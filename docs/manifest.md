@@ -11,14 +11,16 @@ Das Manifest beschreibt die Software, die eine Verwaltung betreut: Name, Mail-Ab
 - Alle fünf Abschnitte (`product`, `mail`, `billing`, `provisioning`, `ui`) sind optional, ebenso jedes Feld, das unten nicht als Pflicht bezeichnet ist. Ein **unbekannter Abschnitt auf oberster Ebene** ist ein Fehler. **Unbekannte Felder innerhalb eines Abschnitts** werden dagegen nicht gemeldet, sondern ignoriert; ein Tippfehler im Feldnamen fällt deshalb nicht auf.
 - Rangfolge je Wert, wo es mehrere Quellen gibt: Umgebungsvariable vor Manifest vor neutraler Vorgabe. Das gilt für `provisioning` (Coolify), für `mail` (Absender) und für `billing`; die Ausnahmen stehen bei den Feldern.
 - Das Manifest enthält **keine Geheimnisse** (kein API-Token, kein SMTP-Passwort). Jene stehen in der `.env`.
-- Nach außen gibt die Verwaltung unter `GET /api/public-config` ohne Anmeldung nur `ui.productName` und `ui.logoUrl` heraus, nie Mail-, Abrechnungs- oder Provisionierungsdaten.
+- Nach außen gibt die Verwaltung unter `GET /api/public-config` ohne Anmeldung nur `productName`, `logoUrl` und `bound` heraus, nie Mail-, Abrechnungs- oder Provisionierungsdaten.
 
 ## `product`
 
 | Feld | Typ | Vorgabe | Bedeutung |
 |---|---|---|---|
-| `name` | Text, nicht leer | `saas-instant` | Anzeigename der Software. Erscheint in Mails (Betreff, Rahmen) und im Portal-Eintrag (`install.sh` liest ihn mit einer einfachen Heuristik aus der Datei). |
-| `slug` | Text, `a-z`, `0-9`, Bindestriche (nicht am Rand, nicht doppelt) | `saas-instant` | Kurzname für Bezeichner. `install.sh` setzt ihn beim Kopieren der Vorlage auf Ihre `--software`-Kennung. |
+| `name` | Text, nicht leer | `SAAS Verwaltung` | Anzeigename der Software. **Einzige Namensquelle** für Oberfläche, Mails (Betreff, Rahmen, Absendername), Rechnungen und Portal-Eintrag (`install.sh` liest ihn mit einer einfachen Heuristik aus der Datei). `install.sh --name "<Name>"` setzt ihn. |
+| `slug` | Text, `a-z`, `0-9`, Bindestriche (nicht am Rand, nicht doppelt) | `saas-instant` | Kurzname für Bezeichner. `install.sh` setzt ihn beim Kopieren der Vorlage auf Ihre `--software`-Kennung. **Pflicht, sobald `name` gesetzt ist** (sonst Manifestfehler). |
+
+**Bindung an genau eine Software.** Ohne `product.name` heißt die Verwaltung „SAAS Verwaltung" (nicht angebunden, `bound: false`). Sobald das Manifest `name` und `slug` setzt, ist sie angebunden (`bound: true`) und zeigt den Namen der Software. Beim ersten Start schreibt `control-api` den Slug in die Tabelle `Installation`; jeder spätere Start mit einem anderen `product.slug` bricht mit klarer Meldung ab. Dasselbe gilt, wenn die Umgebungsvariable `SAAS_INSTANT_SLUG` (vom mitgelieferten Compose aus der `.env` durchgereicht) vom Manifest-Slug abweicht. Wer eine andere Software betreuen will, richtet dafür eine eigene Verwaltung mit eigener Datenbank ein.
 
 ## `mail`
 
@@ -26,7 +28,7 @@ Absender und Rahmen aller Mails der Verwaltung (Anmeldecodes, Rechnungen, Rundma
 
 | Feld | Typ | Vorgabe | Bedeutung |
 |---|---|---|---|
-| `senderName` | Text, nicht leer | `saas-instant` | Absendername. Wirkt nur, wenn die Umgebungsvariable `SMTP_FROM` nicht gesetzt ist (siehe unten). |
+| `senderName` | Text, nicht leer | `product.name` | Absendername. Wirkt nur, wenn die Umgebungsvariable `SMTP_FROM` nicht gesetzt ist (siehe unten). |
 | `senderAddress` | E-Mail-Adresse | `noreply@example.com` | Absenderadresse. Wirkt nur, wenn `SMTP_FROM` nicht gesetzt ist (siehe unten); liefert außerdem die Maildomäne, wenn `domain` fehlt. |
 | `footer` | Text, Zeilenumbrüche erlaubt | leer | Fußzeile jeder Mail; jede Zeile wird eine Zeile im Mailrahmen. |
 | `imprint` | Text | keiner | Anbieterangaben, stehen im Mailrahmen unter `footer`. |
@@ -90,6 +92,7 @@ Rechnungsnummern haben das feste Format `JJJJ-NNN` (Jahr, fortlaufend, lückenlo
 | `taxRatePercent` | Zahl >= 0 | 19 | Umsatzsteuersatz in Prozent |
 | `paymentTermDays` | Zahl >= 0 | 14 | Zahlungsziel in Tagen |
 | `averageDays` | Zahl >= 1 | 90 | Tage für den Durchschnitt aktiver Personen |
+| `retentionYears` | ganze Zahl 1 bis 30 | 8 | Aufbewahrungsfrist festgeschriebener Rechnungen in Jahren: `retentionUntil` = 31.12. des Festschreibejahres plus diese Zahl. Wirkt nur auf künftig festgeschriebene Rechnungen. Die Dauer klärt der Betreiber mit der Steuerberatung ([gobd.md](operations/gobd.md)). |
 
 ## `provisioning`
 
@@ -118,7 +121,7 @@ Fehlen `metricsPath` oder `setupStatusPath`, gilt der jeweilige Endpunkt als nic
 
 | Feld | Typ | Vorgabe | Bedeutung |
 |---|---|---|---|
-| `productName` | Text, nicht leer | `saas-instant` | Name in der Oberfläche (Anmeldeseite, Kopfzeile). Kommt über `GET /api/public-config`. |
+| `productName` | Text, nicht leer | keiner (gilt `product.name`) | Nur optionaler Override des Namens in der Oberfläche (Anmeldeseite, Kopfzeile). Wirkt erst, wenn die Verwaltung angebunden ist. Kommt über `GET /api/public-config`. Der Untertitel „Verwaltung" entfällt, wenn der Name schon auf „Verwaltung" endet. |
 | `logoUrl` | Text, beginnt mit `http://`, `https://` oder `/` | keines | Logo in der Oberfläche. |
 
 Die volle Instanz-Adresse (`https://<subdomain>.<basis>`) zeigt die Oberfläche nur, wenn beim **Build** `VITE_INSTANCE_BASE_DOMAIN` gesetzt ist. Der Docker-Build setzt sie aus `CONTROL_INSTANCE_BASE_DOMAIN` der `.env`; `install.sh` übernimmt dafür `provisioning.instanceDomainBase` aus dem Manifest (den Platzhalter `example.com` nicht). Eine spätere Änderung wirkt erst nach `docker compose up -d --build`. Ohne Wert steht in der Oberfläche nur die Subdomain, ohne Verweis.
@@ -165,7 +168,8 @@ provisioning:
     INSTANCE_MODE: production
 
 ui:
-  productName: Mein Produkt
+  # productName: Mein Produkt   # optional: Override; sonst gilt product.name
+  logoUrl: https://example.com/logo.svg
 ```
 
 Die vollständige Vorlage mit allen Feldern: `saas-instant.manifest.example.yaml`.

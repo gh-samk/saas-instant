@@ -20,8 +20,10 @@ Alle Punkte sind im Code vorhanden; ob sie in Ihrer Umgebung laufen, hängt von 
 
 - **Organisationen:** Stammdaten, Ansprechpersonen, Notizen, Verlauf, Statuslauf (Anfrage, Demo, Pilot, zahlend, Überprüfung, ruhend, beendet). Ein täglicher Zeitplan (03:00 Uhr, abschaltbar) vollzieht genau zwei Wechsel ohne Geldfolge von selbst (Pilot nach 90 Tagen zu „zahlend“, Überprüfung sieben Monate nach der Pilotentscheidung); alles mit Geldfolge wird nur vorgeschlagen.
 - **Anfrage und Aufnahme:** öffentlicher Anfrageweg (`POST /api/public/inquiry`, durch Schlüssel geschützt) und ein Aufnahmeformular per Token-Link für Kundenangaben und Lastschriftmandat.
-- **Instanzen:** anlegen über den Provisioner (Vorschau, Fortschritt, Gesundheitsprüfung), Einladungslink für das Erst-Setup, Erreichbarkeitsprüfung, nächtlicher Kennzahlenabruf, nächtlicher Abgleich mit Coolify, Eingang von Sicherungsmeldungen (`POST /api/backups`), Archivieren (Stoppen).
-- **Rechnungen:** Preisstufen aus dem Manifest, Entwurf, Festschreiben (danach unveränderlich), Versand per Mail, Mahnung, Zahlungserfassung, Storno, Nummernkreis. XML nach EN 16931 (CII) entsteht im Backend; das PDF/A-3-Dokument erzeugt der Dienst `invoice-renderer` (Quelle `tools/invoice-renderer`, läuft im Compose-Stapel).
+- **Instanzen:** anlegen über den Provisioner (Vorschau, Fortschritt, Gesundheitsprüfung), Einladungslink für das Erst-Setup, Erreichbarkeitsprüfung, nächtlicher Kennzahlenabruf, nächtlicher Abgleich mit Coolify, Archivieren (Stoppen). **Sicherungen:** Ziel (S3 oder SFTP-Storage-Box) in den Einstellungen, „Jetzt sichern“, Prüfsummenprüfung, Wiederherstellung in eine **neue** Instanz mit anschließender Übernahme (siehe unten und Einschränkungen).
+- **Rechnungen:** Preisstufen (Voreinstellung aus dem Manifest, als Preisliste in den Einstellungen änderbar), Entwurf, Festschreiben (danach unveränderlich), Versand per Mail, Mahnung, Zahlungserfassung, Storno, Nummernkreis. **E-Rechnung:** XML nach EN 16931 (CII) entsteht im Backend, das PDF/A-3-Dokument (ZUGFeRD/Factur-X, Profil EN 16931) erzeugt der Dienst `invoice-renderer` (Quelle `tools/invoice-renderer`, läuft im Compose-Stapel); dazu die **XRechnung** als reine XML-Datei.
+- **GoBD-Bausteine:** Datenbank-Trigger sperren Änderung und Löschung festgeschriebener Rechnungen und des Audit-Logs; Dokumente werden einmal erzeugt und mit SHA-256 gespeichert; nächtlicher Integritätslauf mit Aufgabe „Beleg manipuliert“; Verlauf je Rechnung; Aufbewahrungsende je Rechnung (Vorgabe 8 Jahre); Export für die Betriebsprüfung. Das ist die **technische Umsetzung**. Verfahrensdokumentation (Vorlage in [docs/operations/gobd.md](docs/operations/gobd.md)) und Rechtsprüfung liegen beim Betreiber und seiner Steuerberatung.
+- **Sicherung und Wiederherstellung:** ein eigener **Backup-Agent** (Container im Compose-Stapel) sichert Instanzen, die Verwaltungs-Datenbank und ein Rechnungsarchiv verschlüsselt (age) auf S3 (optional mit Object Lock) oder eine Storage Box. Zugangsdaten liegen nur im Agent und sind in der Oberfläche write-only. Details: [docs/operations/backup-and-recovery.md](docs/operations/backup-and-recovery.md).
 - **Mail:** Postausgang mit Warteschlange, getrennt in Transaktionsmails und werbliche Rundmails; Rundmails nur mit Einwilligung (Double-Opt-in, Sperrliste).
 - **Aufgabenliste „Heute“:** abgeleitete Hinweise (überfällige Rechnungen, fehlende Sicherung, fehlgeschlagener Kennzahlenabruf, Abweichung zu Coolify usw.).
 - **Betriebsschalter:** Feature-Flags, die Instanzen über `GET /api/flags` lesen.
@@ -38,6 +40,9 @@ Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/
 | ![Rechnungen](docs/screenshots/06-invoices.png)<br>**Rechnungen** | ![Rechnung](docs/screenshots/07-invoice-detail.png)<br>**Rechnung** mit PDF/XML, Zahlung, Erinnerung |
 | ![Rechnungen, dunkel](docs/screenshots/06-invoices-dark.png)<br>**Dunkelmodus** | ![Anmeldung](docs/screenshots/01-login.png)<br>**Anmeldung** mit Passkey oder Passwort + zweitem Faktor |
 | ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (Modus „Portal“): Liste der Verwaltungen | ![Portal, dunkel](docs/screenshots/09-portal-dark.png)<br>**Portal** im Dunkelmodus |
+| ![Preise](docs/screenshots/10-settings-prices.png)<br>**Einstellungen → Preise:** Stufen, Steuersatz, Zahlungsziel | ![Sicherung](docs/screenshots/11-settings-backup.png)<br>**Einstellungen → Sicherung:** S3 oder Storage Box |
+| ![Instanz-Sicherungen](docs/screenshots/12-instance-backups.png)<br>**Instanz → Sicherungen** | ![Wiederherstellen](docs/screenshots/12-instance-backups-restore.png)<br>**Als neue Instanz wiederherstellen** |
+| ![XRechnung](docs/screenshots/13-invoice-xrechnung.png)<br>**Rechnung** mit ZUGFeRD/XRechnung, Integrität, Verlauf | ![GoBD-Export](docs/screenshots/14-gobd-export.png)<br>**Export für die Betriebsprüfung** |
 
 ## Architektur in Kürze
 
@@ -53,10 +58,13 @@ Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/
  Modus portal: zusätzlich ein statisches Portal (Liste + Links) vor mehreren Verwaltungen.
 ```
 
+Der Backup-Agent (`backup-agent`) und der `docker-socket-proxy` laufen im selben Compose-Stapel, ohne veröffentlichten Port; Details in [docs/architecture.md](docs/architecture.md).
+
 - **Eine Verwaltung je Software.** Jede Software bekommt ihre eigene Verwaltung mit eigener Datenbank und eigener Anmeldung.
 - **Modus bei der Erstinstallation, danach unveränderlich:** `single` (genau eine Verwaltung) oder `portal` (mehrere Verwaltungen plus ein schlankes Portal, das nur Liste und Links zeigt: keine Kundendaten, keine Anmeldung).
 - **Provisioner-Schnittstelle:** drei Operationen (anlegen, Auskunft, stoppen), in v1 nur Coolify.
-- **Regel R1, nie löschen:** Die Verwaltung kennt genau eine Datenbank (ihre eigene) und hat keinen Codepfad, der ein Deployment oder eine Datenbank löscht. Archivieren stoppt die Instanz, das Datenvolumen bleibt.
+- **Regel R1, nie löschen:** Die Verwaltung kennt genau eine Datenbank (ihre eigene) und hat keinen Codepfad, der ein Deployment oder eine Datenbank löscht. Archivieren stoppt die Instanz, das Datenvolumen bleibt. Eine Wiederherstellung entsteht immer als **neue** Instanz; bei der Übernahme wird die alte gestoppt, nie gelöscht.
+- **Backup-Agent:** führt Sicherung und Wiederherstellung aus (die Verwaltung löst sie nur aus), HMAC-signierte Aufträge im internen Netz, Docker-Zugriff nur über einen `docker-socket-proxy` mit Allowlist.
 - **Manifest:** `saas-instant.manifest.example.yaml` beschreibt die Software (Name, Mail, Abrechnung, Provisionierung, UI).
 - **Instanz-Vertrag:** was eine Software erfüllen muss (drei Umgebungsvariablen, ein Pflicht-Endpunkt, zwei optionale).
 
@@ -105,7 +113,9 @@ Schritt für Schritt, mit TLS und Proxy-Hinweisen: [docs/installation.md](docs/i
 
 ## Einschränkungen in v1
 
-- **Teststand:** Unit-, Integrations- (echtes Postgres) und Oberflächentests sind grün; die Images (Verwaltung, Oberfläche, Portal, Rechnungsdienst) bauen, und der Stapel im Modus `single` startet über `install.sh` (Health-Check, Anmeldeseite, Anlegen des ersten Kontos). **Nicht geprüft:** der Modus `portal` mit echten Containern, das tatsächliche Erzeugen eines Rechnungs-PDF im Rechnungsdienst, Mailversand gegen einen echten SMTP-Server und der Betrieb hinter TLS.
+- **Teststand:** Unit-, Integrations- (echtes Postgres) und Oberflächentests sind grün (Verwaltung: 1465 Jest-, 478 Vitest-, 452 Integrationstests; Backup-Agent 50, Rechnungsdienst 14). Zusätzlich laufen drei Ende-zu-Ende-Suiten mit echten Containern (`bash tests/e2e/run.sh <backup|invoice|install>`, [tests/e2e/README.md](tests/e2e/README.md)): **Sicherung/Wiederherstellung** (MinIO mit Object Lock, SFTP als Storage-Box-Ersatz, Mock-Coolify; 21 Schritte), **Rechnung** (Rechnungsdienst, ZUGFeRD-PDF/A-3b mit veraPDF geprüft, XRechnung und Factur-X mit dem KoSIT-Validator als akzeptabel bewertet, GoBD-Export mit `sha256sum -c`, Mails über Mailpit; 23 Schritte) und **Installation** (`single`, `portal` mit zweiter Verwaltung, Bindung/Slug-Abweichung, Betrieb hinter TLS mit Caddy; 34 Schritte). Ein Beispiel der erzeugten Rechnung (fiktive Daten): [PDF](docs/examples/rechnung-zugferd-beispiel.pdf), [XRechnung-XML](docs/examples/rechnung-xrechnung-beispiel.xml). **Nicht geprüft:** Mailversand gegen einen echten Anbieter, Betrieb mit einem echten Coolify und mit einem Produktivspeicher, Prüfung der Rechnungen durch eine Behörde oder ein Steuerberatungssystem.
+- **Der Backup-Agent ist nur gegen eine kleine Compose-Attrappe und Ersatz-Gegenstellen getestet**, nicht gegen eine echte Coolify-Installation und nicht gegen einen Produktivspeicher. Die Prüfung in der Verwaltung ist eine Prüfsumme der verschlüsselten Datei; ob sich eine Sicherung entschlüsseln und einspielen lässt, zeigt nur eine Rückspielprobe mit Ihrem privaten Schlüssel (wird nur einmal angezeigt und nirgends gespeichert). Der Docker-Zugriff des Agents bleibt ein Restrisiko ([docs/operations/security-model.md](docs/operations/security-model.md)).
+- **GoBD ist keine Rechtsberatung.** Die Software liefert technische Bausteine; ob Ihr Gesamtverfahren konform ist, entscheiden Sie mit Ihrer Steuerberatung. Die Trigger schützen nicht vor einem Superuser auf dem Datenbankserver; die Datenbankrolle der Anwendung sollte kein `TRUNCATE` besitzen (Betreiberaufgabe, [docs/operations/gobd.md](docs/operations/gobd.md)). Die E-Rechnungsformate prüft die Ende-zu-Ende-Suite mit KoSIT und veraPDF (Stand der Validator-Konfiguration: XRechnung 3.0.2); das ersetzt keine Prüfung durch die empfangende Stelle. UBL als XRechnung-Syntax gibt es in v1 nicht (nur CII).
 - **Nur Coolify** als Provisioner. Die Schnittstelle ist vorbereitet, ein zweiter Anbieter existiert nicht.
 - **Die Coolify-Anbindung ist nur gegen eine Attrappe getestet**, nicht gegen eine echte Coolify-Installation. Pfade und Abläufe sind aus einem funktionierenden Provisionierungsskript übernommen (`reference/provision-tenant.py`), aber nicht belegt. Rechnen Sie bei der ersten echten Inbetriebnahme mit Nacharbeit.
 - **Backend-Meldungen und Mailtexte sind nur deutsch.** Die Oberfläche ist über eine i18n-Schicht übersetzbar ([docs/i18n.md](docs/i18n.md)), liegt aber nur auf Deutsch vor.
@@ -124,7 +134,8 @@ Schritt für Schritt, mit TLS und Proxy-Hinweisen: [docs/installation.md](docs/i
 | [docs/instance-contract.md](docs/instance-contract.md) | was eine Software erfüllen muss |
 | [docs/i18n.md](docs/i18n.md) | Oberflächentexte |
 | [docs/rename-glossary.md](docs/rename-glossary.md) | Benennungsregeln (deutsch zu englisch) |
-| [docs/operations/backup-and-recovery.md](docs/operations/backup-and-recovery.md) | Sicherung, Meldeweg, Wiederherstellung |
+| [docs/operations/backup-and-recovery.md](docs/operations/backup-and-recovery.md) | Backup-Agent, Einrichtung, Wiederherstellung und Übernahme |
+| [docs/operations/gobd.md](docs/operations/gobd.md) | GoBD: technische Umsetzung, Vorlage für die Verfahrensdokumentation |
 | [docs/operations/emergency-access.md](docs/operations/emergency-access.md) | Notfallzugang (Kommandos im Container) |
 | [docs/operations/coolify-setup.md](docs/operations/coolify-setup.md) | Coolify einrichten, bekannte Fallen |
 | [docs/operations/billing.md](docs/operations/billing.md) | Rechnungen, SEPA-Mandat, Mailabsender |

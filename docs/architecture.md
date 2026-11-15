@@ -8,6 +8,8 @@ Aufbau von saas-instant, soweit er für Betrieb und Anbindung einer eigenen Soft
 Repository
 ├── apps/control     Verwaltung: NestJS-API (Prisma, Postgres) + React-Oberfläche (Vite)
 ├── apps/portal      Portal: statische Seite (nginx), liest portal/registry.json
+├── apps/backup-agent  Backup-Agent: verschlüsselte Sicherungen, Wiederherstellung (Node/TypeScript, kein NestJS)
+├── tools/invoice-renderer  Rechnungsdienst: erzeugt das PDF/A-3
 ├── packages/shared  gemeinsamer Code (Datum, Mailrahmen, Organisationsname ...)
 ├── packages/ui      gemeinsame UI-Bausteine
 ├── docker-compose.yml             Control-Stack einer Verwaltung
@@ -17,13 +19,15 @@ Repository
 └── reference/                     Vorlagen und Referenz (Coolify-Compose der Verwaltung, Provisionierungsskript)
 ```
 
-Eine laufende Verwaltung besteht aus drei Containern:
+Eine laufende Verwaltung besteht aus diesen Containern (dazu der Rechnungsdienst `invoice-renderer`, siehe [operations/billing.md](operations/billing.md)):
 
 | Dienst | Aufgabe |
 |---|---|
 | `control-db` | Postgres 16, genau eine Datenbank `control` |
 | `control-api` | NestJS-Anwendung; beim Start `prisma migrate deploy`, dann die API unter dem Präfix `/api` |
 | `control-web` | nginx: liefert die Oberfläche aus und proxyt `/api/` an `control-api:3001`. Er ist der einzige veröffentlichte Dienst. |
+| `backup-agent` | Backup-Agent (Abschnitt „Backup-Agent“): Sicherungen und Wiederherstellung, kein veröffentlichter Port |
+| `docker-socket-proxy` | einziger Dienst mit Docker-Socket (nur lesend gemountet), Allowlist, nur für den Agent erreichbar |
 
 Der Compose-Dienstname `control-api` ist fest; eine Prüfung (`timezone.spec.ts`) verlässt sich darauf.
 
@@ -68,11 +72,33 @@ Wie das gesichert ist:
 
 - Die Provisioner-Schnittstelle hat keine Methode zum Löschen oder Zurücksetzen. Was dort nicht steht, lässt sich nirgends aufrufen.
 - `coolify/no-delete-path.spec.ts` prüft über den Quellbaum: abschließende Methodenliste des Clients, kein HTTP-DELETE und kein Löschaufruf in den Dateien, die Coolify ansprechen, kein Löschaufruf gegen die Beweismodelle (Instanz, Kennzahl, Sicherung, Audit-Log).
-- **Archivieren** stoppt die Anwendung und setzt den Status auf `archived`; das Datenvolumen bleibt. Der Meldetext nennt den Stand der letzten Sicherung, löst aber keine aus. Es gibt keinen Weg zurück im Code, die Wiederherstellung ist ein Handgriff in Coolify.
+- **Archivieren** stoppt die Anwendung und setzt den Status auf `archived`; das Datenvolumen bleibt. Der Meldetext nennt den Stand der letzten Sicherung, löst aber keine aus. Ein Wiederherstellen einer archivierten oder laufenden Instanz geht nur über eine **neue** Anwendung und die anschließende Übernahme (Abschnitt „Backup-Agent“); die alte wird dabei gestoppt, nie gelöscht.
 - **Erstellung verwerfen** ist nur unter vier Bedingungen möglich: Status `provisioning`; in Coolify existiert nichts (nie angelegt oder dort von Hand entfernt, ein Ausfall zählt nicht als entfernt); keine Kennzahlen; keine Sicherungen. Sie löscht nur die Zeile in der eigenen Datenbank.
 - Das Coolify-Token sollte **kein Löschrecht** haben (siehe [installation.md](installation.md)).
 
 Weitere Regeln, die im Code genannt und geprüft werden: **R2** der Rechnungsnummernkreis ist lückenlos (Nummer erst beim Festschreiben, in derselben Transaktion, mit Sperre; Format `JJJJ-NNN`); **R4** nichts wird automatisch gelöscht (einzige Ausnahme: unbestätigte Mail-Eintragungen werden nach 72 Stunden entfernt, mit Audit-Eintrag); **R5** alles mit Geldfolge wird vorgeschlagen, nicht vollzogen (der Zeitplan vollzieht nur zwei Statuswechsel ohne Geldfolge); **R3** werbliche Mail geht nur durch ein Tor, das die Einwilligung prüft.
+
+## Backup-Agent
+
+Sicherung und Wiederherstellung führt nicht die Verwaltung aus, sondern ein eigener Container, der Backup-Agent (`apps/backup-agent`, Node/TypeScript mit wenigen Abhängigkeiten, kein NestJS). Er ist der einzige Ort mit Zugangsdaten zum Sicherungsspeicher (S3 oder SFTP) und mit Docker-Zugriff, und dieser läuft ausschließlich über den `docker-socket-proxy` mit Allowlist. Die Verwaltung stellt das Ziel ein, löst Aufträge aus und zeigt Ergebnisse.
+
+```
+control-api ──HMAC-signiert (Port 8787, Compose-Netz)──► backup-agent ──► Sicherungsziel
+     ▲                                                        │
+     └── GET /api/internal/backup-plan, POST /api/backups ◄───┘  (x-backup-key)
+                                         backup-agent ──► docker-socket-proxy ──► Docker-Socket
+```
+
+- **Aufträge** (`POST /v1/jobs` am Agent): `backup` (Instanz), `backup-control` (Verwaltungs-Datenbank und Rechnungsarchiv), `verify` (Größe und Prüfsumme gegen die Meta-Datei), `restore` (in einen fremden Compose-Stack). Weitere Wege: `GET /v1/health`, `GET`/`PUT /v1/target`, `POST /v1/target/test`, `GET /v1/jobs/:id`, `GET /v1/backups`.
+- **Zeitplan** im Agent: täglich 02:30 Uhr, optional zusätzlich 14:30 Uhr. Die Instanzliste holt er von der Verwaltung; fertige Sicherungen meldet er dorthin zurück.
+- **Verwaltungsseite:** `apps/control/src/backup-settings/` (Einstellungen, Agent-Client, Signatur) und `apps/control/src/instances/` (Sicherungen und Wiederherstellungen je Instanz). Die Verwaltung speichert vom Ziel nur unkritische Angaben, nie Zugangsdaten.
+- **Getestet** ist der Agent gegen eine kleine Compose-Attrappe (Datenbank mit Volume und Coolify-ähnlichen Labels) und Ersatz-Gegenstellen für S3 und SFTP, **nicht** gegen eine echte Coolify-Installation.
+
+Einrichtung, Wiederherstellung und das Risiko des Docker-Zugriffs: [operations/backup-and-recovery.md](operations/backup-and-recovery.md). Regeln R1/R4 und Sicherheitszusagen: [operations/security-model.md](operations/security-model.md).
+
+## Rechnungen und GoBD
+
+Festgeschriebene Rechnungen und das Audit-Log sind durch Datenbank-Trigger gegen Änderung und Löschung geschützt; Dokumente (PDF/A-3 mit eingebetteter strukturierter Rechnung, XML, XRechnung) werden einmal erzeugt, mit SHA-256 gespeichert und nur noch ausgeliefert. Ein nächtlicher Integritätslauf (02:40 Uhr) prüft Prüfsummen und Nummernkreis. Einzelheiten und Grenzen: [operations/gobd.md](operations/gobd.md).
 
 ## Manifest
 
@@ -103,6 +129,8 @@ Geheimnisse, die die Verwaltung später braucht (TOTP-Geheimnisse, Setup- und Ke
 | täglich 04:30 | Abgleich mit Coolify; Abweichungen erscheinen in der Aufgabenliste | `CONTROL_RECONCILIATION_ENABLED=nein` |
 | minütlich | Versand der Rundmail-Warteschlange | `CONTROL_BROADCAST_ENABLED` |
 | stündlich | Prüfung des Postausgangs; Aufräumen unbestätigter Einwilligungen | `CONTROL_OUTBOX_PROBE_ENABLED`, `CONTROL_CONSENT_CLEANUP` |
+| täglich 02:40 | Integritätslauf der festgeschriebenen Rechnungen (Prüfsummen, Nummernkreis); Befunde im Audit-Log und als Aufgabe | nicht abschaltbar |
+| täglich 02:30 (optional auch 14:30) | **im Backup-Agent:** Sicherung aller Instanzen und der Verwaltung | Zeitplan in Einstellungen → Sicherung |
 
 Die Uhrzeiten gelten in der Zeitzone des Containers (`APP_TIMEZONE`, Vorgabe `Europe/Berlin`).
 
@@ -110,7 +138,7 @@ Die Uhrzeiten gelten in der Zeitzone des Containers (`APP_TIMEZONE`, Vorgabe `Eu
 
 - Anmeldung: Passkey oder Passwort plus zweiter Faktor; mindestens ein Faktor muss eingerichtet bleiben (serverseitig erzwungen). Sitzung 30 Tage, Cookie `httpOnly`, `SameSite=Strict`, CSRF per Double-Submit (`x-csrf-token` gegen Cookie).
 - Rate-Limit global 100 Anfragen je Minute, an den Anmelderouten und am öffentlichen Anfrageweg strenger.
-- Server-zu-Server-Wege (Anfrageweg, Sicherungsmeldung) sind per Schlüssel geschützt (`CONTROL_INQUIRY_KEY`, `CONTROL_BACKUP_KEY`) und von der CSRF-Prüfung ausgenommen; jede Ausnahme ist im Code begründet und wird von einem Test aufgezählt.
+- Server-zu-Server-Wege (Anfrageweg, Sicherungsmeldung und Sicherungsplan) sind per Schlüssel geschützt (`CONTROL_INQUIRY_KEY`, `CONTROL_BACKUP_KEY`) und von der CSRF-Prüfung ausgenommen; Aufträge der Verwaltung an den Backup-Agent sind HMAC-signiert (`BACKUP_AGENT_SECRET`); jede Ausnahme ist im Code begründet und wird von einem Test aufgezählt.
 - Logs maskieren Token in Pfaden (Aufnahmelinks, Einwilligungslinks, Notfall-Links), im Anwendungs- wie im nginx-Zugriffslog.
 - Notfallzugang nur im Container über `node dist/cli/emergency.js`; er erzeugt Links (15 Minuten), nie Passwörter, und schreibt ins Audit-Log mit Akteur `cli:<OS-Benutzer>`.
 

@@ -13,10 +13,10 @@ Erinnerung oder ein Versprechen zu verlassen. Dazu gehört auch Prüfcode in
 
 | Regel | Inhalt | Prüfung |
 |---|---|---|
-| **R1** | **Kein Löschpfad für Instanzen.** Auf Kundeninstanzen gibt es genau zwei Schreibvorgänge: anlegen und stoppen/archivieren, beide nur nach ausdrücklicher Bestätigung. Es gibt keinen Codepfad, der ein Deployment oder eine Datenbank löscht, weder in der Oberfläche noch in der API noch in einem Skript. Die Verwaltung hat genau **eine** Datenbank (die eigene), keine zweite `DATABASE_URL` und keinen SQL-Zugang zu Kundeninstanzen. Das Datenvolumen einer Instanz überlebt jedes Stoppen. | `coolify/no-delete-path.spec.ts` prüft die abschließende Methodenliste der Schnittstelle, sucht HTTP-DELETE und Löschaufrufe gegen Instanz, Kennzahl, Sicherung und Audit-Log; `build-content.spec.ts` hält Prüfcode aus dem Produktionsartefakt |
-| **R2** | **Festgeschriebene Rechnungen sind unveränderlich.** Nach dem Festschreiben existiert kein Lösch- und kein Änderungsbefehl. Der Nummernkreis ist lückenlos. | `invoices/invoice-immutable.spec.ts` (Quellbaum), `invoice.integration.spec.ts` (laufender Nachweis) |
+| **R1** | **Kein Löschpfad für Instanzen.** Auf Kundeninstanzen gibt es genau zwei Schreibvorgänge der Verwaltung: anlegen und stoppen/archivieren, beide nur nach ausdrücklicher Bestätigung. Es gibt keinen Codepfad, der ein Deployment oder eine Datenbank löscht, weder in der Oberfläche noch in der API noch in einem Skript, **auch nicht im Backup-Agent** (er löscht nur eigene, alte Sicherungsdateien außerhalb von `invoices/`, nie eine Instanz und nie eine Datenbank). Die Verwaltung hat genau **eine** Datenbank (die eigene), keine zweite `DATABASE_URL` und keinen SQL-Zugang zu Kundeninstanzen. Die Wiederherstellung einer Sicherung legt eine **neue** Instanz an und überschreibt nie eine bestehende; die Übernahme **stoppt** die alte, löscht sie nicht. Das Datenvolumen einer Instanz überlebt jedes Stoppen. | `coolify/no-delete-path.spec.ts` prüft die abschließende Methodenliste der Schnittstelle, sucht HTTP-DELETE und Löschaufrufe gegen Instanz, Kennzahl, Sicherung und Audit-Log; `backup-settings/no-delete-backup.spec.ts` prüft dasselbe für den Sicherungsweg; `build-content.spec.ts` hält Prüfcode aus dem Produktionsartefakt; im Agent hält ein Löschwächter (`storage/guard.ts`) Rechnungsarchive (`invoices/`) vom Löschen aus |
+| **R2** | **Festgeschriebene Rechnungen sind unveränderlich.** Nach dem Festschreiben existiert kein Lösch- und kein Änderungsbefehl. Der Nummernkreis ist lückenlos. Zusätzlich sperren **Datenbank-Trigger** jede Änderung und Löschung festgeschriebener Rechnungen und des Audit-Logs, unabhängig vom Anwendungscode ([gobd.md](gobd.md)). | `invoices/invoice-immutable.spec.ts` (Quellbaum), `invoice.integration.spec.ts` und `gobd.integration.spec.ts` (laufender Nachweis gegen eine echte Datenbank) |
 | **R3** | **Transaktions- und Werbemails laufen über getrennte Codepfade.** Eine Abmeldung vom Newsletter darf keine Rechnung und keinen Anmeldecode verhindern, und werbliche Mails nutzen keine Einstellung der Transaktionswege. | getrennte Dienste im Modul `mail`, Tests dazu |
-| **R4** | **Nichts wird automatisch gelöscht.** Aufgaben wie „Löschung prüfen“ sind Vorschläge, keine Handlung. | Aufgabenquellen im Modul `tasks` lesen nur und schreiben nichts |
+| **R4** | **Nichts wird automatisch gelöscht, was Kundendaten oder Nachweise trägt.** Aufgaben wie „Löschung prüfen“ sind Vorschläge, keine Handlung. Einzige maschinelle Löschung im Sicherungsweg: der Agent räumt **alte Sicherungsdateien** der Instanzen und der Verwaltung nach der eingestellten Aufbewahrung auf, **nur nach einem gelungenen Lauf**, nie den neuesten Satz und **nie** Rechnungsarchive. | Aufgabenquellen im Modul `tasks` lesen nur und schreiben nichts; Agent-Tests zur Aufbewahrung und zum Löschwächter |
 | **R5** | **Kein automatischer Schreibvorgang mit Geldfolge.** Zeitgesteuerte Läufe wechseln nur Zustände ohne Geldfolge. Überfälligkeit wird abgeleitet statt geschrieben, Preisvorschläge werden nie ungefragt übernommen. | Modul `schedule` (nur Zustandswechsel ohne Geldfolge) und `tasks` |
 | **R6** | **Alles Relevante steht im Audit-Log**, auch gescheiterte Versuche. Schreiben und Protokollieren geschehen in derselben Transaktion: Was nicht protokolliert werden konnte, gilt nicht. | `audit/audit.service.spec.ts` |
 
@@ -26,8 +26,21 @@ Organisation können auf Anfrage gelöscht werden. Der Satz „kein Löschpfad�
 Deployments, Datenbanken und Instanzen von Kundschaft sowie für die Nachweise
 (Audit-Log, Sicherungsmeldungen, Kennzahlen, festgeschriebene Rechnungen).
 
-Wiederherstellung ist ebenfalls bewusst kein Knopf, sondern Handarbeit auf dem
-Server ([backup-and-recovery.md](backup-and-recovery.md)).
+**Sicherung und Wiederherstellung (neu gefasst).** Früher war die Wiederherstellung
+reine Handarbeit auf dem Server, und die Verwaltung konnte nichts auslösen. Jetzt
+**löst die Verwaltung Sicherung und Wiederherstellung aus, führt sie aber nicht
+aus**; das tut der Backup-Agent (Abschnitt 6). Begründet ist die Änderung so: Wer
+Sicherungen nie zurückspielt, hat keine. Eine Bedienung in der Oberfläche macht die
+Rückspielprobe alltagstauglich. Die Gefahr, die der alte Satz „kein Knopf“
+abwehren sollte (ein Fehlgriff überschreibt die Arbeit einer Organisation), ist
+auf anderem Weg ausgeschlossen:
+
+- Die Wiederherstellung geht **nur in eine NEUE Instanz** unter neuer Subdomain, nie in
+  eine bestehende. Der Agent lehnt den eigenen Stack und den der Verwaltung ab.
+- Sie verlangt den zweiten Faktor, das **Eintippen des Instanznamens** und den
+  privaten Schlüssel; sie ist gedrosselt (5 je Minute) und auditiert.
+- Die **Übernahme** ist ein eigener, bewusst getrennter Schritt: Die alte Instanz wird
+  gestoppt, nie gelöscht, und die alten Werte stehen im Audit-Log.
 
 ## 2. Anmeldung
 
@@ -82,7 +95,10 @@ Im Repository liegen nur Beispieldateien mit Platzhaltern (`.env.example`).
 | `JWT_SECRET` | signiert Sitzungs- und Vorgangs-Token | wird beim Start geprüft: mindestens 32 Zeichen und kein Beispielwert, sonst startet die Anwendung nicht |
 | `CONTROL_CONFIG_KEY` | Schlüssel für ruhende Geheimnisse (Abschnitt 4) | mindestens 32 Zeichen, **kein Entwicklungs-Fallback**; ohne ihn startet die Anwendung nicht |
 | `CONTROL_POSTGRES_PASSWORD` | Datenbank der Verwaltung | nur bei der ersten Einrichtung wirksam |
-| `CONTROL_BACKUP_KEY` | Meldeweg des Sicherungswerkzeugs | mindestens 32 Zeichen; ungesetzt existiert die Route nicht (404) |
+| `CONTROL_BACKUP_KEY` | Meldeweg und Sicherungsplan: Ausweis des Agents bei der Verwaltung (Header `x-backup-key`) | mindestens 32 Zeichen, gleich dem `BACKUP_REPORT_KEY` des Agents; ungesetzt existieren `POST /api/backups` und `GET /api/internal/backup-plan` nicht (404) |
+| `BACKUP_AGENT_SECRET` | signiert die Aufträge der Verwaltung an den Agent (HMAC-SHA256) | von `install.sh` erzeugt; Verwaltung und Agent kennen ihn, sonst niemand |
+| `AGENT_STATE_KEY` | verschlüsselt (AES-256-GCM) die Zugangsdaten zum Sicherungsziel im State-Volume des Agents | nur der Agent kennt ihn; die Verwaltung nicht |
+| `BACKUP_REPORT_KEY` | Umgebungsvariable des Agents für denselben Wert wie `CONTROL_BACKUP_KEY` | siehe oben |
 | `CONTROL_INQUIRY_KEY` | Ausweis des Webserver-Proxys für das öffentliche Anfrageformular | derselbe Wert im Proxy der Webseite, mindestens 32 Zeichen; ungesetzt existiert die Route nicht (404) |
 | `CONTROL_COOLIFY_TOKEN` | Zugriff auf Coolify | eigenes Token, siehe [coolify-setup.md](coolify-setup.md) |
 | `SMTP_PASS`, `CONTROL_INSTANCE_SMTP_PASS` | Postausgang | je Rolle getrennt |
@@ -104,7 +120,8 @@ Grundsätze:
   werden nie geloggt ([../instance-contract.md](../instance-contract.md)).
 - **Nicht ins Log:** Der Request-Logger schwärzt `Cookie`, `X-CSRF-Token`,
   `Authorization`, `Set-Cookie` sowie die Schlüssel-Header des Anfragewegs
-  (`x-inquiry-key`) und des Sicherungswegs (`x-backup-key`). Ein Test schickt eine
+  (`x-inquiry-key`) und des Sicherungswegs (`x-backup-key`); der Agent
+  schwärzt seine Zugangsdaten und den privaten Schlüssel in jeder Meldung und jedem Log. Ein Test schickt eine
   echte Anfrage durch den echten Logger und prüft, dass das Geheimnis nicht in der
   Logzeile steht. Tokens in URLs (Bestätigungs- und Abmeldelinks) werden maskiert.
   Container-Logs sind über Coolify einsehbar, ein Geheimnis darin ist kein
@@ -113,8 +130,11 @@ Grundsätze:
   protokolliert, *dass* ein Code angefordert wurde, nie welcher.
 - **Rotation:** Wer ein Geheimnis tauscht, muss wissen, was daran hängt. `JWT_SECRET`
   beendet alle Sitzungen. `CONTROL_CONFIG_KEY` macht alle damit verschlüsselten Werte
-  unlesbar (siehe unten). Der `CONTROL_BACKUP_KEY` und der Anfrageschlüssel müssen
-  gleichzeitig bei der Gegenstelle geändert werden.
+  unlesbar (siehe unten). Der `CONTROL_BACKUP_KEY` (= `BACKUP_REPORT_KEY` des Agents)
+  und der Anfrageschlüssel müssen gleichzeitig bei der Gegenstelle geändert werden.
+  Ein neuer `BACKUP_AGENT_SECRET` muss in Verwaltung und Agent zugleich gesetzt werden.
+  Wer `AGENT_STATE_KEY` tauscht, macht die gespeicherten Zugangsdaten im Agent
+  unlesbar; das Ziel muss dann neu eingerichtet werden.
 
 ## 4. Verschlüsselung
 
@@ -168,19 +188,50 @@ gesicherte Backups. Das ist Aufgabe des Betreibers.
 - **Kein Aufzählungsorakel.** Der Sicherungsmeldeweg antwortet für bekannte und
   unbekannte Subdomains gleich, damit sich mit dem Schlüssel keine Kundenliste
   abfragen lässt.
-- **Sicherungszugang auf dem Host.** Die Zugangsdaten zum Sicherungsspeicher liegen
-  nicht in Kundencontainern und nicht in der Verwaltung.
+- **Sicherungszugang nur im Agent.** Die Zugangsdaten zum Sicherungsspeicher liegen
+  nicht in Kundencontainern und nicht in der Verwaltung, sondern ausschließlich
+  verschlüsselt im State-Volume des Backup-Agents (Abschnitt 6).
 - **Seed nur in der Entwicklung.** Das Seed-Skript legt ein Konto mit bekanntem
   Passwort an und läuft nur mit `CONTROL_SEED_ALLOWED=ja`, nie bei
   `NODE_ENV=production`.
 
-## 6. Was in Ihrer Verantwortung bleibt
+## 6. Backup-Agent
+
+Der Backup-Agent (`apps/backup-agent`) ist der **einzige** Ort mit Zugangsdaten zum
+Sicherungsspeicher und mit Docker-Zugriff. Aufbau und Betrieb:
+[backup-and-recovery.md](backup-and-recovery.md). Was er zusagt:
+
+| Zusage | Umsetzung |
+|---|---|
+| Nur die Verwaltung darf Aufträge geben | jede Anfrage ist **HMAC-signiert** (`BACKUP_AGENT_SECRET`) mit Zeitstempel und Nonce: Abweichung über 60 s, wiederholte Nonce (5 Minuten Gedächtnis), falsche Signatur (zeitkonstanter Vergleich) und Body über 1 MiB werden abgelehnt (`apps/backup-agent/src/hmac.ts`) |
+| Kein Weg von außen | kein veröffentlichter Port; erreichbar nur im Compose-Netz; `read_only`, ohne Linux-Capabilities, `no-new-privileges`, läuft nicht als root |
+| Docker nur mit Mindestrechten | Zugriff nur über **`docker-socket-proxy`** mit Allowlist: `CONTAINERS`, `EXEC` und `POST` an; `IMAGES`, `NETWORKS`, `VOLUMES`, `SERVICES`, `SWARM` und weitere aus; der Socket ist nur dort und nur lesend gemountet (geprüft von `tests/install.test.sh`) |
+| Geheimnisse nur im Agent | Zugangsdaten zum Ziel liegen im Agent mit AES-256-GCM verschlüsselt (`AGENT_STATE_KEY`); die Verwaltung hält und liefert sie nie |
+| Geheimnisse **write-only** in der Oberfläche | Eingabe geht über die Verwaltung an den Agent und kommt nie zurück; weder Datenbank noch Audit-Log noch Log der Verwaltung sehen sie |
+| Sicherungen sind nur mit dem Betreiberschlüssel lesbar | Verschlüsselung mit **age** (nur der öffentliche Schlüssel im Agent); der private Schlüssel wird einmal angezeigt und nirgends gespeichert; bei der Wiederherstellung kommt er write-only, nur im Arbeitsspeicher |
+| Wiederherstellung nur in neue, fremde Stacks | Zielprojekt muss das Compose-Label tragen und darf weder der Stack des Agents noch der der Verwaltung sein; nicht ermittelbarer eigener Stack bedeutet Ablehnung |
+| Rechnungsarchive bleiben | der Agent löscht nie unter `invoices/`; bei S3 mit Object Lock (GOVERNANCE) versehen |
+
+**Das Restrisiko:** Auch durch den Proxy bleibt `EXEC` auf Containern des Hosts ein
+mächtiges Recht. Wer den Agent übernimmt, kann Befehle in anderen Containern
+ausführen. Schutz sind die fehlende Erreichbarkeit von außen, die Signatur und ein
+gepflegter Host; gelöst ist das Risiko nicht.
+
+**Nicht zugesichert:** Der Agent ist gegen eine kleine Compose-Attrappe getestet,
+nicht gegen eine echte Coolify-Installation. Die Verifikation in der Verwaltung ist
+eine Prüfsumme der verschlüsselten Datei, kein Entschlüsselungstest (der Schlüssel
+liegt nicht auf dem Server).
+
+## 7. Was in Ihrer Verantwortung bleibt
 
 - Der Server, das Betriebssystem, die Firewall und der Zugriff auf Docker. Wer
   Zugriff auf den Container hat, kann über `emergency` jedes Konto übernehmen.
 - Das Coolify-Konto und das Token der Verwaltung.
 - Verschlüsselte Datenträger und Backups, der private Backup-Schlüssel im
-  Passwortmanager, regelmäßige Rückspielproben.
+  Passwortmanager (er wird nur einmal angezeigt), regelmäßige Rückspielproben mit
+  diesem Schlüssel; die Einrichtung von Object Lock am Bucket.
+- Die Datenbankrolle der Anwendung (kein `TRUNCATE`, nicht Eigentümerin der Tabellen),
+  damit die GoBD-Trigger greifen ([gobd.md](gobd.md), Abschnitt 10).
 - DNS und Mail-Authentifizierung (SPF, DKIM, DMARC), siehe [billing.md](billing.md).
 - Updates des Betriebssystems, von Docker, Coolify und dieser Software. Die
   Abhängigkeiten werden über `pnpm-workspace.yaml` überschrieben, wo bekannte

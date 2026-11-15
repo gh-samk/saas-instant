@@ -1,222 +1,402 @@
 # Sicherung und Wiederherstellung
 
-Dieses Dokument beschreibt, was gesichert werden muss, wie die Sicherung der
-Verwaltung gemeldet wird und wie eine Datenbank von Hand zurückgespielt wird.
+Dieses Dokument beschreibt, wie Sicherungen entstehen, wo sie liegen, wie man sie
+einrichtet und wie man eine Instanz oder die Verwaltung selbst zurückholt.
 
-**Was saas-instant liefert und was nicht:** Das Repository enthält **kein
-Sicherungswerkzeug**. Gesichert wird mit einem Werkzeug, das der Betreiber auf
-dem Server einrichtet (Beispiel: `pg_dump`, Verschlüsselung mit `age`, Ablage
-per `rclone` in einem S3-Speicher, ausgelöst per Cron). Die Verwaltung bietet nur
-den **Meldeweg** dafür (Abschnitt 2) und zeigt Alter und Größe der letzten
-Sicherung je Instanz.
+**Ehrlicher Stand:** Der Backup-Agent ist gegen eine kleine Docker-Compose-Attrappe
+(eine Datenbank samt Volume mit Labels, wie Coolify sie vergibt) und gegen
+Ersatz-Gegenstellen getestet, **nicht** gegen eine echte Coolify-Installation und
+nicht gegen die Produktivumgebung eines Anbieters. Rechnen Sie bei der ersten
+echten Inbetriebnahme mit Nacharbeit, und spielen Sie vor dem ersten Kunden einmal
+den ganzen Weg an einer Wegwerf-Instanz durch (Abschnitt 9).
 
-## 1. Was gesichert werden muss
+## 1. Architektur: warum ein Agent
 
-| Was | Wo es liegt | Warum |
-|---|---|---|
-| Datenbank der Verwaltung (`control`) | Volume `control-db-data` im Compose-Stapel der Verwaltung (Dienst `control-db`) | Kunden, Instanzregister, Rechnungen samt ausgegebenem PDF/XML (Spalten `pdfContent`, `xmlContent`), Audit-Log |
-| Datenbank je Kundeninstanz | im Compose-Stapel der Instanz | Arbeitsdaten der Kundschaft |
-| Hochgeladene Dateien je Kundeninstanz | Volume der Instanz | gehört zum Datenstand der Datenbank |
-| `CONTROL_CONFIG_KEY` und `JWT_SECRET` der Verwaltung | `.env` der Installation | siehe unten |
-
-**`CONTROL_CONFIG_KEY` gehört gesondert gesichert**, nicht zusammen mit den
-Datenbank-Dumps. Er verschlüsselt ruhende Geheimnisse in der Datenbank
-(TOTP-Geheimnisse, Setup- und Kennzahlen-Token der Instanzen). Ohne ihn ist ein
-zurückgespielter Dump in diesen Feldern unlesbar, und TOTP müsste neu
-eingerichtet werden. Mit Dump und Schlüssel am selben Ort verliert die
-Verschlüsselung ihren Sinn.
-
-Rechnungen unterliegen gesetzlichen Aufbewahrungsfristen. Das ausgegebene
-Dokument liegt in der Datenbank der Verwaltung und hängt damit an deren
-Sicherung, nicht an einem Volume, das ein Ausrollen überschreiben kann. Welche
-Frist gilt, klärt der Betreiber mit seiner Steuerberatung.
-
-### Anforderungen an das Sicherungswerkzeug
-
-| Punkt | Empfehlung | Begründung |
-|---|---|---|
-| Häufigkeit | mindestens täglich, besser zweimal täglich | Höchstens so viel Arbeit geht im Ernstfall verloren. |
-| Ziel | **externer Speicher**, nicht derselbe Server | Eine Sicherung auf derselben Maschine überlebt genau die Störungen nicht, für die es sie gibt. |
-| Verschlüsselung | asymmetrisch (z. B. `age`), **nur der öffentliche Schlüssel liegt auf dem Server** | Wer den Server übernimmt, kann sichern, aber nichts zurücklesen. Der private Schlüssel liegt ausschließlich beim Betreiber, im Passwortmanager. |
-| Aufbewahrung | mehrere Wochen, aufgeräumt wird je Instanz **nur nach einem gelungenen Lauf** | Eine wochenlange Störung räumt sonst die letzten guten Stände weg. |
-| Zugangsdaten zum Speicher | **auf dem Host**, nicht in Kundencontainern und nicht in der Verwaltung | Eine kompromittierte Instanz käme sonst an die Sicherungen aller anderen. |
-| Dateien | `pg_dump -Fc` je Datenbank plus Archiv der Uploads | Das Custom-Format erlaubt `pg_restore --list` zur Prüfung. |
-
-Nicht gesichert werden muss eine Demo-Instanz, die sich selbst zurücksetzt.
-
-## 2. Meldung an die Verwaltung
-
-Die Verwaltung hat **keinen Zugang** zum Sicherungsspeicher und soll auch keinen
-bekommen: Eine kompromittierte Verwaltung käme sonst an die Daten aller Kunden.
-Stattdessen meldet das Sicherungswerkzeug nach **jedem gelungenen Lauf** je
-Instanz eine Zeile:
-
-```bash
-curl -sS -X POST "https://<verwaltung>/api/backups" \
-  -H "content-type: application/json" \
-  -H "x-backup-key: $CONTROL_BACKUP_KEY" \
-  -d "{\"subdomain\":\"$SLUG\",\"date\":\"$(date +%F)\",\"sizeBytes\":$BYTES}"
+```
+ Betreiber ─► control-web ─► control-api ──HMAC-signiert──► backup-agent ──► Sicherungsziel
+                               │  ▲  (Compose-Netz, Port 8787)   │  │         (S3 oder SFTP)
+                               │  └── GET  /api/internal/backup-plan
+                               │      POST /api/backups  (x-backup-key)
+                               ▼                                 ▼
+                          control-db                  docker-socket-proxy ─► docker.sock (nur lesend gemountet)
 ```
 
-Den Schlüssel nicht in der Befehlszeile übergeben (sichtbar in der Prozessliste),
-sondern aus einer Datei mit Rechten 600 in den Kopf der Anfrage legen, etwa mit
-`curl -H @datei`.
+Die **Verwaltung** (`control-api`) hat weder Zugangsdaten zum Sicherungsspeicher noch
+Zugriff auf Docker. Sie stellt ein Ziel ein, **löst Aufträge aus** und zeigt
+Ergebnisse. Dump, Verschlüsselung, Upload, Aufräumen und Rückspielen führt der
+**Backup-Agent** (`apps/backup-agent`, Container `backup-agent`) aus.
 
-| Feld | Bedeutung |
+**Warum nicht in der Verwaltung?** Die Verwaltung hat eine Weboberfläche, einen
+Anmeldeweg und öffentliche Eingangswege. Wer sie kompromittiert, bekäme sonst die
+Sicherungen aller Kunden und könnte Instanzen anfassen. Der Agent hat keinen Weg
+von außen, kennt nur einen Aufrufer (die Verwaltung, per Signatur) und darf
+auf Docker nur das, was die Allowlist erlaubt (Abschnitt 10). Das
+verkleinert den Schaden eines Einbruchs in die Verwaltung auf „Aufträge auslösen,
+die der Agent ohnehin ausführen würde“.
+
+Der Agent ist **ein** Container im Compose-Stapel der Verwaltung (`docker-compose.yml`):
+kein veröffentlichter Port, `read_only`, ohne Linux-Capabilities, mit
+`no-new-privileges`, Zustand in einem eigenen Volume (`backup-agent-state`, im
+Container `/state`). `install.sh` erzeugt die drei nötigen Geheimnisse:
+
+| Variable | Zweck |
 |---|---|
-| `subdomain` | Subdomain der Instanz im Register |
-| `date` | Tag der Sicherung (`YYYY-MM-DD`), nicht in der Zukunft |
-| `sizeBytes` | Größe in Byte, ganze Zahl |
+| `BACKUP_AGENT_SECRET` | Schlüssel der Anfragesignatur (HMAC) zwischen Verwaltung und Agent |
+| `AGENT_STATE_KEY` | verschlüsselt die Zugangsdaten im State-Volume des Agents (AES-256-GCM) |
+| `BACKUP_REPORT_KEY` | Schlüssel, mit dem der Agent bei der Verwaltung den Sicherungsplan abholt und Ergebnisse meldet (Header `x-backup-key`) |
 
-Verhalten des Endpunkts:
+Die Verwaltung vergleicht `x-backup-key` mit ihrer Variable **`CONTROL_BACKUP_KEY`**.
+Diese muss denselben Wert wie `BACKUP_REPORT_KEY` haben. Tragen Sie ihn in
+`installations/<slug>/.env` ein, falls er dort nicht schon steht; ohne diesen Wert
+gibt es die beiden Wege `GET /api/internal/backup-plan` und `POST /api/backups` nicht
+(404), und der Agent bekommt weder einen Plan noch kann er melden.
 
-- `CONTROL_BACKUP_KEY` (mindestens 32 Zeichen) muss in der Umgebung der Verwaltung
-  gesetzt sein, etwa mit `openssl rand -hex 32`. Ohne ihn **existiert die Route
-  nicht** (404). Dann bleibt die Anzeige leer, und jede Instanz erscheint als
-  „Sicherung überfällig“. Das ist Absicht: Ein leeres Feld, das nichts sagt, wäre
-  schlimmer als ein Fehlalarm.
-- Falscher oder fehlender Schlüssel: `401`. Der Vergleich läuft in konstanter Zeit.
-- Ein Datum in der Zukunft wird mit `400` abgewiesen. Eine einzige Meldung mit
-  falsch gestellter Uhr würde die Überfälligkeits-Aufgabe sonst dauerhaft
-  abschalten, und für Sicherungsmeldungen gibt es bewusst keinen Löschpfad. Ein
-  Tag Toleranz für Zeitzonen ist eingebaut.
-- Jede formal gültige Meldung bekommt `200`, **auch mit unbekannter Subdomain**.
-  Der Endpunkt darf mit dem Schlüssel keine Kundenliste verraten. Ein Tippfehler
-  im Skript fällt deshalb nicht an der Antwort auf, sondern im Log der Verwaltung
-  („Sicherungsmeldung für eine unbekannte Subdomain verworfen“) und später an der
-  Aufgabe „Sicherung überfällig“.
-- Zwei Meldungen am selben Tag berichtigen dieselbe Zeile (eine Zeile je Instanz
-  und Tag).
-- Der Meldeweg ist auf 60 Anfragen je Minute begrenzt.
+### Wie die Verwaltung den Agent aufruft
 
-**Warum Meldung statt Abfrage:** Das Ausbleiben der Meldung ist das Signal. Es
-gibt bewusst kein Feld „fehlgeschlagen“, denn Sicherungen scheitern in der Praxis
-nicht mit einer Fehlermeldung, sondern mit wochenlanger Stille. Die Verwaltung
-erzeugt für eine **laufende** Instanz die Aufgabe „Sicherung überfällig“, sobald
-zwei Tage ohne Meldung vergangen sind.
+HTTP/JSON im internen Netz, Hostname `backup-agent`, Port 8787. **Jede** Anfrage ist
+signiert: `X-SI-Timestamp` (ms seit Epoche), `X-SI-Nonce` (mindestens 16 Byte, hex),
+`X-SI-Signature` = HMAC-SHA256 über Methode, Pfad mit Query, Zeitstempel, Nonce und
+SHA-256 des Bodys. Der Agent lehnt ab:
 
-Die Datenbank der Verwaltung selbst ist keine Instanz und wird nicht gemeldet.
-Ihre Sicherung gehört deshalb in eine eigene Überwachung des Betreibers (zum
-Beispiel eine Benachrichtigung des Sicherungswerkzeugs bei Fehlschlag).
+- einen Zeitstempel, der mehr als 60 Sekunden abweicht,
+- eine Nonce, die er in den letzten 5 Minuten schon gesehen hat (Replay),
+- eine falsche Signatur (zeitkonstanter Vergleich),
+- einen Body über 1 MiB.
 
-## 3. Warum es keinen Wiederherstellungsknopf gibt
+Die Aufträge heißen `backup`, `backup-control`, `verify` und `restore`; sie laufen in
+einer Warteschlange im Agent, die Verwaltung fragt den Stand ab. Antworten enthalten
+keine Geheimnisse. Quelle: `apps/backup-agent/src/hmac.ts`, `app.ts`,
+`apps/control/src/backup-settings/`.
 
-Die Verwaltung spielt nie etwas zurück. Das ist Regel R1 (siehe
-[security-model.md](security-model.md)): Auf Kundeninstanzen gibt es genau zwei
-Schreibvorgänge, anlegen und stoppen, jeweils nach ausdrücklicher Bestätigung.
-Eine Wiederherstellung überschreibt einen laufenden Datenbestand. Als Knopf in
-einer Liste genügte ein Fehlgriff, um die Arbeit einer Organisation durch einen
-Stand von vor Stunden zu ersetzen, ohne dass es jemand sofort merkt. Der Vorgang
-gehört an eine Stelle, an der man ihn nicht versehentlich auslöst: auf den Server,
-von Hand.
+## 2. Was gesichert wird und was nicht
 
-| Die Verwaltung … | |
+| Was | Wie | Ablage im Ziel |
+|---|---|---|
+| Datenbank je Kundeninstanz | `pg_dump -Fc`, per `docker exec` im Datenbank-Container der Instanz, verschlüsselt | `<Präfix>/instances/<subdomain>/<JJJJ-MM-TT>T<HHMMSS>Z.dump.age` |
+| Uploads je Instanz | `tar czf` im Container, der das Volume einhängt, verschlüsselt (nur, wenn das Manifest `uploadsService` und `uploadsPath` nennt) | `….uploads.tar.age` |
+| Datenbank der Verwaltung | `pg_dump -Fc` über `CONTROL_DATABASE_URL`, verschlüsselt | `<Präfix>/control/<Zeitstempel>.dump.age` |
+| Rechnungsarchiv | je Jahr alle PDFs und XMLs plus `hashes.sha256`, verschlüsselt | `<Präfix>/invoices/<JJJJ>/<Zeitstempel>.tar.age` |
+
+Zu jeder Datei gehört eine `.meta.json` mit Größe und SHA-256. Die
+Instanz-Container findet der Agent über Compose-Labels
+(`com.docker.compose.project`, `com.docker.compose.service`). Welches Projekt und
+welcher Dienst, steht im Manifest unter `provisioning.backup`
+([manifest.md](../manifest.md)); **ohne diesen Abschnitt gibt es keinen
+Sicherungsplan** und die Verwaltung lehnt Sicherung und Wiederherstellung ab.
+
+Das Rechnungsarchiv wird nur neu abgelegt, wenn sich sein Inhalt geändert hat.
+Zusammenhang mit der GoBD: [gobd.md](gobd.md), Abschnitt 9.
+
+**Nicht gesichert wird:**
+
+- **`CONTROL_CONFIG_KEY` und `JWT_SECRET`.** Sie liegen in der `.env` der
+  Installation, nicht in der Datenbank. **`CONTROL_CONFIG_KEY` gehört gesondert
+  gesichert**, getrennt von den Dumps (Passwortmanager). Er verschlüsselt ruhende
+  Geheimnisse in der Datenbank (TOTP-Geheimnisse, Setup- und Kennzahlen-Token der
+  Instanzen). Ohne ihn ist ein zurückgespielter Dump in diesen Feldern unlesbar, und
+  TOTP müsste neu eingerichtet werden.
+- **Die Zugangsdaten zum Sicherungsziel und der Agent-Zustand.** Das State-Volume
+  `backup-agent-state` enthält das Ziel (verschlüsselt mit `AGENT_STATE_KEY`) und
+  wird nicht gesichert. Gehen Volume oder `AGENT_STATE_KEY` verloren, richten Sie das
+  Ziel in den Einstellungen neu ein. Die Sicherungen im Ziel bleiben lesbar, solange
+  Sie den privaten Schlüssel haben.
+- **Der private Entschlüsselungsschlüssel.** Er liegt absichtlich nirgends auf dem
+  Server (Abschnitt 4).
+- **Compose-Dateien, `.env`, Manifest, Coolify-Einstellungen, Images.** Das ist
+  Konfiguration, kein Datenbestand. Halten Sie sie in Ihrer eigenen Ablage.
+- **Eine Demo-Instanz, die sich selbst zurücksetzt.**
+
+## 3. Einrichtung in den Einstellungen
+
+Unter **Einstellungen → Sicherung** (Rollen `owner` und `administrator`, zweiter
+Faktor nötig). Die Seite zeigt zuerst, ob der Agent erreichbar ist. Ist er es nicht,
+wird nichts gespeichert.
+
+Zugangsdaten sind **write-only**: Sie gehen aus dem Formular durch die Verwaltung
+direkt an den Agent. Die Verwaltung speichert sie nicht, schreibt sie weder in
+Datenbank noch Audit-Log noch Log und gibt sie nie zurück. In der Datenbank der
+Verwaltung stehen nur unkritische Angaben (Typ, Endpunkt oder Host, Bucket oder
+Pfad, Zeitplan, Aufbewahrung, Ergebnis des letzten Tests). Der Agent behält bestehende
+Zugangsdaten, wenn Sie beim erneuten Speichern ein Geheimnisfeld nicht neu angeben.
+
+### Ziel-Typ S3 (Objektspeicher)
+
+| Feld | Hinweis |
 |---|---|
-| zeigt Tag und Größe der letzten Sicherung je Instanz | ja |
-| meldet eine ausbleibende Sicherung als Aufgabe | ja |
-| stoppt eine Instanz beim Archivieren, nach Bestätigung | ja |
-| nennt beim Archivieren den Stand der letzten Sicherung im Verlauf | ja |
-| löst selbst eine Sicherung aus | nein |
-| löscht ein Deployment oder eine Datenbank | nein, an keiner Stelle |
-| spielt eine Sicherung zurück | nein |
-| hat SQL-Zugang zu Kundendatenbanken | nein |
+| Endpunkt | mit `https://`, z. B. `https://s3.example.com` |
+| Region | wie vom Anbieter genannt |
+| Bucket | muss existieren |
+| Präfix | optionaler Ordner im Bucket |
+| Path-Style | bei vielen selbst betriebenen S3-Diensten nötig |
+| Zugangsschlüssel und geheimer Schlüssel | nur Rechte für diesen Bucket vergeben: lesen, schreiben, auflisten; das Recht zum Löschen nur, wenn die Aufbewahrung alter Sicherungen aufräumen soll (Abschnitt 5) |
 
-Die Zeilen mit „nein“ sind als **Abwesenheit** geprüft: Tests durchsuchen den
-Quellbaum nach HTTP-DELETE, nach Aufrufen mit löschendem Namen und nach
-Löschaufrufen gegen die Nachweis-Modelle.
+**Object Lock am Bucket.** Für das Rechnungsarchiv empfohlen: Legen Sie den Bucket
+**mit aktiviertem Object Lock** (und damit Versionierung) an, und setzen Sie in den
+Einstellungen „Object Lock“ an. Dann schreibt der Agent jedes Rechnungsarchiv mit
+einer Aufbewahrungssperre im Modus GOVERNANCE (Einzelheiten und Grenzen:
+[gobd.md](gobd.md), Abschnitt 9). Object Lock lässt sich bei vielen Anbietern nur
+beim Anlegen des Buckets einschalten. **„Verbindung testen“ prüft das nicht**, denn
+der Test schreibt ein Objekt ohne Sperre. Ob die Sperre greift, sehen Sie nach dem
+ersten Lauf in der Verwaltung des Anbieters am Objekt unter `invoices/`. Ein Anbieter
+ohne Unterstützung lehnt den Upload mit Sperre ab; dann scheitert der
+Rechnungsarchiv-Teil des Laufs mit Fehlermeldung statt still ungeschützt zu laufen.
 
-**Beim Archivieren zieht die Verwaltung keine Sicherung.** Sie stoppt die Instanz
-und schreibt in den Verlauf, wie es um die letzte Sicherung steht. Ist sie zu alt
-oder fehlt sie, steht dort ein Warnhinweis. Vor dem Archivieren deshalb einmal
-das Sicherungswerkzeug von Hand laufen lassen und prüfen, dass im Verlauf
-hinterher „Letzte Sicherung: heute“ steht.
+### Ziel-Typ Storage Box (SFTP)
 
-## 4. Der Weg zurück: eine Kundeninstanz
+Gedacht für eine Storage Box (z. B. bei Hetzner), funktioniert mit jedem SFTP-Ziel.
 
-**Vorher lesen:** Die Wiederherstellung überschreibt den laufenden Bestand der
-Instanz. Alles seit dem Zeitpunkt der Sicherung ist danach weg. Vorher mit der
-Organisation sprechen.
+| Feld | Hinweis |
+|---|---|
+| Host | z. B. `uXXXXXX.your-storagebox.de` |
+| Port | **23** bei einer Storage Box (nicht 22) |
+| Benutzer | Unterkonto nur für die Sicherungen |
+| Anmeldeart | Schlüssel (empfohlen) oder Passwort; Schlüssel als privater Schlüssel im Formular |
+| Pfad | Verzeichnis für die Sicherungen, ohne `..` |
 
-Platzhalter: `<db-container>` (Datenbank-Container der Instanz), `<db-user>` und
-`<db-name>` (laut Compose-Datei der Instanz), `<api-container>` (App-Container).
+Bei einer Storage Box gibt es **kein Object Lock** durch den Agent. Schutz des
+Rechnungsarchivs entsteht dort durch ein Unterkonto, das nur der Agent nutzt,
+und durch Snapshots, die Sie beim Anbieter einrichten.
 
-1. **Stand bestimmen.** In der Verwaltung an der Organisation unter „Instanz“ die
-   letzte Sicherung ablesen, ältere Stände liegen im Sicherungsspeicher. Notiere
-   Subdomain, Datum der Sicherung und Anlass.
-2. **Nur die App stoppen, nicht den ganzen Stapel.** Ein Stopp über Coolify hielte
-   auch die Datenbank an, die Schritt 5 braucht.
+### Zeitplan und Aufbewahrung
+
+- **Zeitplan:** täglich um 02:30 Uhr oder zusätzlich um 14:30 Uhr (Serverzeit des
+  Agents, Zeitzone aus `APP_TIMEZONE`). Zum Planen holt der Agent die Instanzliste
+  von der Verwaltung (`GET /api/internal/backup-plan`) und sichert jede Instanz,
+  danach die Verwaltung (Datenbank und Rechnungsarchiv).
+- **Aufbewahrung** in Tagen (1 bis 3650): Der Agent räumt Sicherungssätze unter
+  `instances/…` und `control/`, die älter sind, **nur nach einem gelungenen Lauf**
+  auf und behält immer den neuesten Satz. Er löscht **nie** etwas unter `invoices/`;
+  das ist im Agent hart verdrahtet (Löschwächter), unabhängig von Einstellungen.
+
+### Verbindung testen
+
+Der Knopf „Verbindung testen“ lässt den Agent ein Testobjekt schreiben, lesen,
+vergleichen und wieder löschen. Das Ergebnis (nur Ja/Nein und ein Text ohne
+Geheimnisse) steht in der Verwaltung. Es beweist Zugang und Rechte, **nicht** Object
+Lock und nicht, dass der Platz für die Sicherungen reicht. Der Test wird auditiert.
+
+## 4. Der Entschlüsselungsschlüssel
+
+Alle Sicherungen werden mit **age** verschlüsselt (npm-Paket `age-encryption`).
+Beim **ersten** Speichern des Ziels erzeugt der Agent ein Schlüsselpaar:
+
+- Der **öffentliche Schlüssel** (Empfänger, `age1…`) bleibt im Agent. Damit lässt sich
+  nur verschlüsseln.
+- Der **private Schlüssel** (`AGE-SECRET-KEY-1…`) steht **genau einmal** in der Antwort
+  auf dieses Speichern, wird in der Oberfläche **einmal angezeigt** und nirgends
+  gespeichert, weder im Agent noch in der Verwaltung noch im Log.
+
+**Legen Sie ihn sofort ab:** im Passwortmanager und zusätzlich an einem zweiten Ort
+(ausgedruckt im Tresor). **Ohne ihn sind alle Sicherungen wertlos**, auch die
+Rechnungsarchive; der Anbieter, die Verwaltung und der Agent können nichts
+entschlüsseln. Nach dem Schließen der Anzeige gibt es keinen zweiten Blick. Ändern
+Sie später das Ziel, bleibt das Schlüsselpaar bestehen, und es wird kein neuer
+privater Schlüssel angezeigt. Wer den Schlüssel verloren hat, leert das Volume
+`backup-agent-state` und richtet das Ziel neu ein; dabei entsteht ein neues
+Schlüsselpaar, das nur für **neue** Sicherungen gilt. Alte bleiben unlesbar.
+
+Wer den Server übernimmt, kann damit also sichern, aber nichts zurücklesen.
+
+## 5. Sicherungen ansehen, auslösen, prüfen
+
+An der Instanz (Karte der Organisation) gibt es den Bereich **Sicherungen**:
+
+- **Liste:** Datum, Größe, ob geprüft.
+- **Jetzt sichern:** löst einen Auftrag `backup` für diese Instanz aus
+  (`POST /api/instances/:id/backups`).
+- **Prüfen:** löst einen Auftrag `verify` aus. Er lädt die verschlüsselte Datei aus
+  dem Ziel und vergleicht **Größe und SHA-256 mit der Meta-Datei**. Er entschlüsselt
+  **nicht**. Das beweist, dass die Datei unverändert und vollständig im Ziel liegt, nicht,
+  dass sie sich entschlüsseln und zurückspielen lässt (siehe Abschnitt 9).
+
+**Meldeweg und Überfälligkeit.** Nach jedem gelungenen Lauf meldet der Agent
+das Ergebnis an `POST /api/backups` (`x-backup-key`): Art (`instance`, `control`
+oder `invoices`), Datum, Größe, Objektschlüssel und Prüfsumme. Für Instanzsicherungen
+legt die Verwaltung je Instanz und Tag eine Zeile an und erzeugt für eine
+**laufende** Instanz die Aufgabe „Sicherung überfällig“, sobald zwei Tage ohne Meldung
+vergangen sind. Das Ausbleiben der Meldung ist das Signal; es gibt bewusst keinen
+„fehlgeschlagen“-Zustand, denn Sicherungen scheitern in der Praxis mit wochenlanger
+Stille. Eigenschaften des Wegs:
+
+- ohne gesetztes `CONTROL_BACKUP_KEY` existiert er nicht (404); falscher oder fehlender
+  Schlüssel: 401, Vergleich in konstanter Zeit,
+- ein Datum in der Zukunft wird mit 400 abgewiesen (mit einem Tag Toleranz),
+- jede formal gültige Meldung bekommt 200, auch mit unbekannter Subdomain
+  (kein Aufzählungsorakel),
+- höchstens 60 Anfragen je Minute.
+
+Meldungen für die **Verwaltungs-Datenbank** und das **Rechnungsarchiv** haben keine
+Instanz; sie landen nur im Audit-Log (`backup.reported`) und lösen keine Aufgabe aus.
+Überwachen Sie diese beiden deshalb selbst: Im Sicherungsziel muss unter `control/`
+täglich ein neuer Satz stehen.
+
+## 6. Wiederherstellung in eine NEUE Instanz
+
+**Es gibt keinen Weg, eine laufende Instanz zu überschreiben.** Eine
+Wiederherstellung entsteht immer als **neue** Anwendung neben der alten. Das ist
+Absicht (Regel R1, siehe [security-model.md](security-model.md)): Ein Fehlgriff darf
+nie die Arbeit einer Organisation durch einen Stand von vor Stunden ersetzen.
+Die alte Instanz bleibt bis zu Ihrer ausdrücklichen Übernahme unberührt.
+
+**Voraussetzungen:** Der Agent ist erreichbar, das Manifest hat den Abschnitt
+`provisioning.backup`, die Instanz hat eine Sicherung mit Status „ok“, und Sie haben
+den **privaten Schlüssel** (Abschnitt 4) zur Hand.
+
+**Ablauf** (an der Instanz im Bereich „Sicherungen“, Knopf „Als neue Instanz
+wiederherstellen“; `POST /api/instances/:id/restores`):
+
+1. Sie wählen die Sicherung und geben eine **neue Subdomain** ein (sie muss in der
+   Verwaltung und in Coolify frei sein), fügen den **privaten Schlüssel** ein, tippen
+   zur Bestätigung den **Namen der Instanz** (die Subdomain der bestehenden Instanz)
+   ein und weisen sich mit dem zweiten Faktor aus.
+2. Die Verwaltung legt über den Provisioner (nur `create`) eine **neue Anwendung** in
+   Coolify an, mit denselben Geheimnissen wie die alte, aber ohne eine neue
+   Instanz-Zeile. Status `provisioning`.
+3. Die Verwaltung beauftragt den Agent mit `restore`; Status `restoring`. Der Agent
+   lädt die Dateien, prüft Größe und Prüfsumme gegen die Meta-Datei, entschlüsselt
+   im Arbeitsspeicher (ein falscher Schlüssel bricht ab, **bevor** etwas am Ziel
+   geändert wird), hält die App-Container des **Ziel**-Stacks an, spielt die
+   Datenbank mit `pg_restore --clean --if-exists --no-owner --single-transaction` ein
+   (bei einem Fehler bleibt der Stand unverändert), startet die Container wieder und
+   entpackt die Uploads.
+4. Die Verwaltung prüft die Gesundheit der neuen Instanz. Status `ready`
+   („wiederhergestellt, wartet auf Übernahme“) oder `failed` mit lesbarem Grund.
+
+**Der Schlüssel ist write-only:** Er lebt nur im Arbeitsspeicher von Verwaltung und
+Agent für die Dauer des Auftrags, wird nie gespeichert, protokolliert oder
+zurückgegeben, und Fehlertexte werden davon gesäubert.
+
+**Der Agent stellt nur in einen fremden Stack zurück.** Er lehnt ab, wenn das
+Ziel der eigene Stack des Agents oder der Verwaltung ist, wenn er seinen eigenen
+Stack nicht ermitteln kann (er verweigert dann lieber) oder wenn der Container nicht
+das Compose-Projektlabel des Ziels trägt.
+
+**Prüfen Sie die neue Instanz**, bevor Sie übernehmen: unter der neuen Subdomain
+anmelden, Stichproben ansehen, das Datum der Sicherung bedenken (alles danach fehlt).
+
+### Übernahme
+
+Erst ein Mensch löst die Übernahme aus
+(`POST /api/instances/:id/restores/:restoreId/adopt`, nur im Status `ready`):
+
+1. Die **alte** Anwendung wird per Provisioner **gestoppt, nie gelöscht**. Schlägt das
+   Stoppen fehl, bleibt alles unverändert.
+2. In einer Transaktion stellt die Verwaltung Subdomain und Coolify-Kennungen der
+   Instanz-Zeile auf die wiederhergestellte Anwendung um. Die **alten Werte stehen im
+   Audit-Log**.
+3. Die alte Anwendung und ihre Daten bleiben in Coolify bestehen. **Löschen Sie sie
+   von Hand und erst, wenn die wiederhergestellte Instanz mindestens eine Woche
+   unauffällig läuft.** Die Software tut das nie.
+
+**Danach manuell prüfen:** Adresse und Zertifikat der Instanz (die Subdomain
+hat sich geändert, ein früher bekannter Link zeigt auf die alte, gestoppte
+Anwendung), Weiterleitungen und DNS beim Betreiber, Einträge in der Buchhaltung oder bei
+der Kundschaft, die die alte Adresse enthalten. Notieren Sie Anlass, Datum der
+zurückgespielten Sicherung und Verlust in einer Notiz an der Organisation.
+
+Jeder Schritt (Start, Ergebnis, Übernahme) steht im Audit-Log.
+
+## 7. Wiederherstellung der Verwaltung selbst (von Hand)
+
+Die Verwaltung hat genau eine Datenbank (`control`, Dienst `control-db`) und
+spielt sich nicht selbst zurück: Der Agent liest sie nur für die Sicherung.
+Das Zurückspielen geschieht auf dem Server, von Hand, auf dem Rechner des Betreibers,
+auf dem der private Schlüssel liegt.
+
+1. Sicherung holen: aus `<Präfix>/control/` den gewünschten Satz
+   (`….dump.age`) und die `.meta.json`. Größe und SHA-256 gegen die Meta-Datei
+   vergleichen.
+2. **Auf dem Rechner des Betreibers entschlüsseln** (`age --decrypt -i <schlüsseldatei>`);
+   mit `pg_restore --list` das Inhaltsverzeichnis prüfen.
+3. `docker compose stop control-api control-web backup-agent` (nur die Dienste, die
+   schreiben; die Datenbank läuft weiter). Der Dienst des Agents heißt
+   `backup-agent`.
+4. **Aktuellen Stand sichern**, bevor er überschrieben wird. Auch ein kaputter Stand ist
+   die einzige Kopie dessen, was seit der letzten Sicherung geschah.
+5. In eine Nebendatenbank einspielen und dort nachsehen:
    ```bash
-   docker stop <api-container>
-   docker exec <db-container> psql -U <db-user> -d postgres -Atc \
-     "select count(*) from pg_stat_activity where datname = '<db-name>'"   # muss 0 sein
+   docker compose exec control-db psql -U control -d postgres -c 'CREATE DATABASE restore_check;'
+   docker compose exec -T control-db pg_restore -U control --no-owner --exit-on-error \
+     -d restore_check < control.dump
    ```
-   Eine laufende App schreibt sonst während des Zurückspielens weiter. Das
-   Ergebnis wäre ein Mischstand, den niemand mehr auseinandersortiert.
-3. **Aktuellen Stand sichern, bevor er überschrieben wird.** Von Hand, nicht mit
-   dem Sicherungswerkzeug, denn das findet Instanzen oft nur über laufende
-   Container. Den Dump verschlüsseln und in den externen Speicher legen, erst
-   danach weitermachen. Auch ein kaputter Stand ist die einzige Kopie dessen, was
-   seit der letzten Sicherung passiert ist.
-4. **Sicherung holen und entschlüsseln, auf dem Rechner des Betreibers.** Dort
-   liegt der private Schlüssel, nicht auf dem Server. Danach das Archiv prüfen
-   (`pg_restore --list <datei>` zeigt das Inhaltsverzeichnis und ändert nichts)
-   und auf den Server kopieren.
-5. **In eine Nebendatenbank einspielen und dort nachsehen.**
-   ```bash
-   docker exec <db-container> psql -U <db-user> -d postgres \
-     -c 'CREATE DATABASE restore_check;'
-   docker exec -i <db-container> pg_restore -U <db-user> --no-owner \
-     --exit-on-error -d restore_check < r.dump
-   ```
-   Zeilenzahlen wichtiger Tabellen und das jüngste Datum prüfen. Ein Einspielen
-   direkt in die Hauptdatenbank ist unumkehrbar, sobald es begonnen hat.
-6. **Umschalten.** Stimmt der Stand:
-   ```bash
-   docker exec <db-container> psql -U <db-user> -d postgres -c \
-     'ALTER DATABASE "<db-name>" RENAME TO before_restore;
-      ALTER DATABASE restore_check RENAME TO "<db-name>";'
-   ```
-   `before_restore` bleibt stehen. Sie wird erst gelöscht, wenn die Instanz
-   mindestens eine Woche unauffällig läuft, und dann von Hand.
-7. **App starten und prüfen.** `docker start <api-container>`. Ein neues Ausrollen
-   ist nicht nötig. Beim Start läuft `prisma migrate deploy`, fehlende
-   Migrationen einer älteren Sicherung laufen automatisch nach (Normalfall, kein
-   Fehler). Danach den Health-Endpunkt der Instanz aufrufen.
-8. **Nachweis schreiben.** In der Verwaltung eine Notiz an der Organisation:
-   Anlass, Datum der zurückgespielten Sicherung, was zwischen Sicherung und
-   Störung verloren ist.
+   Zeilenzahlen wichtiger Tabellen und das jüngste Datum prüfen.
+6. Umschalten: `ALTER DATABASE control RENAME TO before_restore;` und
+   `ALTER DATABASE restore_check RENAME TO control;` (vorher alle Verbindungen
+   beenden). `before_restore` bleibt stehen und wird erst nach einer Woche
+   unauffälligem Betrieb von Hand gelöscht.
+7. **Denselben `CONTROL_CONFIG_KEY` wie beim Erzeugen der Sicherung verwenden.** Ein
+   anderer macht verschlüsselte Felder unlesbar.
+8. `docker compose start control-api control-web backup-agent`. Die Migrationen laufen
+   beim Start. Dann Anmeldung, Rechnungsliste und Audit-Log ansehen.
 
-## 5. Der Weg zurück: die Verwaltung selbst
+Die Verwaltungs-Datenbank enthält die festgeschriebenen Rechnungen samt PDF und XML.
+Zusätzlich liegen sie im Rechnungsarchiv; der Wiederherstellungsweg dafür ist:
+`invoices/<Jahr>/…tar.age` entschlüsseln, entpacken, `sha256sum -c hashes.sha256`.
+Im Modus `portal` hat jede Verwaltung eine eigene Datenbank; die Wiederherstellung
+einer betrifft nie eine andere.
 
-Die Verwaltung hat genau eine Datenbank (`control`, Dienst `control-db`). Die
-Schritte entsprechen Abschnitt 4 mit `docker compose` und den Namen aus
-`docker-compose.yml`:
+## 8. Was die Verwaltung beim Archivieren tut
 
-1. `docker compose stop control-api control-web`, die Datenbank läuft weiter.
-2. Aktuellen Stand sichern, Sicherung holen, entschlüsseln, in eine Nebendatenbank
-   einspielen und prüfen (Benutzername und Datenbank heißen `control`).
-3. Umbenennen wie in Schritt 6.
-4. **Denselben `CONTROL_CONFIG_KEY` wie beim Erzeugen der Sicherung verwenden.**
-   Ein anderer Schlüssel macht verschlüsselte Felder unlesbar.
-5. `docker compose start control-api control-web`, die Migrationen laufen beim
-   Start.
+Beim **Archivieren** einer Instanz stoppt die Verwaltung sie und schreibt in den
+Verlauf, wie es um die letzte Sicherung steht. Sie zieht dabei keine Sicherung. Ist
+die letzte zu alt oder fehlt sie, steht dort ein Warnhinweis. Lösen Sie vorher einmal
+„Jetzt sichern“ aus und prüfen Sie, dass im Verlauf „Letzte Sicherung: heute“ steht.
 
-Da jede Verwaltung ihre eigene Datenbank hat, betrifft die Wiederherstellung einer
-Verwaltung nie eine andere (Modus `portal`).
+## 9. Die Übung, die dieses Dokument nicht ersetzt
 
-## 6. Die Übung, die dieses Dokument nicht ersetzt
+**Eine Sicherung, die nie zurückgespielt wurde, ist eine Vermutung.** Die Prüfung in
+der Verwaltung (Abschnitt 5) ist eine **Prüfsumme**: Sie erkennt Beschädigung und
+fehlende Dateien, nicht einen falschen Schlüssel, ein leeres Archiv oder einen Dump,
+der sich nicht einspielen lässt. Ein Entschlüsselungstest ist ohne den privaten
+Schlüssel nicht möglich, und der Schlüssel liegt aus gutem Grund nicht auf dem
+Server. Deshalb **regelmäßig** (mindestens vierteljährlich) und vor dem ersten echten
+Kunden:
 
-**Eine Sicherung, die nie zurückgespielt wurde, ist eine Vermutung.** Vor dem
-ersten echten Kunden und danach regelmäßig:
-
-1. Eine aktuelle Sicherung aus dem externen Speicher holen und entschlüsseln.
-2. In einen Wegwerf-Postgres (ohne offenen Port) einspielen: `pg_restore
-   --exit-on-error` muss ohne Fehler durchlaufen.
-3. Zeilenzahlen aller Tabellen mit der laufenden Datenbank vergleichen.
-4. Gegenprobe: Mit einem fremden Schlüssel darf sich die Datei nicht öffnen
-   lassen, und auf dem Server darf kein privater Schlüssel liegen.
-5. Mindestens einmal den ganzen Weg aus Abschnitt 4 an einer Wegwerf-Instanz
-   gehen (Stand A sichern, Stand B danach schreiben, zurückspielen, B muss
-   verschwunden sein, `before_restore` muss B enthalten) und das Ergebnis im
-   eigenen Betriebsjournal festhalten. Abweichungen von dieser Anleitung gehören
+1. Eine aktuelle Sicherung einer Wegwerf-Instanz mit dem privaten Schlüssel als neue
+   Instanz wiederherstellen (Abschnitt 6) und die Daten ansehen: Zeilenzahlen,
+   jüngstes Datum, ein Upload öffnen.
+2. Den Dump der Verwaltung auf dem eigenen Rechner entschlüsseln und in einen
+   Wegwerf-Postgres einspielen (`pg_restore --exit-on-error`); Zeilenzahlen mit der
+   laufenden Datenbank vergleichen.
+3. Ein Rechnungsarchiv entschlüsseln und `sha256sum -c hashes.sha256` ausführen.
+4. Gegenprobe: Mit einem fremden Schlüssel darf sich keine Datei öffnen lassen, und
+   auf dem Server darf kein privater Schlüssel liegen.
+5. Einmal den ganzen Weg samt Übernahme an einer Wegwerf-Instanz gehen und das
+   Ergebnis im Betriebsjournal festhalten. Abweichungen von dieser Anleitung gehören
    hierher.
+
+## 10. Das Risiko des Docker-Zugriffs
+
+Der Agent muss in Datenbank-Container fremder Stacks `pg_dump`, `pg_restore` und
+`tar` ausführen. Dafür braucht er Docker-Zugriff. **Dieser Zugriff ist im Kern
+ein Zugriff auf den Server.**
+
+Gelöst ist das so, mit begrenztem Schaden:
+
+- Der Agent spricht nie mit `docker.sock`, sondern mit dem Dienst
+  **`docker-socket-proxy`** (`tcp://docker-socket-proxy:2375`). Nur dieser Dienst
+  mountet den Socket (lesend gemountet) und lauscht nur im internen Netz
+  `docker-api`, an dem sonst nur der Agent hängt.
+- Die Allowlist des Proxys erlaubt `CONTAINERS`, `EXEC` und `POST` (für Starten,
+  Stoppen und `exec`); `IMAGES`, `NETWORKS`, `VOLUMES`, `SERVICES`, `SWARM`, `TASKS`,
+  `SECRETS`, `CONFIGS`, `BUILD`, `SYSTEM` und weitere sind gesperrt. Ein Test
+  (`tests/install.test.sh`) hält diese Zeilen fest.
+- Der Agent bedient nur Container mit dem erwarteten Compose-Label und startet und
+  stoppt nur Container des Ziel-Stacks.
+
+**Was bleibt:** `CONTAINERS` plus `EXEC` erlauben im Prinzip, in **jedem** Container
+auf dem Host Befehle auszuführen. Wer den Agent kompromittiert, kann das gesamte
+Docker-Host-System beeinflussen, auch wenn der Agent selbst es nie tut. Der
+Proxy begrenzt die Schnittstelle, er macht sie nicht harmlos. Deshalb: den Agent
+nicht aus dem Netz erreichbar machen (kein `ports:`), `BACKUP_AGENT_SECRET` wie ein
+Passwort behandeln, den Server aktuell halten, und wo es geht den Agent auf einem
+Host betreiben, der nur die Verwaltung und die Instanzen trägt. Die Verwaltung selbst
+hat keinen Docker-Zugriff.
+
+## 11. Zusammenfassung der Rechte
+
+| Wer | darf | darf nicht |
+|---|---|---|
+| Verwaltung | Ziel einstellen (write-only), Aufträge `backup`, `verify`, `restore` auslösen, neue Anwendung anlegen, alte **stoppen**, Meldungen annehmen | Zugangsdaten halten oder zurückgeben, Dump oder Restore selbst ausführen, Docker ansprechen, löschen |
+| Agent | sichern, auflisten, prüfen, in einen **fremden, neuen** Stack zurückspielen, eigene alte Sicherungen nach gelungenem Lauf aufräumen | Instanzen oder Datenbanken löschen, `invoices/` löschen, in den eigenen Stack oder den der Verwaltung zurückspielen, ohne Signatur antworten |
+| Betreiber | Schlüssel verwalten, Rückspielproben, alte Anwendungen von Hand entfernen | |

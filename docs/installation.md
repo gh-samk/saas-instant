@@ -178,7 +178,7 @@ Umgebungsvariablen, die der Code liest (`apps/control/src/coolify/coolify.config
 | `CONTROL_INSTANCE_SETUP_PATH`, `CONTROL_INSTANCE_SETUP_STATUS_PATH`, `CONTROL_INSTANCE_METRICS_PATH` | überschreiben die Pfade des Instanz-Vertrags |
 | `CONTROL_INSTANCE_SMTP_HOST`, `_PORT`, `_USER`, `_PASS`, `_FROM` | Postausgang der Instanzen; `HOST` und `FROM` sind Pflicht |
 | `CONTROL_METRICS_FETCH_ENABLED`, `CONTROL_RECONCILIATION_ENABLED` | `nein` schaltet den nächtlichen Kennzahlenabruf (04:00) bzw. den Abgleich mit Coolify (04:30) ab |
-| `CONTROL_BACKUP_KEY` | Schlüssel, mit dem sich ein Sicherungswerkzeug bei `POST /api/backups` ausweist |
+| `CONTROL_BACKUP_KEY` | Schlüssel, mit dem sich der Backup-Agent bei `GET /api/internal/backup-plan` und `POST /api/backups` ausweist; derselbe Wert wie `BACKUP_REPORT_KEY` des Agents ([operations/backup-and-recovery.md](operations/backup-and-recovery.md)) |
 | `RECHNUNGSDIENST_URL` | Adresse des Rechnungsdienstes für PDF/A-3. Das Compose startet den Dienst `invoice-renderer` (Quelle `tools/invoice-renderer`, nur im Compose-Netz, ohne Port nach außen) und setzt `http://invoice-renderer:8080`; Vorgabe im Code ohne Compose `http://rechnungsdienst:8080`; ausdrücklich leer = PDF-Erzeugung aus |
 
 **Ehrlicher Stand:** Diese Anbindung ist nur gegen eine Attrappe getestet. Machen Sie die erste Inbetriebnahme mit einer Test-Instanz und beobachten Sie Coolify dabei. Die Verwaltung legt nur an und stoppt; wenn etwas scheitert, steht die Anwendung unter Umständen in Coolify und muss dort von Hand aufgeräumt werden (die Verwaltung löscht sie nie).

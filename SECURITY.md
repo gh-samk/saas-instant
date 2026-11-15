@@ -34,9 +34,12 @@ Stände werden nicht gepflegt.
 ## Was in den Geltungsbereich gehört
 
 Der Quelltext dieses Repositories: die Verwaltung (`apps/control`), das Portal
-(`apps/portal`), die gemeinsamen Pakete, `install.sh`, `bin/saas-instant` und die
+(`apps/portal`), der Backup-Agent (`apps/backup-agent`), die gemeinsamen Pakete, `install.sh`, `bin/saas-instant` und die
 mitgelieferten Compose- und Konfigurationsdateien. Das Sicherheitsmodell und seine
 Zusagen stehen in [docs/operations/security-model.md](docs/operations/security-model.md).
+
+Besonders willkommen sind Meldungen zum Backup-Agent (Signatur der Aufträge,
+Umgang mit Zugangsdaten und dem privaten Schlüssel, Grenzen des Docker-Zugriffs).
 
 Nicht dazu gehören Schwachstellen in Fremdkomponenten (Coolify, PostgreSQL, Docker,
 die verwaltete Software, ein separater Rechnungsdienst) und Fehlkonfigurationen der
