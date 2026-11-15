@@ -52,7 +52,7 @@ USER node
 
 WORKDIR /app/apps/control
 EXPOSE 3001
-# Healthcheck gegen GET /api/gesundheit.
+# Healthcheck gegen GET /api/health.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-  CMD wget -qO- http://localhost:3001/api/gesundheit || exit 1
+  CMD wget -qO- http://localhost:3001/api/health || exit 1
 ENTRYPOINT ["./docker-entrypoint.sh"]

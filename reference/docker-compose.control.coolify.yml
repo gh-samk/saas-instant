@@ -28,7 +28,7 @@
 #       SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM  je nach Postausgang.
 #                                  SMTP_PORT=465 spricht SMTPS, 587/25 STARTTLS.
 #   - Ein kaputter Postausgang meldet sich NICHT auf der Anmeldeseite (die
-#     antwortet immer gleich), sondern unter GET /api/gesundheit als
+#     antwortet immer gleich), sondern unter GET /api/health als
 #     { status: "beeintraechtigt", mail: { letzterFehler } }. Darauf triggern.
 #   - CONTROL_APP_URL und CONTROL_RP_ID müssen zur Domain passen; die rpID ist
 #     die nackte Domain ohne Schema und Port. Passt sie nicht, lassen sich
@@ -151,14 +151,18 @@ services:
       # ANMELDEFAKTOR, dazu SMTP_USER und SMTP_PASS. Nicht abschalten.
       SMTP_TLS_ERZWINGEN: "1"
       # Oeffentlicher Anfrageweg (Etappe 2). OHNE CONTROL_INQUIRY_KEY
-      # antwortet POST /api/oeffentlich/anfrage mit 404 — dann kommt vom
+      # antwortet POST /api/public/inquiry mit 404 — dann kommt vom
       # Formular der Webseite nichts mehr an. Derselbe Wert muss im nginx der
-      # Webseite als Header x-anfrage-schluessel gesetzt sein.
+      # Webseite als Header x-inquiry-key gesetzt sein.
       CONTROL_INQUIRY_KEY: ${CONTROL_INQUIRY_KEY:?CONTROL_INQUIRY_KEY muss gesetzt sein, sonst nimmt die Verwaltung keine Anfragen an}
       CONTROL_INQUIRY_RECIPIENT: ${CONTROL_INQUIRY_RECIPIENT:-hallo@example.com}
       # Die Kette vor dem Anfrageweg ist zwei Stationen laenger als die der
-      # Oberflaeche (ueber das nginx der Webseite). Ohne diesen Wert zaehlt das
-      # Rate-Limit gegen einen Proxy statt gegen den Besucher ([W1]).
+      # Oberflaeche (ueber das nginx der Webseite): Traefik -> webseite-nginx ->
+      # Traefik -> control-web -> API = 4 Eintraege von rechts in X-Forwarded-For.
+      # Rueckfall; Vorrang hat die Kopfzeile x-sender-ip des Webseiten-nginx.
+      # Das Bundle docker-compose.yml hat keinen zweiten Traefik und steht deshalb
+      # auf 2. Ohne diesen Wert zaehlt das Rate-Limit gegen einen Proxy statt
+      # gegen den Besucher ([W1]).
       CONTROL_INQUIRY_TRUST_PROXY: ${CONTROL_INQUIRY_TRUST_PROXY:-4}
       DEMO_URL: ${DEMO_URL:-https://demo.example.com}
       DEMO_LOGIN_USER: ${DEMO_LOGIN_USER:-demo-nutzer}

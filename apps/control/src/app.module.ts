@@ -65,7 +65,7 @@ import { ManifestModule } from './manifest/manifest.module';
     }),
     // Die Konfiguration steht in `common/log-konfig.ts` — dort ist sie
     // pruefbar. Inline war sie es nicht, und genau deshalb blieb der
-    // `x-anfrage-schluessel` unredigiert, bis er im Produktionslog auffiel.
+    // `x-inquiry-key` unredigiert, bis er im Produktionslog auffiel.
     LoggerModule.forRoot({
       pinoHttp: buildLogConfig(),
       // '{*pfad}' STATT DER VORGABE '*' — dieselbe Sache wie unten bei

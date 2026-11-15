@@ -17,7 +17,7 @@
 export interface ProvisionedInstance {
   /** Kennung beim Anbieter (bei Coolify: die UUID der Anwendung). */
   ref: string;
-  /** Name beim Anbieter, z. B. `instanz-musterverein`. */
+  /** Name beim Anbieter, z. B. `instance-musterverein`. */
   name: string;
   /** Voll qualifizierte Domänen (Hostnamen ohne Schema). */
   domains: string[];

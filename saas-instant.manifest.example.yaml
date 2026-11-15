@@ -70,7 +70,7 @@ provisioning:
 
 ui:
   productName: Mein Produkt
-  logoUrl: https://example.com/logo.svg   # optional
+  # logoUrl: https://example.com/logo.svg   # optional (https); ohne Angabe zeigt die Oberfläche die Initiale
   # Oberfläche: Name und Logo kommen über GET /api/public-config. Die Instanz-
   # Domain zeigt die Oberfläche nur, wenn beim Build VITE_INSTANZ_BASISDOMAIN
   # gesetzt ist (z. B. example.com); sonst steht nur die Subdomain.

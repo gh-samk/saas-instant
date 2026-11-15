@@ -623,7 +623,7 @@ export class LoginService {
     // Beides verschwindet, wenn der Versand die Antwort nicht mehr berührt.
     //
     // Sichtbar bleibt ein kaputter Postausgang trotzdem: im Anwendungslog, im
-    // Audit-Log und unter `/api/gesundheit` (`mail.letzterFehler`).
+    // Audit-Log und unter `/api/health` (`mail.letzterFehler`).
     void this.sendConcurrently(
       account.id,
       account.username,

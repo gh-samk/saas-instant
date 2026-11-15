@@ -38,7 +38,7 @@ import { SecondFactorGuard } from './second-factor.guard';
  */
 const WITHOUT_SESSION: Record<string, string> = {
   AppController:
-    'Nur /api/gesundheit — ein zustandsloses Lebenszeichen für den Container.',
+    'Nur /api/health — ein zustandsloses Lebenszeichen für den Container.',
   RobotsController: '/robots.txt muss für Suchmaschinen anonym lesbar sein.',
   AuthController:
     'Hier findet die Anmeldung selbst statt; eine Sitzung gibt es davor nicht.',

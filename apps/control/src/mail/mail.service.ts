@@ -362,7 +362,7 @@ export class MailService {
    * Letzter Versandfehler, für die AUTHENTIFIZIERTE Betriebsanzeige.
    *
    * Der Ort, an dem ein kaputter Postausgang sichtbar wird — die anonyme
-   * Anforderungsroute darf ihn nicht verraten ([W1] Runde 1), und `/api/gesundheit`
+   * Anforderungsroute darf ihn nicht verraten ([W1] Runde 1), und `/api/health`
    * darf es auch nicht, denn der Endpunkt ist anonym erreichbar ([K2]).
    * Bewusst im Speicher und nicht in der Datenbank: es ist eine
    * Betriebsanzeige, kein Nachweis. Der Nachweis steht im Audit-Log und im
@@ -837,7 +837,7 @@ export class MailService {
   }
 
   /**
-   * Verschickt und merkt sich den Fehlschlag für `/api/gesundheit`.
+   * Verschickt und merkt sich den Fehlschlag für `/api/health`.
    *
    * `betreffArt` statt des Betreffs im Log: der Betreff kann eine Adresse
    * enthalten, die Betriebsanzeige braucht nur die Art.

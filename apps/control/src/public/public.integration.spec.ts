@@ -810,9 +810,9 @@ describe('Je Art einmal – auch bei bekannter Adresse', () => {
 
     expect(await inquiriesFrom(email)).toEqual(
       [
-        'demo:bereits_ausgeloest',
-        'demo:zugangsdaten_gesendet',
-        'pilot:bestaetigung_gesendet',
+        'demo:already_triggered',
+        'demo:credentials_sent',
+        'pilot:confirmation_sent',
       ].sort(),
     );
   });
@@ -842,7 +842,7 @@ describe('Je Art einmal – auch bei bekannter Adresse', () => {
     await service.inquiry({ inquiryKind: 'demo', email }, SOURCE);
     expect(double.demoAccesses).toEqual([email]);
     expect(await inquiriesFrom(email)).toEqual(
-      ['demo:versand_fehlgeschlagen', 'demo:zugangsdaten_gesendet'].sort(),
+      ['demo:send_failed', 'demo:credentials_sent'].sort(),
     );
   });
 });

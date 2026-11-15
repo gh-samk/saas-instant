@@ -846,9 +846,9 @@ describe('[K4] Eine Sperre lässt sich nicht abschwächen', () => {
     });
     const last = JSON.stringify(entries[entries.length - 1]);
     // Der Eintrag darf NICHT aussehen wie eine gelungene Herabstufung.
-    expect(last).toContain('"abgeschwaechtAbgewiesen":true');
-    expect(last).toContain('"status":"spam_gemeldet"');
-    expect(last).toContain('"gemeldet":"abgemeldet"');
+    expect(last).toContain('"weakenedRefused":true');
+    expect(last).toContain('"status":"spam_reported"');
+    expect(last).toContain('"reported":"unsubscribed"');
   });
 
   /**

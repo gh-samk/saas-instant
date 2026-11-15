@@ -12,7 +12,7 @@ import { FeatureFlagService } from './feature-flag.service';
  * alle paar Minuten nach; so muss die Verwaltung für einen Schalter nichts auf
  * eine Instanz schreiben (R1).
  *
- * BEWUSST NICHT UNTER `/api/oeffentlich`: Dort gilt der Anfrage-Schlüssel, und
+ * BEWUSST NICHT UNTER `/api/public`: Dort gilt der Anfrage-Schlüssel, und
  * `inquiry-tracker.ts` zählt diesen Pfad nach der Proxy-Kette der Webseite.
  *
  * Das Limit ist großzügig, weil alle Instanzen desselben Servers mit EINER

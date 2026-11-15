@@ -17,7 +17,7 @@ import { htmlFromText } from './sanitizer';
  * und wurde in `style="…"` eingesetzt. Im Rohtext stand die Schriftliste
  * vollständig da — jeder `toContain`-Test war grün. Der HTML-Parser sah etwas
  * anderes: Das `style`-Attribut endete nach `BlinkMacSystemFont, `, und
- * Schriftgrösse, Zeilenhöhe, Fettung und die Markenfarbe `#3a7d6b` lagen als
+ * Schriftgrösse, Zeilenhöhe, Fettung und die Akzentfarbe `#0369a1` lagen als
  * Attributmüll daneben. Die Wortmarke im Kopf war weder grün noch fett.
  *
  * Gefunden wurde das am tatsächlich versendeten Ergebnis (Mailpit), nicht am
@@ -133,7 +133,7 @@ describe('Das gerahmte Dokument, wie ein Parser es liest', () => {
     expect(foot).toContain(`color:${MAIL_TOKENS.textMuted}`);
     expect(foot).toContain('font-size:12.5px');
     // Die Fusszeile steht auf EIGENER Fläche, nicht nur hinter einer Linie.
-    expect(foot).toContain('background-color:#fbfcfb');
+    expect(foot).toContain('background-color:#fbfcfe');
   });
 
   /**

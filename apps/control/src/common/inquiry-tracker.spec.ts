@@ -159,7 +159,7 @@ describe('inquiryHopsFrom', () => {
  * ===========================================================================
  *
  * Etappe 5 brachte einen zweiten unauthentifizierten Schreibweg
- * (`/api/einwilligung/anmeldung`). Er stand nicht in der Pfadliste und fiel
+ * (`/api/consent/subscription`). Er stand nicht in der Pfadliste und fiel
  * deshalb auf `req.ip` zurück — bei `CONTROL_TRUST_PROXY=2` die Adresse eines
  * Proxys. Alle Besucher der Webseite teilten sich damit weltweit ein
  * Kontingent von fünf Eintragungen je Minute.
@@ -194,7 +194,7 @@ describe('[K2] Jeder öffentliche Schreibweg zählt gegen den richtigen Zähler'
    *
    * Die erste Fassung prüfte nur eine Richtung: „jeder Schlüssel-Controller
    * hat einen Eintrag". Damit war ein zu BREITER Eintrag unsichtbar — und
-   * genau das ist passiert: `/api/einwilligung` als Präfix deckte auch
+   * genau das ist passiert: `/api/consent` als Präfix deckte auch
    * Bestätigung, Abmeldung und Sperre ab, deren echte Proxy-Kette kürzer ist.
    * Zwei erfundene `X-Forwarded-For`-Einträge genügten dort für ein frisches
    * Kontingent bei jeder Anfrage.

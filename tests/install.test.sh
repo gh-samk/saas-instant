@@ -68,6 +68,11 @@ check "portal: bin add legt weitere an (Start nicht möglich, daher nur Modus-Pr
 check_not "portal: Moduswechsel auf single verweigert" "$P/install.sh" --dir "$P" --mode single --software gamma --non-interactive --no-start --yes
 check_not "ungültige Kennung abgelehnt" "$P/install.sh" --dir "$P" --software 'Bad Slug' --non-interactive --no-start --yes
 check "portal: Dateien der Portal-Seite" test -f "$P/apps/portal/index.html" -a -f "$P/apps/portal/nginx.conf" -a -f "$P/apps/portal/Dockerfile" -a -f "$P/apps/portal/docker-compose.portal.yml"
+check "portal: Tokens, Schrift und Lizenz vorhanden" test -f "$P/apps/portal/tokens.css" -a -f "$P/apps/portal/fonts/inter-latin-wght-normal.woff2" -a -f "$P/apps/portal/fonts/LICENSE-Inter.txt"
+check "portal: Dockerfile liefert Tokens und Schrift mit" bash -c "grep -q 'tokens.css' '$P/apps/portal/Dockerfile' && grep -q 'COPY fonts/' '$P/apps/portal/Dockerfile'"
+check "portal: CSP erlaubt Schrift nur von self" grep -q "font-src 'self'" "$P/apps/portal/security-headers.conf"
+check "portal: keine externen Quellen in Seite und Styles" bash -c "! grep -Eq 'https?://|//fonts\\.' '$P/apps/portal/index.html' '$P/apps/portal/tokens.css' '$P/apps/portal/style.css'"
+check "portal: lang=de und Skip-Link" bash -c "grep -q '<html lang=\"de\"' '$P/apps/portal/index.html' && grep -q 'class=\"skip\"' '$P/apps/portal/index.html'"
 
 if [ "$FAILS" -ne 0 ]; then printf '%s Prüfung(en) fehlgeschlagen\n' "$FAILS" >&2; exit 1; fi
 echo "Alle Prüfungen bestanden."

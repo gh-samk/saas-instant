@@ -63,11 +63,11 @@ import { KEY_HEADER, keyMatches } from '../public/key';
  * ===========================================================================
  *
  * EINE LISTE UND KEINE KONSTANTE — das war [K2]. Als mit Etappe 5 der zweite
- * öffentliche Schreibweg dazukam (`/api/einwilligung/anmeldung`), fiel er auf
+ * öffentliche Schreibweg dazukam (`/api/consent/subscription`), fiel er auf
  * `req.ip` zurück; bei `CONTROL_TRUST_PROXY=2` teilten sich damit alle
  * Besucher der Webseite weltweit ein Kontingent von fünf Anfragen je Minute.
  *
- * DIE LISTE WAR DANACH ZU BREIT — das war [W7]. `/api/einwilligung` als
+ * DIE LISTE WAR DANACH ZU BREIT — das war [W7]. `/api/consent` als
  * PRÄFIX deckte auch Bestätigung, Abmeldung und die Sperrroute ab. Die kommen
  * NICHT über das Webseiten-nginx: Ein Bestätigungslink wird direkt aus dem
  * Postfach angeklickt, die Ein-Klick-Abmeldung ruft der Mailclient selbst auf,

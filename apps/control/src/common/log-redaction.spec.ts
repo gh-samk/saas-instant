@@ -8,7 +8,7 @@ import { KEY_HEADER } from '../public/key';
  * WAS OHNE DIESEN TEST PASSIERT IST (Produktionslog, 07.09.2026):
  *
  * Die `redact`-Liste deckte Cookie, CSRF-Header und `set-cookie` ab — aber
- * nicht `x-anfrage-schluessel`. Bei JEDEM `POST /api/oeffentlich/anfrage`
+ * nicht `x-inquiry-key`. Bei JEDEM `POST /api/public/inquiry`
  * schrieb der Request-Logger daher den vollständigen Header-Satz samt dem
  * Geheimnis, mit dem sich das nginx der Webseite bei der Verwaltung ausweist.
  * Wer es hat, kann beliebige Anfragen einliefern. Es liegt bewusst ausserhalb

@@ -9,7 +9,7 @@ import { KEY_HEADER } from '../public/key';
  * WARUM ALS EIGENE DATEI ([Log-Leck 07.09.2026]): Solange die Liste im
  * `LoggerModule.forRoot(…)` stand, liess sie sich nicht pruefen — kein Test
  * kam an sie heran, und die Luecke fiel erst im Produktionslog auf. Der
- * `x-anfrage-schluessel` stand dort bei JEDEM `POST /api/oeffentlich/anfrage`
+ * `x-inquiry-key` stand dort bei JEDEM `POST /api/public/inquiry`
  * im Klartext. Getrennt liegend ist sie testbar: `log-redaktion.spec.ts`
  * schickt eine echte Anfrage durch einen echten pino-Logger und liest mit,
  * was herauskommt.

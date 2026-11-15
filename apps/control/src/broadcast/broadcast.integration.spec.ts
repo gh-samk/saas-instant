@@ -920,12 +920,12 @@ describe('Fortschritt eines Versands', () => {
 
     const state = await queue.progress(template.id);
     expect(Object.keys(state).sort()).toEqual([
-      'rejected',
       'failed',
-      'total',
       'open',
+      'refused',
       'sent',
       'templateId',
+      'total',
     ]);
     const raw = JSON.stringify(state);
     expect(raw).not.toContain('@');

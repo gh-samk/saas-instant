@@ -161,6 +161,30 @@ describe('Absenderadressen', () => {
     ).not.toThrow();
   });
 
+  it('lässt eine frische Installation ohne eingerichtete Absender in Produktion starten', () => {
+    const addresses = {
+      domain: 'example.com',
+      admin: '',
+      invoice: '',
+      broadcast: '',
+      returnPath: '',
+    } as ReturnType<typeof senderAddresses>;
+    expect(() => checkSenderAlignment('production', addresses)).not.toThrow();
+  });
+
+  it('prüft eine einzelne gesetzte Adresse weiter streng, auch wenn die anderen leer sind', () => {
+    const addresses = {
+      domain: 'example.com',
+      admin: '',
+      invoice: 'R <rechnung@anderswo.example.net>',
+      broadcast: '',
+      returnPath: '',
+    } as ReturnType<typeof senderAddresses>;
+    expect(() => checkSenderAlignment('production', addresses)).toThrow(
+      /MAIL_SENDER_INVOICE/,
+    );
+  });
+
   it('nimmt eine abweichende, aber einheitliche Domäne an', () => {
     const addresses = senderAddresses(
       config({

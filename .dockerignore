@@ -1,0 +1,17 @@
+# Nichts davon gehört in ein Image (Geheimnisse, lokale Builds, Betriebsdaten).
+.git
+**/node_modules
+**/dist
+**/dist-web
+**/.env
+**/.env.*
+!**/.env.example
+installations
+portal/registry.json
+portal/portal.env
+.saas-instant-mode
+backups
+docs/screenshots
+**/*.log
+.DS_Store
+**/*.tsbuildinfo

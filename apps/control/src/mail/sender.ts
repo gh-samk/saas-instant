@@ -199,8 +199,12 @@ export function checkSenderAlignment(
     ['MAIL_SENDER_BROADCAST', addresses.broadcast],
     ['MAIL_RETURN_PATH', addresses.returnPath],
   ];
+  // Leer = Mail ist noch nicht eingerichtet (frische Installation ohne SMTP).
+  // Das ist kein Ausrichtungsfehler und darf den Start nicht verhindern; wer
+  // eine Adresse einträgt, wird weiter streng geprüft.
   const wrong = toCheck.filter(
-    ([, value]) => domainFrom(value) !== addresses.domain,
+    ([, value]) =>
+      value.trim() !== '' && domainFrom(value) !== addresses.domain,
   );
   if (wrong.length === 0) return;
   throw new Error(

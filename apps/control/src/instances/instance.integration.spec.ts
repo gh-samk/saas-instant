@@ -467,7 +467,7 @@ describe('Archivieren — stoppen, sichern, nichts löschen', () => {
       where: { companyId: company.id, bySystem: true },
     });
     expect(notes).toHaveLength(1);
-    expect(notes[0].text).toContain('archived');
+    expect(notes[0].text).toContain('archiviert');
     expect(notes[0].text).toContain('nichts gelöscht');
   });
 
@@ -837,7 +837,7 @@ describe('Der Aufbau liest die Compose-Datei durch ein erstes Ausrollen', () => 
     const end = await untilEnd(company.id);
     expect(end.status).toBe('provisioning');
     expect(end.message).toContain('Compose-Datei');
-    expect(end.message).toContain('instanz-compose-nie');
+    expect(end.message).toContain('instance-compose-nie');
     // Die Domäne wurde versucht, aber nie angenommen.
     expect(coolify.applicationsList.every((a) => a.domains.length === 0)).toBe(true);
     expect(coolify.calls.filter((a) => a === 'startDeploy')).toHaveLength(1);
@@ -882,7 +882,7 @@ describe('Verwerfen nach dem Aufräumen in Coolify', () => {
     const { service, company } = await halfCreated('halb-steht');
     await expect(
       service.discardCreation(company.id, ACTOR, SOURCE),
-    ).rejects.toThrow(/instanz-halb-steht/);
+    ).rejects.toThrow(/instance-halb-steht/);
     expect(
       await prisma.instance.findUnique({ where: { companyId: company.id } }),
     ).not.toBeNull();
@@ -1029,7 +1029,7 @@ describe('Jeder Ausgang des Aufbaus hat einen Weg nach vorn', () => {
       'das gescheiterte Deployment ist vermerkt',
     );
     expect(await message(company.id)).toContain('Deployment endete');
-    expect(await message(company.id)).toContain('instanz-deploy-kaputt');
+    expect(await message(company.id)).toContain('instance-deploy-kaputt');
   });
 
   it('lässt eine späte Instanz auf „ausstehend" — und „Erneut prüfen" macht sie aktiv', async () => {

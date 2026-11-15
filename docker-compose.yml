@@ -77,6 +77,11 @@ services:
       SMTP_TLS_ERZWINGEN: ${SMTP_TLS_ERZWINGEN:-1}
       CONTROL_INQUIRY_KEY: ${CONTROL_INQUIRY_KEY:-}
       CONTROL_INQUIRY_RECIPIENT: ${CONTROL_INQUIRY_RECIPIENT:-}
+      # Eintraege von rechts in X-Forwarded-For bis zum Formularbesucher auf dem
+      # oeffentlichen Anfrageweg (Rueckfall; Vorrang hat x-sender-ip der Webseite).
+      # Hier: Webseiten-nginx -> control-web -> API = 2, ohne zweiten Traefik. Die
+      # Coolify-Referenz hat zwei Traefik in der Kette und deshalb 4; steht vor
+      # dem Webseiten-nginx ein TLS-Proxy, ist es 3. Siehe docs/installation.md.
       CONTROL_INQUIRY_TRUST_PROXY: ${CONTROL_INQUIRY_TRUST_PROXY:-2}
       CONTROL_SCHEDULE_ENABLED: ${CONTROL_SCHEDULE_ENABLED:-ja}
 

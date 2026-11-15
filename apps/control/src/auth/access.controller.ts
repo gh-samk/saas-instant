@@ -326,7 +326,7 @@ export class AccessController {
   /**
    * Betriebsstand des Postausgangs — hinter der Sitzung.
    *
-   * Gehörte früher an `/api/gesundheit`; dort war er anonym abfragbar und damit
+   * Gehörte früher an `/api/health`; dort war er anonym abfragbar und damit
    * ein Kontoverzeichnis auf Zuruf ([K2]). Hier ist er das, was er sein soll:
    * eine Betriebsanzeige für die Betreiberin. `letzterFehler.klasse` ist eine
    * feste Kategorie, niemals der Wortlaut des Relays.

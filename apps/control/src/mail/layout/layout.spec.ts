@@ -368,7 +368,7 @@ describe('Der Rahmen benutzt die Farben des Projekts', () => {
     expect(mail.html).toContain(MAIL_FONT);
     // Die Webfonts der Anwendung kommen in einer Mail nie an.
     expect(mail.html).not.toContain('Hanken Grotesk');
-    expect(mail.html).not.toContain('Source Serif');
+    expect(mail.html).not.toMatch(/Source\sSerif/);
   });
 });
 

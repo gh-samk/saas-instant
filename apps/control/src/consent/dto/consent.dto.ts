@@ -19,7 +19,7 @@ import {
  * „Ein Formular, das nach der Demo fragt und nebenbei den Newsletter
  * einsammelt, ist der Fall, der abgemahnt wird."
  *
- * Deshalb gibt es diesen Endpunkt getrennt von `POST /api/oeffentlich/anfrage`
+ * Deshalb gibt es diesen Endpunkt getrennt von `POST /api/public/inquiry`
  * und deshalb nimmt die Anfrage-Route keinerlei Newsletter-Feld entgegen.
  * Beides zusammenzulegen wäre ein Handgriff und genau der falsche: Wer eine
  * Demo will, hat damit nicht in Werbung eingewilligt, und ein vorbelegtes oder
