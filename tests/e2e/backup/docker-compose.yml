@@ -1,0 +1,121 @@
+# E2E-Suite "backup": Agent-Stack (Projekt si-e2e-backup). Alles mit Label e2e=true.
+# Start: docker compose -p si-e2e-backup -f docker-compose.yml up -d --build --wait
+# Zugangsdaten und Geheimnisse kommen NUR aus der Umgebung des Laufs (zufällig je Lauf).
+name: si-e2e-backup
+
+x-label: &label
+  e2e: "true"
+  e2e.suite: backup
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${E2E_MINIO_USER:?}
+      MINIO_ROOT_PASSWORD: ${E2E_MINIO_PASSWORD:?}
+    ports:
+      - "127.0.0.1:19000:9000"
+    volumes:
+      - minio-data:/data
+    labels: *label
+
+  sftp:
+    # Ersatz für die Storage Box (SFTP). Neuer Container = neuer Host-Key (für den Pinning-Test).
+    image: atmoz/sftp:alpine
+    command: ["${E2E_SFTP_USER:?}:${E2E_SFTP_PASSWORD:?}:::upload"]
+    ports:
+      - "127.0.0.1:12222:22"
+    labels: *label
+
+  docker-socket-proxy:
+    # Allowlist wie im Haupt-Compose (docker-compose.yml): nur Container ansehen/starten/stoppen + Exec.
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: "1"
+      EXEC: "1"
+      POST: "1"
+      IMAGES: "0"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      SERVICES: "0"
+      SWARM: "0"
+      TASKS: "0"
+      SECRETS: "0"
+      CONFIGS: "0"
+      PLUGINS: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      AUTH: "0"
+      SYSTEM: "0"
+      NODES: "0"
+      DISTRIBUTION: "0"
+      EVENTS: "0"
+      INFO: "0"
+      SESSION: "0"
+      VERSION: "1"
+      PING: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # PRODUKTFEHLER im Haupt-Compose: dort steht "read_only: true" fuer diesen Dienst, aber das
+    # Entrypoint des Images (0.3.0) schreibt /usr/local/etc/haproxy/haproxy.cfg ("Read-only file system",
+    # Container beendet sich mit Exit 1). Hier deshalb ohne read_only; cap_drop/no-new-privileges bleiben.
+    tmpfs:
+      - /run
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - docker-api
+    labels: *label
+
+  backup-agent:
+    build:
+      context: ../../..
+      dockerfile: apps/backup-agent/Dockerfile
+    environment:
+      PORT: "8787"
+      STATE_DIR: /state
+      WORK_DIR: /state/work
+      BACKUP_AGENT_SECRET: ${E2E_AGENT_SECRET:?}
+      AGENT_STATE_KEY: ${E2E_AGENT_STATE_KEY:?}
+      BACKUP_REPORT_KEY: ${E2E_REPORT_KEY:?}
+      # Die Control-API läuft als Prozess auf dem Host (Port 13001), ihre Datenbank auf si-test-db.
+      CONTROL_URL: http://host.docker.internal:13001
+      CONTROL_DATABASE_URL: ${E2E_CONTROL_DATABASE_URL:?}
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      AGENT_COMPOSE_PROJECT: si-e2e-backup
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:18787:8787"
+    volumes:
+      - backup-agent-state:/state
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - default
+      - docker-api
+    depends_on:
+      - docker-socket-proxy
+    labels: *label
+
+volumes:
+  minio-data:
+    labels: *label
+  backup-agent-state:
+    labels: *label
+
+networks:
+  default:
+    labels: *label
+  docker-api:
+    internal: true
+    labels: *label

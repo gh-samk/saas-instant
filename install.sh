@@ -11,8 +11,8 @@
 #   portal : mehrere Verwaltungen (je eigene Datenbank und Anmeldung) plus ein
 #            schlankes Portal (Liste + Links, keine Kundendaten, keine Anmeldung).
 #
-# Aufruf:  ./install.sh [--mode single|portal] [--software <slug>] [--dir <pfad>]
-#                       [--host <name>] [--non-interactive] [--dry-run] [--no-start] [--yes]
+# Aufruf:  ./install.sh [--mode single|portal] [--software <slug>] [--name "<Name>"]
+#                       [--dir <pfad>] [--host <name>] [--non-interactive] [--dry-run] [--no-start] [--yes]
 #
 # --dry-run   zeigt nur, was geschähe. Es wird NICHTS geschrieben, auch kein
 #             Modus-Lock, und nichts gestartet.
@@ -24,6 +24,7 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SRC_DIR"
 MODE=""
 SLUG=""
+NAME=""
 HOST="localhost"
 NON_INTERACTIVE=0
 DRY_RUN=0
@@ -40,6 +41,8 @@ Verwendung: ./install.sh [Optionen]
 
   --mode single|portal   Betriebsart (nur bei der Erstinstallation wählbar)
   --software <slug>      Kennung der Software (a-z, 0-9, Bindestrich)
+  --name "<Name>"        Anzeigename der Software (kommt als product.name ins Manifest;
+                         beliebiger Text, 1 bis 200 Zeichen, ohne Steuerzeichen)
   --dir <pfad>           Zielverzeichnis (Vorgabe: Ordner dieses Skripts)
   --host <name>          Hostname für die Adressen (Vorgabe: localhost)
   --non-interactive      Keine Rückfragen; --mode und --software sind Pflicht
@@ -55,6 +58,7 @@ while [ $# -gt 0 ]; do
     --mode) [ $# -ge 2 ] || die "--mode braucht einen Wert."; MODE="$2"; shift 2 ;;
     --software) [ $# -ge 2 ] || die "--software braucht einen Wert."; SLUG="$2"; shift 2 ;;
     --dir) [ $# -ge 2 ] || die "--dir braucht einen Wert."; ROOT_DIR="$2"; shift 2 ;;
+    --name) [ $# -ge 2 ] || die "--name braucht einen Wert."; NAME="$2"; shift 2 ;;
     --host) [ $# -ge 2 ] || die "--host braucht einen Wert."; HOST="$2"; shift 2 ;;
     --non-interactive) NON_INTERACTIVE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -85,6 +89,16 @@ confirm() {
   local answer
   read -r -p "$1 [j/N]: " answer || answer=""
   case "$answer" in j|J|y|Y|ja|Ja|yes) return 0 ;; *) return 1 ;; esac
+}
+
+# Der Name landet als YAML-Text im Manifest und als JSON-Text in der Registry.
+# Er wird NIE von einer Shell oder von sed ausgewertet (nur als Variable,
+# per awk/ENVIRON eingesetzt); Steuerzeichen (Zeilenumbruch!) sind verboten.
+valid_name() {
+  [ -n "$1" ] || return 1
+  [ "${#1}" -le 200 ] || return 1
+  case "$1" in *[[:cntrl:]]*) return 1 ;; esac
+  [[ "$1" =~ [^[:space:]] ]]
 }
 
 valid_slug() { [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$ ]]; }
@@ -154,6 +168,10 @@ if [ -z "$SLUG" ]; then
 fi
 valid_slug "$SLUG" || die "Ungültige Kennung '$SLUG'. Erlaubt: a-z, 0-9, Bindestrich (1 bis 40 Zeichen)."
 
+if [ -n "$NAME" ]; then
+  valid_name "$NAME" || die "Ungültiger Name. Erlaubt: 1 bis 200 Zeichen, nicht nur Leerraum, keine Steuerzeichen (auch kein Zeilenumbruch)."
+fi
+
 TARGET="$INSTALL_DIR/$SLUG"
 EXISTING=0
 [ -f "$TARGET/.env" ] && EXISTING=1
@@ -165,7 +183,7 @@ if [ "$MODE" = "single" ] && [ "$EXISTING" -eq 0 ] && [ -d "$INSTALL_DIR" ]; the
   done
 fi
 
-info "Modus: $MODE | Software: $SLUG | Verzeichnis: $TARGET"
+info "Modus: $MODE | Software: $SLUG${NAME:+ | Name: $NAME} | Verzeichnis: $TARGET"
 confirm "Fortfahren?" || die "Abgebrochen."
 
 # --- Trockenlauf: hier endet er, es wurde nichts geschrieben -----------------
@@ -214,6 +232,10 @@ else
     printf 'CONTROL_POSTGRES_PASSWORD=%s\n' "$(secret 24)"
     printf 'JWT_SECRET=%s\n' "$(secret 32)"
     printf 'CONTROL_CONFIG_KEY=%s\n' "$(secret 32)"
+    printf '# Sicherungen: Verwaltung <-> Backup-Agent (nur im Compose-Netz).\n'
+    printf 'BACKUP_AGENT_SECRET=%s\n' "$(secret 32)"
+    printf 'AGENT_STATE_KEY=%s\n' "$(secret 32)"
+    printf 'BACKUP_REPORT_KEY=%s\n' "$(secret 32)"
     printf 'MANIFEST_FILE=%s\n' "$TARGET/saas-instant.manifest.yaml"
   } > "$TARGET/.env"
   chmod 600 "$TARGET/.env"
@@ -224,9 +246,26 @@ if [ ! -f "$TARGET/saas-instant.manifest.yaml" ]; then
   EXAMPLE="$SRC_DIR/saas-instant.manifest.example.yaml"
   [ -f "$EXAMPLE" ] || EXAMPLE="$ROOT_DIR/saas-instant.manifest.example.yaml"
   [ -f "$EXAMPLE" ] || die "Beispielmanifest saas-instant.manifest.example.yaml nicht gefunden."
-  sed "s/^\\( *slug:\\) *mein-produkt\\(.*\\)\$/\\1 $SLUG\\2/" "$EXAMPLE" > "$TARGET/saas-instant.manifest.yaml"
+  # Slug und (optional) Name im Abschnitt `product:` setzen. Die Werte gehen
+  # per Umgebung an awk (ENVIRON), nicht per Quoting in ein Skript: Anführungszeichen,
+  # Backticks, $(...) und Backslashes im Namen bleiben reiner Text. Im YAML steht der
+  # Name in doppelten Anführungszeichen, `\` und `"` sind maskiert.
+  NAME_YAML="${NAME//\\/\\\\}"
+  NAME_YAML="${NAME_YAML//\"/\\\"}"
+  MF_SLUG="$SLUG" MF_NAME="$NAME_YAML" awk '
+    BEGIN { slug = ENVIRON["MF_SLUG"]; name = ENVIRON["MF_NAME"] }
+    /^product:/ { inproduct = 1; print; next }
+    /^[^ \t#]/ { inproduct = 0 }
+    inproduct && /^[ \t]+slug:/ { sub(/slug:[ \t]*[^ \t#]+/, "slug: " slug); print; next }
+    inproduct && name != "" && /^[ \t]+name:/ {
+      match($0, /^[ \t]+/); print substr($0, 1, RLENGTH) "name: \"" name "\""; next
+    }
+    { print }
+  ' "$EXAMPLE" > "$TARGET/saas-instant.manifest.yaml"
   chmod 644 "$TARGET/saas-instant.manifest.yaml"
   info "Angelegt: $TARGET/saas-instant.manifest.yaml (bitte anpassen)"
+elif [ -n "$NAME" ]; then
+  warn "Das Manifest von '$SLUG' besteht bereits und bleibt unverändert; --name wurde nicht übernommen (product.name dort von Hand ändern)."
 fi
 
 # Basisdomain der Instanzen aus dem Manifest in die .env übernehmen. Compose
@@ -249,7 +288,16 @@ write_registry() {
   mkdir -p "$PORTAL_DIR"
   local tmp="$PORTAL_DIR/registry.json.tmp" first=1 f s p h n m
   {
-    printf '{\n  "entries": [\n'
+    printf '{\n'
+    # Optionaler Seitentitel des Portals: PORTAL_TITLE (Umgebung) oder der Titel
+    # der bisherigen Registry. In JSON bleiben nur unkritische Zeichen übrig.
+    local title="${PORTAL_TITLE:-}"
+    if [ -z "$title" ] && [ -f "$PORTAL_DIR/registry.json" ]; then
+      title="$(sed -n 's/^  "title": "\(.*\)",$/\1/p' "$PORTAL_DIR/registry.json" | head -n 1)"
+    fi
+    title="$(printf '%s' "$title" | tr -d '[:cntrl:]' | tr -d "\"'" | tr -d '\\' | cut -c1-80)"
+    [ -z "$title" ] || printf '  "title": "%s",\n' "$title"
+    printf '  "entries": [\n'
     for f in "$INSTALL_DIR"/*/.env; do
       [ -f "$f" ] || continue
       s="$(sed -n 's/^SAAS_INSTANT_SLUG=//p' "$f" | head -n 1)"
@@ -260,7 +308,10 @@ write_registry() {
       m="$(dirname "$f")/saas-instant.manifest.yaml"
       n=""
       if [ -f "$m" ]; then
-        n="$(sed -n '/^product:/,/^[^ #]/p' "$m" | sed -n 's/^ *name: *//p' | head -n 1 | sed 's/ *#.*$//' | tr -d '\r' | tr -d "\"'" | tr -d '\\')"
+        n="$(sed -n '/^product:/,/^[^ #]/p' "$m" | sed -n 's/^ *name: *//p' | head -n 1 | tr -d '\r')"
+        # In Anführungszeichen: Inhalt bis zum letzten ", sonst bis zu einem Kommentar.
+        if [[ "$n" =~ ^\"(.*)\"[[:space:]]*(#.*)?$ ]]; then n="${BASH_REMATCH[1]}"; else n="${n%%[[:space:]]#*}"; fi
+        n="$(printf '%s' "$n" | tr -d '[:cntrl:]' | tr -d "\"'" | tr -d '\\' | cut -c1-200)"
       fi
       [ -n "$n" ] || n="$s"
       [ "$first" -eq 1 ] || printf ',\n'

@@ -38,9 +38,18 @@ check "single: .env vorhanden" test -f "$S/installations/alpha/.env"
 check ".env hat Rechte 600" test "$(perm "$S/installations/alpha/.env")" = 600
 check "Manifest kopiert" test -f "$S/installations/alpha/saas-instant.manifest.yaml"
 check "Manifest trägt die Kennung" grep -q 'slug: alpha' "$S/installations/alpha/saas-instant.manifest.yaml"
-for v in JWT_SECRET CONTROL_CONFIG_KEY CONTROL_POSTGRES_PASSWORD; do
+for v in JWT_SECRET CONTROL_CONFIG_KEY CONTROL_POSTGRES_PASSWORD BACKUP_AGENT_SECRET AGENT_STATE_KEY BACKUP_REPORT_KEY; do
   check "$v ist gesetzt und lang" grep -Eq "^$v=[0-9a-f]{32,}\$" "$S/installations/alpha/.env"
 done
+check "Backup-Geheimnisse sind verschieden" bash -c "[ \$(grep -E '^(BACKUP_AGENT_SECRET|AGENT_STATE_KEY|BACKUP_REPORT_KEY|JWT_SECRET)=' '$S/installations/alpha/.env' | cut -d= -f2 | sort -u | wc -l) -eq 4 ]"
+check "Compose: CONTROL_BACKUP_KEY der control-api kommt aus BACKUP_REPORT_KEY (ein Geheimnis)" grep -qF 'CONTROL_BACKUP_KEY: ${BACKUP_REPORT_KEY:?' "$REPO/docker-compose.yml"
+check_not "Compose: CONTROL_BACKUP_KEY nicht mehr leer durchgereicht" grep -Eq '^ +CONTROL_BACKUP_KEY: *$' "$REPO/docker-compose.yml"
+check "Compose: Agent und Verwaltung lesen denselben .env-Wert BACKUP_REPORT_KEY" bash -c "[ \$(grep -c 'BACKUP_REPORT_KEY:?' '$REPO/docker-compose.yml') -eq 3 ] && [ \$(grep -c '^BACKUP_REPORT_KEY=' '$S/installations/alpha/.env') -eq 1 ] && ! grep -q '^CONTROL_BACKUP_KEY=' '$S/installations/alpha/.env'"
+check "Compose: backup-agent ohne ports, mit cap_drop und State-Volume" bash -c "awk '/^  backup-agent:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' > '$TMP/agent.yml'; ! grep -q 'ports:' '$TMP/agent.yml' && grep -q 'cap_drop' '$TMP/agent.yml' && grep -q 'backup-agent-state:/state' '$TMP/agent.yml' && grep -q 'read_only: true' '$TMP/agent.yml'"
+check "Compose: Docker-Socket nur im docker-socket-proxy gemountet" bash -c "[ \$(grep -c 'docker\.sock' '$REPO/docker-compose.yml') -eq 1 ] && awk '/^  docker-socket-proxy:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' | grep -q 'docker.sock:ro'"
+check "Compose: docker-socket-proxy mit Allowlist, ohne ports" bash -c "awk '/^  docker-socket-proxy:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' > '$TMP/proxy.yml'; ! grep -q 'ports:' '$TMP/proxy.yml' && grep -q 'CONTAINERS: \"1\"' '$TMP/proxy.yml' && grep -q 'EXEC: \"1\"' '$TMP/proxy.yml' && grep -q 'IMAGES: \"0\"' '$TMP/proxy.yml' && grep -q 'VOLUMES: \"0\"' '$TMP/proxy.yml' && grep -q 'NETWORKS: \"0\"' '$TMP/proxy.yml' && grep -q 'SWARM: \"0\"' '$TMP/proxy.yml'"
+check "Compose: control-api kennt BACKUP_AGENT_URL" grep -qF 'BACKUP_AGENT_URL: ${BACKUP_AGENT_URL:-http://backup-agent:8787}' "$REPO/docker-compose.yml"
+check "Backup-Agent: Dockerfile laeuft nicht als root" bash -c "grep -q '^USER 10002' '$REPO/apps/backup-agent/Dockerfile'"
 check "Modus-Lock = single" grep -q '^mode=single$' "$S/.saas-instant-mode"
 check_not "single: kein Portal-Verzeichnis" test -e "$S/portal"
 check_not "Moduswechsel wird verweigert" "$S/install.sh" --dir "$S" --mode portal --software alpha --non-interactive --no-start --yes
@@ -50,6 +59,35 @@ check "single: add-Meldung" bash -c "'$S/bin/saas-instant' add beta 2>&1 | grep 
 check_not "single: zweite Verwaltung verweigert" "$S/install.sh" --dir "$S" --software beta --non-interactive --no-start --yes
 check "single: Wiederholung gleicher slug behält Geheimnisse" bash -c "a=\$(cat '$S/installations/alpha/.env'); '$S/install.sh' --dir '$S' --software alpha --non-interactive --no-start --yes >/dev/null; [ \"\$a\" = \"\$(cat '$S/installations/alpha/.env')\" ]"
 check "single: list" "$S/bin/saas-instant" list
+
+# --- --name: Name im Manifest, Injektionsversuche bleiben wirkungslos ---------
+N="$TMP/name"; stage "$N"
+check "name: Anlegen mit --name läuft" "$N/install.sh" --dir "$N" --mode single --software alpha --name "Meine Software" --non-interactive --no-start --yes
+check "name: product.name im Manifest" grep -q '^  name: "Meine Software"$' "$N/installations/alpha/saas-instant.manifest.yaml"
+check "name: product.slug im Manifest" grep -q '^  slug: alpha ' "$N/installations/alpha/saas-instant.manifest.yaml"
+check "name: Abschnitt mail bleibt unberührt" grep -q 'senderName: Mein Produkt' "$N/installations/alpha/saas-instant.manifest.yaml"
+check "name: .env trägt SAAS_INSTANT_SLUG" grep -q '^SAAS_INSTANT_SLUG=alpha$' "$N/installations/alpha/.env"
+
+I="$TMP/inject"; stage "$I"
+EVIL='Evil "x" `touch '"$TMP"'/pwned1` $(touch '"$TMP"'/pwned2) \ ; $HOME & #c'
+check "name: Injektionsversuch läuft ohne Fehler durch" "$I/install.sh" --dir "$I" --mode portal --software alpha --name "$EVIL" --non-interactive --no-start --yes
+check_not "name: Backticks wurden nicht ausgeführt" test -e "$TMP/pwned1"
+check_not "name: \$(...) wurde nicht ausgeführt" test -e "$TMP/pwned2"
+check "name: Manifest nur mit maskierten Anführungszeichen" grep -qF '  name: "Evil \"x\" `touch' "$I/installations/alpha/saas-instant.manifest.yaml"
+check "name: \$HOME bleibt Text" grep -qF '$HOME' "$I/installations/alpha/saas-instant.manifest.yaml"
+# YAML-Rundlauf mit dem 'yaml'-Paket der Verwaltung (wie im Betrieb); ohne installierte Pakete übersprungen.
+if (cd "$REPO/apps/control" && node -e "require('yaml')") >/dev/null 2>&1; then
+  check "name: Manifest bleibt gültiges YAML und trägt den Namen unverändert" env EVIL="$EVIL" MF="$I/installations/alpha/saas-instant.manifest.yaml" bash -c "cd '$REPO/apps/control' && node -e \"const y=require('yaml');const d=y.parse(require('fs').readFileSync(process.env.MF,'utf8'));if(d.product.name!==process.env.EVIL||d.product.slug!=='alpha'||d.mail.senderName!=='Mein Produkt')process.exit(1)\""
+else
+  printf 'skip name: YAML-Rundlauf (yaml-Paket nicht installiert)\n'
+fi
+check "name: Registry bleibt gültiges JSON" bash -c "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert len(d[\"entries\"])==1' '$I/portal/registry.json'"
+check "name: Registry nennt Slug und trägt einen bereinigten Namen" python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["entries"][0]; assert e["slug"]=="alpha"; assert "\"" not in e["name"] and "\\" not in e["name"] and e["name"].startswith("Evil")' "$I/portal/registry.json"
+check_not "name: Zeilenumbruch im Namen abgelehnt" "$I/install.sh" --dir "$I" --software beta --name $'A\nB: x' --non-interactive --no-start --yes
+check_not "name: zu langer Name abgelehnt" "$I/install.sh" --dir "$I" --software beta --name "$(printf 'x%.0s' $(seq 1 201))" --non-interactive --no-start --yes
+check_not "name: nur Leerraum abgelehnt" "$I/install.sh" --dir "$I" --software beta --name "   " --non-interactive --no-start --yes
+check "name: Registry mit Titel aus PORTAL_TITLE" env PORTAL_TITLE='Meine "Titel"' "$I/install.sh" --dir "$I" --software gamma --name "Gamma" --non-interactive --no-start --yes
+check "name: Registry trägt Titel und Name Gamma" bash -c "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d[\"title\"]==\"Meine Titel\"; assert [e[\"name\"] for e in d[\"entries\"] if e[\"slug\"]==\"gamma\"]==[\"Gamma\"]' '$I/portal/registry.json'"
 
 # --- portal ------------------------------------------------------------------
 P="$TMP/portal"; stage "$P"
@@ -73,6 +111,9 @@ check "portal: Dockerfile liefert Tokens und Schrift mit" bash -c "grep -q 'toke
 check "portal: CSP erlaubt Schrift nur von self" grep -q "font-src 'self'" "$P/apps/portal/security-headers.conf"
 check "portal: keine externen Quellen in Seite und Styles" bash -c "! grep -Eq 'https?://|//fonts\\.' '$P/apps/portal/index.html' '$P/apps/portal/tokens.css' '$P/apps/portal/style.css'"
 check "portal: lang=de und Skip-Link" bash -c "grep -q '<html lang=\"de\"' '$P/apps/portal/index.html' && grep -q 'class=\"skip\"' '$P/apps/portal/index.html'"
+check "portal: nginx liefert / aus (Verzeichnis-Index, kein 404)" grep -Eq 'try_files \$uri \$uri/ =404' "$P/apps/portal/nginx.conf"
+check "portal: Port nur an Loopback veroeffentlicht" grep -Eq '"\$\{PORTAL_BIND:-127\.0\.0\.1\}:' "$P/apps/portal/docker-compose.portal.yml"
+check "Compose: docker-socket-proxy ohne read_only (Entrypoint schreibt haproxy.cfg)" bash -c "awk '/^  docker-socket-proxy:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' | grep -vE '^\s*#' | grep -vq 'read_only'"
 
 if [ "$FAILS" -ne 0 ]; then printf '%s Prüfung(en) fehlgeschlagen\n' "$FAILS" >&2; exit 1; fi
 echo "Alle Prüfungen bestanden."

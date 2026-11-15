@@ -1,0 +1,45 @@
+# Mini-Instanz für die Suite "backup": Postgres + 'app'-Container mit Upload-Volume.
+# Aufruf je Instanz mit eigenem Projektnamen: docker compose -p si-e2e-demo1 -f demo.compose.yml up -d --wait
+# Der Backup-Agent findet die Container über die Compose-Labels (Projekt + Dienst).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${E2E_DEMO_DB_PASSWORD:?}
+      POSTGRES_DB: app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    labels:
+      e2e: "true"
+      e2e.suite: backup
+  app:
+    image: alpine:3.20
+    init: true
+    command: ["sleep", "infinity"]
+    volumes:
+      - uploads:/uploads
+    labels:
+      e2e: "true"
+      e2e.suite: backup
+
+volumes:
+  pgdata:
+    labels:
+      e2e: "true"
+      e2e.suite: backup
+  uploads:
+    labels:
+      e2e: "true"
+      e2e.suite: backup
+
+networks:
+  default:
+    labels:
+      e2e: "true"
+      e2e.suite: backup

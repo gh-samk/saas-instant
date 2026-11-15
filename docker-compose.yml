@@ -59,6 +59,10 @@ services:
       NODE_ENV: production
       PORT: "3001"
       MANIFEST_PATH: ${MANIFEST_PATH:-/app/saas-instant.manifest.yaml}
+      # Bindung an genau eine Software: install.sh schreibt den Slug in die .env.
+      # control-api bricht den Start ab, wenn er vom Manifest (product.slug) oder
+      # von der in der Datenbank gespeicherten Bindung abweicht. Leer = keine Prüfung gegen die Umgebung.
+      SAAS_INSTANT_SLUG: ${SAAS_INSTANT_SLUG:-}
       CONTROL_APP_URL: ${CONTROL_APP_URL:-http://localhost:8080}
       CONTROL_RP_ID: ${CONTROL_RP_ID:-localhost}
       CONTROL_RP_NAME: ${CONTROL_RP_NAME:-Verwaltung}
@@ -118,7 +122,18 @@ services:
       CONTROL_METRICS_FETCH_ENABLED:
       CONTROL_RECONCILIATION_ENABLED:
       CONTROL_OUTBOX_PROBE_ENABLED:
-      CONTROL_BACKUP_KEY:
+
+      # Sicherungen: Verwaltung <-> Backup-Agent (nur im Compose-Netz). Die
+      # Verwaltung signiert ihre Anfragen mit BACKUP_AGENT_SECRET; der Agent
+      # meldet fertige Sicherungen mit BACKUP_REPORT_KEY an /api/backups.
+      # install.sh erzeugt beide Werte (und AGENT_STATE_KEY fuer den Agenten).
+      BACKUP_AGENT_URL: ${BACKUP_AGENT_URL:-http://backup-agent:8787}
+      BACKUP_AGENT_SECRET: ${BACKUP_AGENT_SECRET:?BACKUP_AGENT_SECRET muss gesetzt sein}
+      BACKUP_REPORT_KEY: ${BACKUP_REPORT_KEY:?BACKUP_REPORT_KEY muss gesetzt sein}
+      # Der Agent sendet x-backup-key = BACKUP_REPORT_KEY; der Guard der
+      # Verwaltung vergleicht mit CONTROL_BACKUP_KEY. Beide sind derselbe Wert
+      # (kein zweites Geheimnis).
+      CONTROL_BACKUP_KEY: ${BACKUP_REPORT_KEY:?BACKUP_REPORT_KEY muss gesetzt sein}
 
       # Rechnungen: Preistafel, Datumsfenster, Ausstellerangaben.
       CONTROL_PRICE_TABLE:
@@ -194,6 +209,97 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Backup-Agent: verschluesselte Sicherungen der Instanzen und der Verwaltung.
+  # Kein Port nach aussen; erreichbar nur fuer control-api im Compose-Netz
+  # (HMAC-signiert, siehe apps/backup-agent). Docker-Zugriff ausschliesslich
+  # ueber den docker-socket-proxy (Allowlist), nie ueber den Socket selbst.
+  # Der Agent loescht keine Instanzen und keine Datenbanken; Rechnungsarchive
+  # (invoices/*) loescht er nie (HARTE REGEL R1).
+  backup-agent:
+    build:
+      context: .
+      dockerfile: apps/backup-agent/Dockerfile
+    environment:
+      TZ: ${APP_TIMEZONE:-Europe/Berlin}
+      PORT: "8787"
+      STATE_DIR: /state
+      WORK_DIR: /state/work
+      BACKUP_AGENT_SECRET: ${BACKUP_AGENT_SECRET:?BACKUP_AGENT_SECRET muss gesetzt sein}
+      AGENT_STATE_KEY: ${AGENT_STATE_KEY:?AGENT_STATE_KEY muss gesetzt sein}
+      BACKUP_REPORT_KEY: ${BACKUP_REPORT_KEY:?BACKUP_REPORT_KEY muss gesetzt sein}
+      CONTROL_URL: http://control-api:3001
+      CONTROL_DATABASE_URL: postgresql://control:${CONTROL_POSTGRES_PASSWORD}@control-db:5432/control
+      # Aufbewahrung der Rechnungsarchive (Object Lock) kommt aus dem
+      # Sicherungsplan der Verwaltung (retentionYears); nur Rueckfall, falls der
+      # Plan sie nicht liefert. Ungesetzt = 10 Jahre.
+      INVOICE_RETENTION_YEARS:
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      # Projektname dieses Stacks: Wiederherstellung dorthin ist ausgeschlossen.
+      AGENT_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-}
+    volumes:
+      - backup-agent-state:/state
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - default
+      - docker-api
+    depends_on:
+      - docker-socket-proxy
+      - control-db
+    restart: unless-stopped
+
+  # Einziger Dienst mit Zugriff auf den Docker-Socket (nur lesend gemountet).
+  # Allowlist: Container ansehen/starten/stoppen und Exec (fuer pg_dump,
+  # pg_restore, tar). Images, Netze, Volumes, Dienste und Swarm sind gesperrt.
+  # Lauscht nur im internen Netz docker-api, ohne ports:.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: "1"
+      EXEC: "1"
+      POST: "1"
+      IMAGES: "0"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      SERVICES: "0"
+      SWARM: "0"
+      TASKS: "0"
+      SECRETS: "0"
+      CONFIGS: "0"
+      PLUGINS: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      AUTH: "0"
+      SYSTEM: "0"
+      NODES: "0"
+      DISTRIBUTION: "0"
+      EVENTS: "0"
+      INFO: "0"
+      SESSION: "0"
+      VERSION: "1"
+      PING: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Bewusst ohne read_only: der Entrypoint des Images schreibt beim Start
+    # /usr/local/etc/haproxy/haproxy.cfg (aus der Vorlage); mit read_only
+    # startet der Dienst in einer Neustartschleife. Der Schutz bleibt ueber
+    # cap_drop, no-new-privileges, internes Netz und Allowlist.
+    tmpfs:
+      - /run
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - docker-api
+    restart: unless-stopped
+
   control-web:
     build:
       context: .
@@ -215,3 +321,10 @@ services:
 
 volumes:
   control-db-data:
+  backup-agent-state:
+
+networks:
+  # Internes Netz nur fuer den Weg Backup-Agent -> docker-socket-proxy
+  # (internal: kein Zugang nach aussen, kein anderer Dienst haengt daran).
+  docker-api:
+    internal: true
