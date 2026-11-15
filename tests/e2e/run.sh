@@ -4,7 +4,7 @@
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUITE="${1:-}"
-export E2E_OUT="${E2E_OUT:-/tmp/saas-instant-e2e}"
+export E2E_OUT="${E2E_OUT:-${TMPDIR:-/tmp}/saas-instant-e2e}"
 mkdir -p "$E2E_OUT"
 
 case "$SUITE" in

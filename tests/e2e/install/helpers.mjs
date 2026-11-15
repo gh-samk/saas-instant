@@ -11,7 +11,8 @@ import { E2E_OUT, waitFor } from '../lib/util.mjs';
 import { ROOT } from '../lib/control.mjs';
 
 export const OUT = join(E2E_OUT, 'install');
-export const PW_CORE = 'playwright-core';
+// Pfad zu playwright-core (Umgebungsvariable E2E_PLAYWRIGHT_CORE); ohne Angabe wird es aus dem Repo aufgelöst.
+export const PW_CORE = process.env.E2E_PLAYWRIGHT_CORE || 'playwright-core';
 
 /** Fehler, die ein Verhalten des PRODUKTS betreffen (nicht des Skripts). */
 export function expect(cond, msg) {

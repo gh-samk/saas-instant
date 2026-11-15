@@ -1,10 +1,9 @@
 // Gemeinsame Helfer der E2E-Suiten: Schritte, Ergebnis-JSON, Timeouts, Zustand.
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
-export const E2E_OUT =
-  process.env.E2E_OUT ||
-  '/tmp/saas-instant-e2e';
+export const E2E_OUT = process.env.E2E_OUT || join(tmpdir(), 'saas-instant-e2e');
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

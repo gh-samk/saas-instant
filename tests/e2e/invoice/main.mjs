@@ -1,13 +1,22 @@
 // Suite "invoice": Echttest der Rechnungserzeugung (ZUGFeRD + XRechnung), Validatoren, Mailversand.
 // Aufbau: Rechnungsdienst (gehärtet, 127.0.0.1:18080), Mailpit (SMTP 11025, API 18025), Control-API (13002).
-// Alle Fixtures sind frei erfunden (example.com, Musterstadt); Docker-Ressourcen tragen das Label e2e=true.
+// Der Aussteller kommt NICHT mehr aus dem Manifest, sondern per PUT /api/settings/issuer (Einstellungen -> Firmendaten):
+//  - Matrix: für jede Rechtsform unvollständig (422 issuer_incomplete mit genauer Feldliste) und vollständig
+//    (festgeschrieben, PDF/XML enthalten alle Pflichtzeilen, Name/Anschrift nicht doppelt);
+//  - Design: Logo, Akzentfarbe (auch abgelehnte Werte), öffentliche Konfiguration;
+//  - Ergebnisdateien in ${E2E_OUT}/invoice/ (ZUGFeRD-PDF, XRechnung-XML, Vorschau-PNG je Hauptrechnung).
+// Alle Fixtures sind frei erfunden (example.com, Musterstadt); Docker-Ressourcen tragen e2e=true und e2e.suite=invoice.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startControl, makeClient, ROOT } from '../lib/control.mjs';
-import { docker, run, waitHealthy, logs } from '../lib/docker.mjs';
+import { docker, run, waitHealthy } from '../lib/docker.mjs';
 import { createSuite, assert, E2E_OUT, waitFor, sleep } from '../lib/util.mjs';
-import { mailpit, sqlClient, extractAttachedXml, sha256, today, monthRange, creditorIdValid } from './helpers.mjs';
+import {
+  mailpit, sqlClient, extractAttachedXml, sha256, today, monthRange, pacer, pdfHasColor, pdfImageObjects,
+  normText, countOf, xmlUnescape,
+} from './helpers.mjs';
+import { FORMS, brokenProfile, makeLogoPng, JPEG_BYTES, spacedIban } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUITE = 'invoice';
@@ -16,6 +25,8 @@ const OUT = join(E2E_OUT, SUITE);
 const TOOLS = join(E2E_OUT, 'tools');
 mkdirSync(OUT, { recursive: true });
 mkdirSync(TOOLS, { recursive: true });
+mkdirSync(join(OUT, 'formen'), { recursive: true });
+mkdirSync(join(OUT, 'design'), { recursive: true });
 
 // ---- Festlegungen -----------------------------------------------------------------------------
 const PORT_RENDERER = 18080;
@@ -36,16 +47,13 @@ const KOSIT_CONF_VERSION = 'v2026-08-31';
 const KOSIT_JAR_URL = `https://github.com/itplr-kosit/validator/releases/download/v${KOSIT_JAR_VERSION}/validator-${KOSIT_JAR_VERSION}-standalone.jar`;
 const KOSIT_CONF_URL = `https://github.com/itplr-kosit/validator-configuration-xrechnung/releases/download/${KOSIT_CONF_VERSION}/xrechnung-3.0.2-validator-configuration-2026-08-31.zip`;
 const INQUIRY_KEY = 'e2e-inquiry-key-0123456789abcdef';
+// Jede Ressource dieser Suite trägt beide Labels: run.sh räumt nur die eigene Suite ab (E2E_CLEAN_SUITE).
+const SUITE_LABELS = ['--label', 'e2e=true', '--label', `e2e.suite=${SUITE}`];
+const ACCENT = '#0B5C8A';
+const KG = FORMS.find((f) => f.key === 'gmbh-co-kg');
+const GMBH = FORMS.find((f) => f.key === 'gmbh');
 
-// Fiktiver Aussteller. Abweichung von der Vorgabe: USt-IdNr. DE123456789 und IBAN DE02120300000000202051 sind im
-// Produkt die PLATZHALTER-Werte (isPlaceholderIssuer) und würden das Festschreiben zu Recht sperren -> andere Muster.
-const ISSUER = {
-  name: 'Beispiel GmbH & Co. KG',
-  vatId: 'DE136695976',
-  iban: 'DE89370400440532013000',
-  bic: 'COBADEFFXXX',
-  creditorId: 'DE98ZZZ09999999999',
-};
+// Das Manifest trägt nur noch Produkt, Mail und Aufbewahrung; der Aussteller kommt aus den Firmendaten.
 const MANIFEST = `product:
   name: Demo Software
   slug: demo-software
@@ -60,30 +68,6 @@ mail:
       url: https://example.com/impressum
 billing:
   retentionYears: 8
-  issuer:
-    legalForm: company
-    name: ${ISSUER.name}
-    address: Musterstraße 1, 99999 Musterstadt
-    street: Musterstraße 1
-    postalCode: "99999"
-    city: Musterstadt
-    country: DE
-    seat: Musterstadt
-    taxId: ${ISSUER.vatId}
-    email: rechnung@example.com
-    phone: "+49 30 1234567"
-    contactName: Erika Mustermann
-    creditorId: ${ISSUER.creditorId}
-    bankName: Beispielbank
-    iban: ${ISSUER.iban}
-    bic: ${ISSUER.bic}
-    registerCourt: Amtsgericht Musterstadt
-    registerNumber: HRA 99999
-    generalPartnerName: Beispiel Verwaltungs GmbH
-    generalPartnerSeat: Musterstadt
-    generalPartnerRegisterCourt: Amtsgericht Musterstadt
-    generalPartnerRegisterNumber: HRB 99999
-    managingDirectors: Erika Mustermann
 `;
 
 const PRICES = {
@@ -108,20 +92,69 @@ const finding = (t) => { ctx.productFindings.push(t); console.log(`PRODUKTFUND $
 const writeOut = (name, data) => { writeFileSync(join(OUT, name), data); return join(OUT, name); };
 
 let ctl; let ctlPh; let api; let proof; let db; let mp;
-const inv = {}; // key -> { companyId, id, number, pdf, xml, xr }
+const inv = {}; // key -> { companyId, id, number, pdf, xml, xr, label }
+ctx.docs = []; // Dokumente für die Textprüfung: { id, rel, fx, number, recipient, images, ... }
+ctx.pdfs = []; // alle erzeugten PDFs (Pfad relativ zu OUT) für veraPDF
 
-/** Aufruf mit Nachweis des zweiten Faktors im Body. */
-const withProof = async (method, path, body = {}) => api(method, path, { ...body, ...(await proof()) });
 const expectOk = (r, what) => assert(r.ok, `${what}: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 300)}`);
 
+// ---- Zweiter Faktor: Sitzung frisch halten statt bei jedem Aufruf einen TOTP-Code zu verbrauchen -----------
+// Die Control-API verlangt den Nachweis nur, wenn die Anmeldung älter als 10 Minuten ist (FRESH_SESSION_MS). Wer
+// frisch angemeldet ist, schickt keinen Code; ein roher Datei-Upload (Logo) KANN keinen im Body mitschicken. Nach
+// 7 Minuten wird neu angemeldet (ein TOTP-Schritt). Fällt die Abkürzung aus (401/403), geht es mit Nachweis weiter.
+const SESSION_FRESH_MS = 7 * 60_000;
+let sessionAt = 0;
+async function relogin() {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const sess = await ctl.login();
+      api = sess.api; proof = sess.proof; sessionAt = Date.now();
+      return;
+    } catch (e) {
+      if (attempt >= 1) throw e;
+      await sleep(31_000); // der TOTP-Schritt war schon verbraucht: ins nächste Fenster
+    }
+  }
+}
+async function prot(method, path, body, opts) {
+  if (Date.now() - sessionAt > SESSION_FRESH_MS) await relogin();
+  let r;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    r = await api(method, path, body, opts);
+    if (r.status !== 429) break;
+    await sleep((Number(r.headers?.get?.('retry-after')) || 15) * 1000 + 500);
+  }
+  const plain = body && typeof body === 'object' && !(body instanceof Uint8Array);
+  if ((r.status === 401 || r.status === 403) && plain && !('totpCode' in body)) {
+    r = await api(method, path, { ...body, ...(await proof()) }, opts);
+  }
+  return r;
+}
+/** Die Routen erlauben 10 Aufrufe je Minute; wir bleiben darunter und warten nur, wenn es nötig ist. */
+const pace = pacer({ limit: 9, windowMs: 60_000 });
+
+/** Firmendaten speichern (Entwurf: auch unvollständig erlaubt). */
+async function setIssuer(profile, accentColor = null) {
+  await pace('issuer-put');
+  return prot('PUT', '/api/settings/issuer', { profile, accentColor });
+}
+async function finalizeInv(id) {
+  await pace('finalize');
+  return prot('POST', `/api/invoices/${id}/finalize`, { confirmation: 'festschreiben' });
+}
+const fetchDoc = (path) => api('GET', path, undefined, { raw: true });
+const fieldMap = (issues) => Object.fromEntries((issues ?? []).map((i) => [i.field, i.code]));
+const sameMap = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+const PLAIN_LINE = { label: 'Demo Software – Nutzung', description: 'Monatliche Nutzung', quantity: 1, unitPriceNetCent: 4900, taxRate: 19, unit: 'MON' };
+
 const containerPort = (name, hostPort, containerPortNr, extra = []) =>
-  ['run', '-d', '--name', name, '--label', 'e2e=true', '-p', `127.0.0.1:${hostPort}:${containerPortNr}`, ...extra];
+  ['run', '-d', '--name', name, ...SUITE_LABELS, '-p', `127.0.0.1:${hostPort}:${containerPortNr}`, ...extra];
 
 try {
   // ======================================================================= Infrastruktur
   await s.step('Rechnungsdienst-Image bauen (tools/invoice-renderer)', async () => {
-    const have = await docker(['image', 'inspect', RENDERER_IMAGE], { allowFail: true });
-    if (have.code === 0 && process.env.E2E_REBUILD_RENDERER !== '1') return;
+    // IMMER bauen: Der Docker-Schichtcache macht einen unveränderten Bau billig, ein
+    // veraltetes Image (ohne Schrift Inter) dagegen ließ den Lauf still mit DejaVu rendern.
     await docker(['build', '-t', RENDERER_IMAGE, join(ROOT, 'tools', 'invoice-renderer')], { timeoutMs: 1_200_000 });
   }, { timeoutMs: 1_300_000 });
 
@@ -144,7 +177,7 @@ try {
   await s.step('Mailpit starten (SMTP 11025, API 18025)', async () => {
     await docker(['rm', '-f', C_MAILPIT], { allowFail: true });
     await docker([
-      'run', '-d', '--name', C_MAILPIT, '--label', 'e2e=true',
+      'run', '-d', '--name', C_MAILPIT, ...SUITE_LABELS,
       '-p', `127.0.0.1:${PORT_SMTP}:1025`, '-p', `127.0.0.1:${PORT_MAILPIT}:8025`, MAILPIT_IMAGE,
     ], { timeoutMs: 300_000 });
     mp = mailpit(`http://127.0.0.1:${PORT_MAILPIT}`);
@@ -152,7 +185,7 @@ try {
     await mp.clear();
   }, { timeoutMs: 330_000 });
 
-  await s.step('Control-API starten (Manifest mit Aussteller, Renderer, SMTP -> Mailpit)', async () => {
+  await s.step('Control-API starten (Manifest ohne Aussteller, Renderer, SMTP -> Mailpit)', async () => {
     writeOut('manifest.e2e.yaml', MANIFEST);
     ctl = await startControl({
       port: PORT_CONTROL, dbName: DB, suite: SUITE,
@@ -167,15 +200,22 @@ try {
     });
     db = sqlClient({ container: DB_CONTAINER, dbName: DB });
     const sess = await ctl.login();
-    api = sess.api; proof = sess.proof;
+    api = sess.api; proof = sess.proof; sessionAt = Date.now();
     const pc = await fetch(`${ctl.url}/api/public-config`).then((r) => r.json());
     note(`public-config: ${JSON.stringify(pc)}`);
+    assert(pc.accentColor === null && pc.hasLogo === false, `public-config ohne Firmendaten: ${JSON.stringify(pc)}`);
   }, { timeoutMs: 600_000 });
   if (!ctl) throw new Error('Control nicht gestartet – Abbruch der Suite');
 
+  await s.step('PDF-Textwerkzeug bereitstellen (PDFBox aus dem Rechnungsdienst-Image, Quelltext PdfText.java)', async () => {
+    const jar = join(TOOLS, 'mustang-cli.jar');
+    if (!existsSync(jar)) await docker(['cp', `${C_RENDERER}:/opt/mustang-cli.jar`, jar]);
+    assert(existsSync(jar), 'mustang-cli.jar nicht aus dem Rechnungsdienst-Image kopiert');
+  });
+
   // ======================================================================= (1) Preise
   await s.step('(1) Preisliste per Admin-API setzen (PUT mit Nachweis) und per GET prüfen', async () => {
-    const put = await withProof('PUT', '/api/settings/prices', PRICES);
+    const put = await prot('PUT', '/api/settings/prices', PRICES);
     expectOk(put, 'PUT /api/settings/prices');
     const got = await api('GET', '/api/settings/prices');
     expectOk(got, 'GET /api/settings/prices');
@@ -187,7 +227,7 @@ try {
       assert(g && g.monthlyCent === t.monthlyCent && g.setupCent === t.setupCent && g.maxPersons === t.maxPersons, `Stufe ${t.key} weicht ab`);
     }
     // Eine unstimmige Liste (zwei offene Stufen) wird abgelehnt
-    const bad = await withProof('PUT', '/api/settings/prices', {
+    const bad = await prot('PUT', '/api/settings/prices', {
       ...PRICES, tiers: [{ ...PRICES.tiers[0], maxPersons: null }, { ...PRICES.tiers[1], maxPersons: null }],
     });
     assert(bad.status === 400, `unstimmige Preisliste: HTTP ${bad.status} statt 400`);
@@ -196,7 +236,8 @@ try {
   });
 
   // ======================================================================= (2) Kunden
-  const addrBehoerde = { street: 'Amtsstraße', houseNumber: '5', postalCode: '99999', city: 'Musterstadt', country: 'DE' };
+  // Der Empfängerort ist NICHT der Ort des Ausstellers, damit "PLZ Ort" des Ausstellers im PDF genau einmal vorkommen darf.
+  const addrBehoerde = { street: 'Amtsstraße', houseNumber: '5', postalCode: '88888', city: 'Mustertal', country: 'DE' };
   const mkCompany = (extra) => ({ legalForm: 'Körperschaft', ...extra });
   await s.step('(2) Kunden anlegen: Behörde (Leitweg-ID) und Handels GmbH (USt-IdNr.)', async () => {
     const b = await api('POST', '/api/companies', mkCompany({
@@ -205,15 +246,15 @@ try {
       ...addrBehoerde, paymentInterval: 'yearly', paymentMethod: 'bank_transfer',
     }));
     expectOk(b, 'POST /api/companies (Behörde)');
-    inv.b = { companyId: b.body.id };
+    inv.b = { companyId: b.body.id, label: 'gmbh-co-kg-behoerde', fx: KG, recipient: 'Beispiel Behörde' };
     const h = await api('POST', '/api/companies', mkCompany({
       name: 'Beispiel Handels GmbH', buyerType: 'business', vatId: 'DE987654321',
       billingEmail: 'rechnung@handels.example.com', contactName: 'Petra Beispiel', contactEmail: 'kontakt@handels.example.com',
-      street: 'Handelsweg', houseNumber: '12', postalCode: '99999', city: 'Musterstadt', country: 'DE',
+      street: 'Handelsweg', houseNumber: '12', postalCode: '88888', city: 'Mustertal', country: 'DE',
       paymentInterval: 'yearly', paymentMethod: 'bank_transfer',
     }));
     expectOk(h, 'POST /api/companies (Handels GmbH)');
-    inv.h = { companyId: h.body.id };
+    inv.h = { companyId: h.body.id, label: 'gmbh-unternehmen', fx: GMBH, recipient: 'Beispiel Handels GmbH' };
     const nl = await api('POST', '/api/companies', mkCompany({
       name: 'Beispiel Behörde ohne Leitweg', buyerType: 'authority', billingEmail: 'x@behoerde.example.com',
       contactName: 'N N', contactEmail: 'n@behoerde.example.com', ...addrBehoerde, paymentInterval: 'yearly', paymentMethod: 'bank_transfer',
@@ -277,9 +318,25 @@ try {
     assert(draft.lines[0].priceTierKey === 'mittel', 'priceTierKey nicht übernommen');
   });
 
+  await s.step('(3c0) Firmendaten ab Werk sind Platzhalter: Festschreiben verweigert (invoice_issuer_placeholder); danach GmbH & Co. KG setzen', async () => {
+    const first = await api('GET', '/api/settings/issuer');
+    expectOk(first, 'GET /api/settings/issuer');
+    const r0 = await finalizeInv(inv.b.id);
+    assert(r0.status === 422, `Platzhalter-Firmendaten: HTTP ${r0.status} statt 422`);
+    assert(r0.body?.error?.code === 'invoice_issuer_placeholder', `Fehlercode ${r0.body?.error?.code}`);
+    const put = await setIssuer(KG.profile);
+    expectOk(put, 'PUT /api/settings/issuer (GmbH & Co. KG)');
+    assert(put.body.missing.length === 0, `Pflichtangaben der KG unvollständig: ${JSON.stringify(put.body.missing)}`);
+    assert(put.body.profile.name === KG.profile.name, 'Firmenname nicht gespeichert');
+    const back = await api('GET', '/api/settings/issuer');
+    assert(back.body.profile.generalPartner.name === KG.profile.generalPartner.name, 'Komplementärin nicht gespeichert');
+    const audit = await db(`SELECT count(*) FROM "AuditLog" WHERE action LIKE 'issuer%'`);
+    assert(Number(audit.out) >= 1, 'kein Audit-Eintrag zu den Firmendaten');
+  });
+
   await s.step('(3c) Behörde ohne Leitweg-ID: Festschreiben scheitert vorab (keine Nummer verbrannt)', async () => {
     const { draft } = await makeDraftFromSuggestionNoTier();
-    const r = await withProof('POST', `/api/invoices/${draft.id}/finalize`, { confirmation: 'festschreiben' });
+    const r = await finalizeInv(draft.id);
     assert(!r.ok && r.status >= 400 && r.status < 500, `erwartet 4xx, bekam ${r.status}`);
     note(`Behörde ohne Leitweg-ID: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
     const d = await api('GET', `/api/invoices/${draft.id}`);
@@ -294,9 +351,13 @@ try {
     return { draft: draft.body };
   }
 
-  await s.step('(3d) Festschreiben (Nachweis): Nummer und retentionUntil gesetzt', async () => {
+  await s.step('(3d) Festschreiben mit den Firmendaten je Rechtsform (b: GmbH & Co. KG, h: GmbH): Nummer, retentionUntil, Dokumente sofort erzeugt', async () => {
     for (const key of ['b', 'h']) {
-      const r = await withProof('POST', `/api/invoices/${inv[key].id}/finalize`, { confirmation: 'festschreiben' });
+      // Die Dokumente entstehen beim ersten Abruf aus dem AKTUELLEN Profil (Logo, Pflichtzeilen). Darum: Profil
+      // setzen, festschreiben und die Dokumente SOFORT erzeugen, bevor das Profil der nächsten Rechtsform gilt.
+      const put = await setIssuer(inv[key].fx.profile);
+      expectOk(put, `PUT /api/settings/issuer (${inv[key].fx.key})`);
+      const r = await finalizeInv(inv[key].id);
       expectOk(r, `Festschreiben ${key}`);
       assert(/^\d{4}-\d+/.test(r.body.invoiceNumber ?? ''), `Nummer ${r.body.invoiceNumber}`);
       assert(r.body.finalizedAt, 'finalizedAt fehlt');
@@ -304,11 +365,15 @@ try {
       inv[key].number = r.body.invoiceNumber;
       inv[key].retentionUntil = r.body.retentionUntil;
       inv[key].gross = r.body.grossAmount ?? r.body.total ?? null;
+      for (const kind of ['document', 'xml', 'xrechnung']) {
+        const d = await fetchDoc(`/api/invoices/${inv[key].id}/${kind}`);
+        assert(d.status === 200, `GET ${kind} ${key}: HTTP ${d.status} ${d.body.toString().slice(0, 300)}`);
+      }
     }
     const y = new Date().getUTCFullYear();
     assert(String(inv.b.retentionUntil).startsWith(String(y + 8)), `retentionUntil ${inv.b.retentionUntil} (erwartet ${y + 8}-12-31)`);
-    note(`Nummern: ${inv.b.number} (Behörde), ${inv.h.number} (Handels GmbH); retentionUntil ${inv.b.retentionUntil}`);
-  });
+    note(`Nummern: ${inv.b.number} (GmbH & Co. KG an Behörde), ${inv.h.number} (GmbH an Unternehmenskunde); retentionUntil ${inv.b.retentionUntil}`);
+  }, { timeoutMs: 400_000 });
 
   await s.step('(3e) Platzhalter-Aussteller (zweite Control-Instanz ohne Manifest) wird verweigert', async () => {
     ctlPh = await startControl({
@@ -330,8 +395,10 @@ try {
       lines: [{ label: 'Muster', quantity: 1, unitPriceNetCent: 1000, taxRate: 19, unit: 'MON' }],
     });
     expectOk(d, 'Entwurf (Platzhalter-Instanz)');
-    const r = await ph.api('POST', `/api/invoices/${d.body.id}/finalize`, { confirmation: 'festschreiben', ...(await ph.proof()) });
+    // frisch angemeldet: kein zweiter Code nötig (und kein Warten auf das nächste 30-s-Fenster)
+    const r = await ph.api('POST', `/api/invoices/${d.body.id}/finalize`, { confirmation: 'festschreiben' });
     assert(!r.ok && r.status >= 400 && r.status < 500, `Platzhalter-Aussteller: erwartet 4xx, bekam ${r.status}`);
+    assert(r.body?.error?.code === 'invoice_issuer_placeholder', `Platzhalter-Aussteller: Fehlercode ${r.body?.error?.code} (HTTP ${r.status})`);
     note(`Platzhalter-Aussteller verweigert: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
     const det = await ph.api('GET', `/api/invoices/${d.body.id}`);
     assert(det.body.invoiceNumber === null, 'Nummer trotz Platzhalter-Aussteller vergeben');
@@ -339,12 +406,9 @@ try {
   if (ctlPh) await ctlPh.stop().catch(() => {});
 
   // ======================================================================= (4) Dokumente
-  async function fetchDoc(path) {
-    const r = await api('GET', path, undefined, { raw: true });
-    return r;
-  }
   await s.step('(4) Dokumente abrufen: ZUGFeRD-PDF, Factur-X-XML, XRechnung -> Dateien, PDF-Struktur, SHA-256 gegen DB', async () => {
-    for (const [key, label] of [['b', 'behoerde'], ['h', 'handels']]) {
+    for (const key of ['b', 'h']) {
+      const label = inv[key].label;
       const pdf = await fetchDoc(`/api/invoices/${inv[key].id}/document`);
       assert(pdf.status === 200, `GET document ${key}: HTTP ${pdf.status} ${pdf.body.toString().slice(0, 300)}`);
       const xml = await fetchDoc(`/api/invoices/${inv[key].id}/xml`);
@@ -352,11 +416,15 @@ try {
       const xr = await fetchDoc(`/api/invoices/${inv[key].id}/xrechnung`);
       assert(xr.status === 200, `GET xrechnung ${key}: HTTP ${xr.status} ${xr.body.toString().slice(0, 300)}`);
       inv[key].pdf = pdf.body; inv[key].xml = xml.body; inv[key].xr = xr.body;
-      inv[key].label = label;
       mkdirSync(join(OUT), { recursive: true });
       writeFileSync(join(OUT, `rechnung-${label}.pdf`), pdf.body);
       writeFileSync(join(OUT, `rechnung-${label}.factur-x.xml`), xml.body);
       writeFileSync(join(OUT, `rechnung-${label}.xrechnung.xml`), xr.body);
+      ctx.pdfs.push(`rechnung-${label}.pdf`);
+      ctx.docs.push({
+        id: `rechnung-${label}`, rel: `rechnung-${label}.pdf`, fx: inv[key].fx, number: inv[key].number,
+        recipient: inv[key].recipient, images: 0, leitweg: key === 'b' ? '04011000-12345-67' : null,
+      });
       assert(pdf.body.subarray(0, 4).toString() === '%PDF', 'PDF beginnt nicht mit %PDF');
       assert(/<rsm:CrossIndustryInvoice|CrossIndustryInvoice/.test(xml.body.toString()), 'XML ist kein CII');
       assert(xr.body.toString().includes('xrechnung_3.0'), 'XRechnung-XML ohne Kennung xrechnung_3.0');
@@ -379,28 +447,257 @@ try {
     }
   });
 
+  // ======================================================================= (M) Matrix der Rechtsformen
+  async function createPlainDraft(companyId) {
+    const d = await api('POST', `/api/companies/${companyId}/invoices`, {
+      invoiceDate: today(), servicePeriodFrom: period.from, servicePeriodUntil: period.until,
+      introduction: 'Vielen Dank für Ihr Vertrauen. Wir berechnen Ihnen für den Leistungszeitraum:',
+      lines: [{ ...PLAIN_LINE }],
+    });
+    expectOk(d, 'Entwurf anlegen');
+    return d.body;
+  }
+  const baseName = (rel) => rel.replace(/^.*\//, '').replace(/\.pdf$/, '');
+
+  /** Text (PDFBox) und Bildzahl der PDFs, in einem Containerlauf. Liefert { [rel]: { text, images } }. */
+  async function pdfText(rels) {
+    mkdirSync(join(OUT, 'pdftext'), { recursive: true });
+    const user = typeof process.getuid === 'function' ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
+    const r = await docker([
+      'run', '--rm', ...SUITE_LABELS, ...user, '--entrypoint', 'java',
+      '-v', `${HERE}:/src:ro`, '-v', `${TOOLS}:/tools:ro`, '-v', `${OUT}:/data`, RENDERER_IMAGE,
+      '-cp', '/tools/mustang-cli.jar', '/src/PdfText.java', '/data/pdftext', ...rels.map((p) => `/data/${p}`),
+    ], { timeoutMs: 300_000 });
+    const images = {};
+    for (const m of r.stdout.matchAll(/^IMAGES (\S+) (\d+)$/gm)) images[m[1]] = Number(m[2]);
+    const fonts = {};
+    for (const m of r.stdout.matchAll(/^FONTS (\S+) (.*)$/gm)) fonts[m[1]] = m[2].trim();
+    const out = {};
+    for (const rel of rels) {
+      out[rel] = { text: readFileSync(join(OUT, 'pdftext', `${baseName(rel)}.txt`), 'utf8'), images: images[baseName(rel)], fonts: fonts[baseName(rel)] ?? '' };
+    }
+    return out;
+  }
+
+  /** Prüft ein Dokument gegen die Firmendaten seiner Form. Liefert die Liste der Abweichungen (leer = in Ordnung). */
+  function checkDocText(d, rawText, imageCount) {
+    const t = normText(rawText);
+    const p = d.fx.profile;
+    const problems = [];
+    const need = (needle, what) => { if (!t.includes(normText(needle))) problems.push(`${what} fehlt: "${needle}"`); };
+    const once = (needle, what) => {
+      const n = countOf(t, normText(needle));
+      if (n !== 1) problems.push(`${what} steht ${n}x im PDF (erwartet genau 1x): "${needle}"`);
+    };
+    once(p.name, 'Firmenname');
+    once(p.street, 'Straße des Ausstellers');
+    once(`${p.postalCode} ${p.city}`, 'PLZ und Ort des Ausstellers');
+    for (const l of d.fx.legalLines) need(l, 'Pflichtzeile');
+    need(`Tel. ${p.phone}`, 'Telefon'); need(p.email, 'E-Mail'); need(p.web, 'Web');
+    need(`IBAN ${spacedIban(p.iban)}`, 'IBAN'); need(p.bankName, 'Bank'); need(`BIC ${p.bic}`, 'BIC');
+    need(d.recipient, 'Empfänger'); need(d.number, 'Rechnungsnummer');
+    if (d.leitweg) need(d.leitweg, 'Leitweg-ID');
+    if (/Verwaltung Verwaltung/i.test(t)) problems.push('"Verwaltung Verwaltung" im PDF');
+    if (d.images === 'min1') {
+      if (!(imageCount >= 1)) problems.push(`Logo erwartet, aber ${imageCount} Bild(er) im PDF`);
+    } else if (imageCount !== d.images) problems.push(`${imageCount} Bild(er) im PDF, erwartet ${d.images}`);
+    return problems;
+  }
+
+  for (const fx of FORMS) {
+    await s.step(`(M) ${fx.label}: unvollständig -> 422 issuer_incomplete mit Feldliste; vollständig -> festgeschrieben, PDF/XML`, async () => {
+      const draft = await createPlainDraft(inv.h.companyId);
+
+      // (a) absichtlich unvollständig: Speichern geht (Entwurf), Festschreiben nicht
+      const put1 = await setIssuer(brokenProfile(fx));
+      expectOk(put1, 'PUT unvollständiges Profil');
+      assert(sameMap(fieldMap(put1.body.missing), fx.expected),
+        `Antwort "missing" ${JSON.stringify(fieldMap(put1.body.missing))} != erwartet ${JSON.stringify(fx.expected)}`);
+      const f1 = await finalizeInv(draft.id);
+      assert(f1.status === 422, `unvollständig: HTTP ${f1.status} statt 422 (${JSON.stringify(f1.body).slice(0, 200)})`);
+      assert(f1.body?.error?.code === 'issuer_incomplete', `Fehlercode ${f1.body?.error?.code} statt issuer_incomplete`);
+      const issues = f1.body.error.detail?.issues ?? [];
+      assert(sameMap(fieldMap(issues), fx.expected), `Feldliste ${JSON.stringify(fieldMap(issues))} != erwartet ${JSON.stringify(fx.expected)}`);
+      assert(issues.every((i) => typeof i.label === 'string' && i.label.length > 0), 'Feld ohne Bezeichnung in der Meldung');
+      const d1 = await api('GET', `/api/invoices/${draft.id}`);
+      assert(d1.body.invoiceNumber === null, `Nummer ${d1.body.invoiceNumber} trotz unvollständiger Firmendaten vergeben`);
+
+      // (b) vollständig: dieselbe Rechnung lässt sich jetzt festschreiben
+      const put2 = await setIssuer(fx.profile);
+      expectOk(put2, 'PUT vollständiges Profil');
+      assert(put2.body.missing.length === 0, `Profil noch unvollständig: ${JSON.stringify(put2.body.missing)}`);
+      const f2 = await finalizeInv(draft.id);
+      expectOk(f2, 'Festschreiben (vollständig)');
+      const number = f2.body.invoiceNumber;
+      assert(/^\d{4}-\d+/.test(number ?? ''), `Nummer ${number}`);
+
+      const pdf = await fetchDoc(`/api/invoices/${draft.id}/document`);
+      assert(pdf.status === 200, `GET document: HTTP ${pdf.status} ${pdf.body.toString().slice(0, 300)}`);
+      const xml = await fetchDoc(`/api/invoices/${draft.id}/xml`);
+      assert(xml.status === 200, `GET xml: HTTP ${xml.status}`);
+      assert(pdf.body.subarray(0, 4).toString() === '%PDF', 'PDF beginnt nicht mit %PDF');
+      const att = extractAttachedXml(pdf.body);
+      assert(att.xml && att.xml.trim() === xml.body.toString().trim(), 'eingebettetes factur-x.xml != GET /xml');
+      writeFileSync(join(OUT, 'formen', `${fx.key}.pdf`), pdf.body);
+      writeFileSync(join(OUT, 'formen', `${fx.key}.factur-x.xml`), xml.body);
+
+      // Pflichtzeilen und Stammdaten stehen auch im strukturierten Teil (BT-33 = Pflichtzeilen mit " | ")
+      const x = normText(xmlUnescape(xml.body.toString('utf8')));
+      const p = fx.profile;
+      const lacking = [...fx.legalLines, p.name, p.street, p.city, p.iban, p.vatId || p.taxNumber]
+        .filter((v) => !x.includes(normText(v)));
+      assert(lacking.length === 0, `im Factur-X-XML fehlen: ${lacking.join(' | ')}`);
+
+      if (fx.xr) {
+        const xr = await fetchDoc(`/api/invoices/${draft.id}/xrechnung`);
+        assert(xr.status === 200, `GET xrechnung: HTTP ${xr.status}`);
+        assert(xr.body.toString().includes('xrechnung_3.0'), 'XRechnung ohne Kennung xrechnung_3.0');
+        writeFileSync(join(OUT, 'formen', `${fx.key}.xrechnung.xml`), xr.body);
+        (ctx.xrFiles ??= []).push({ name: `formen-${fx.key}.xrechnung.xml`, rel: `formen/${fx.key}.xrechnung.xml` });
+      }
+      ctx.pdfs.push(`formen/${fx.key}.pdf`);
+      ctx.docs.push({ id: fx.key, rel: `formen/${fx.key}.pdf`, fx, number, recipient: inv.h.recipient, images: 0 });
+    }, { timeoutMs: 480_000 });
+  }
+
+  await s.step('(M-Text) PDF-Text aller Rechnungen: alle Pflichtzeilen der Rechtsform enthalten, Firmenname/Anschrift genau einmal, kein Bild ohne Logo', async () => {
+    const got = await pdfText(ctx.docs.map((d) => d.rel));
+    const failures = [];
+    for (const d of ctx.docs) {
+      const g = got[d.rel];
+      const problems = checkDocText(d, g.text, g.images);
+      // Schrift: Inter muss eingebettet sein, DejaVu (Systemrückfall) darf nicht vorkommen.
+      if (!/Inter/i.test(g.fonts)) problems.push(`Inter nicht eingebettet (Schriften: ${g.fonts || 'keine'})`);
+      if (/DejaVu/i.test(g.fonts)) problems.push(`DejaVu im PDF (Schriften: ${g.fonts})`);
+      if (problems.length) failures.push(`${d.id}: ${problems.join('; ')}`);
+    }
+    assert(failures.length === 0, `PDF-Text weicht ab -> ${failures.join(' || ')}`.slice(0, 1500));
+    note(`PDF-Text geprüft für ${ctx.docs.length} Rechnungen (${ctx.docs.map((d) => d.id).join(', ')}); Text unter ${join(OUT, 'pdftext')}`);
+  }, { timeoutMs: 360_000 });
+
+  // ======================================================================= (D) Logo und Akzentfarbe
+  const PNG = makeLogoPng();
+  const publicConfig = async () => (await fetch(`${ctl.url}/api/public-config`)).json();
+  /** Rechnung mit den gerade gültigen Firmendaten (GmbH) ausstellen; liefert { id, number, pdf, rel }. */
+  async function issueDesignInvoice(name) {
+    const draft = await createPlainDraft(inv.h.companyId);
+    const f = await finalizeInv(draft.id);
+    expectOk(f, `Festschreiben (${name})`);
+    const pdf = await fetchDoc(`/api/invoices/${draft.id}/document`);
+    assert(pdf.status === 200, `GET document (${name}): HTTP ${pdf.status}`);
+    const rel = `design/${name}.pdf`;
+    writeFileSync(join(OUT, rel), pdf.body);
+    ctx.pdfs.push(rel);
+    return { id: draft.id, number: f.body.invoiceNumber, pdf: pdf.body, rel };
+  }
+  const designDoc = (made, images) => ({
+    id: baseName(made.rel), rel: made.rel, fx: GMBH, number: made.number, recipient: inv.h.recipient, images,
+  });
+  const logoOpts = { headers: { 'content-type': 'image/png' } };
+
+  await s.step('(D1) Logo: Nicht-Bild und falscher Typ werden abgelehnt (415), PNG wird gespeichert und öffentlich ausgeliefert', async () => {
+    expectOk(await setIssuer(GMBH.profile), 'PUT GmbH-Profil');
+    await pace('logo');
+    const notImage = await prot('POST', '/api/settings/issuer/logo', Buffer.from('das ist kein Bild'), logoOpts);
+    assert(notImage.status === 415 && notImage.body?.error?.code === 'logo_invalid', `Text als PNG: HTTP ${notImage.status} ${JSON.stringify(notImage.body).slice(0, 160)}`);
+    await pace('logo');
+    const mismatch = await prot('POST', '/api/settings/issuer/logo', JPEG_BYTES, logoOpts);
+    assert(mismatch.status === 415 && mismatch.body?.error?.code === 'logo_invalid', `JPEG als PNG deklariert: HTTP ${mismatch.status}`);
+    assert((await publicConfig()).hasLogo === false, 'hasLogo nach abgelehnten Uploads true');
+    await pace('logo');
+    const up = await prot('POST', '/api/settings/issuer/logo', PNG, logoOpts);
+    expectOk(up, 'Logo hochladen');
+    const meta = up.body.logo;
+    assert(meta.hasLogo === true && meta.mime === 'image/png' && meta.sha256 === sha256(PNG) && meta.sizeBytes === PNG.length,
+      `Logo-Metadaten ${JSON.stringify(meta)}`);
+    const pub = await fetch(`${ctl.url}/api/public/logo`);
+    assert(pub.status === 200 && /^image\/png/.test(pub.headers.get('content-type') ?? ''), `GET /api/public/logo -> ${pub.status}`);
+    assert(sha256(Buffer.from(await pub.arrayBuffer())) === sha256(PNG), 'ausgeliefertes Logo != hochgeladenes');
+    assert((await publicConfig()).hasLogo === true, 'public-config.hasLogo nach Upload nicht true');
+  }, { timeoutMs: 300_000 });
+
+  await s.step('(D2) Rechnung mit Logo: Bild im PDF, Firmenname weiterhin genau einmal, Akzentfarbe nicht gesetzt', async () => {
+    const r = await issueDesignInvoice('mit-logo');
+    assert(pdfImageObjects(r.pdf) >= 1, 'kein Bild-XObject im PDF');
+    const d = designDoc(r, 'min1');
+    ctx.docs.push(d);
+    const t = (await pdfText([r.rel]))[r.rel];
+    const problems = checkDocText(d, t.text, t.images);
+    assert(problems.length === 0, problems.join('; '));
+    assert(!pdfHasColor(r.pdf, ACCENT.toLowerCase()), 'Akzentfarbe im PDF, obwohl keine gesetzt ist');
+  }, { timeoutMs: 360_000 });
+
+  await s.step('(D3) Akzentfarbe: zu hell (#FFFF00) und ungültig werden mit 422 abgelehnt; #0B5C8A gilt in public-config und im PDF-Titel', async () => {
+    const ok = await setIssuer(GMBH.profile, ACCENT);
+    expectOk(ok, 'PUT mit Akzentfarbe');
+    assert(ok.body.accentColor === ACCENT.toLowerCase(), `accentColor ${ok.body.accentColor}`);
+    assert(/^#[0-9a-f]{6}$/.test(ok.body.accentOnDark ?? ''), `accentOnDark ${ok.body.accentOnDark}`);
+    const pc = await publicConfig();
+    assert(pc.accentColor === ACCENT.toLowerCase(), `public-config.accentColor ${pc.accentColor}`);
+    assert(/^#[0-9a-f]{6}$/.test(pc.accentOnDark ?? ''), `public-config.accentOnDark ${pc.accentOnDark}`);
+
+    const yellow = await setIssuer(GMBH.profile, '#FFFF00');
+    assert(yellow.status === 422 && yellow.body?.error?.code === 'accent_color_invalid', `#FFFF00: HTTP ${yellow.status} ${JSON.stringify(yellow.body).slice(0, 200)}`);
+    assert(yellow.body.error.detail?.reason === 'contrast', `Grund ${yellow.body.error.detail?.reason} statt contrast`);
+    const word = await setIssuer(GMBH.profile, 'blau');
+    assert(word.status === 422 && word.body?.error?.detail?.reason === 'format', `"blau": HTTP ${word.status} ${JSON.stringify(word.body).slice(0, 200)}`);
+    const after = await api('GET', '/api/settings/issuer');
+    assert(after.body.accentColor === ACCENT.toLowerCase(), `Akzentfarbe nach abgelehnten Werten: ${after.body.accentColor}`);
+    assert((await publicConfig()).accentColor === ACCENT.toLowerCase(), 'public-config nach abgelehnten Werten verändert');
+
+    const r = await issueDesignInvoice('mit-logo-akzent');
+    assert(pdfImageObjects(r.pdf) >= 1, 'kein Bild-XObject im PDF');
+    // Mit Logo gibt es keine Initialmarke: die Akzentfarbe kann nur noch am Titel (und Linien) hängen.
+    assert(pdfHasColor(r.pdf, ACCENT.toLowerCase()), `Akzentfarbe ${ACCENT} kommt im PDF nicht als Füll-/Textfarbe vor (Titel nicht eingefärbt?)`);
+    const d = designDoc(r, 'min1');
+    ctx.docs.push(d);
+    const t = (await pdfText([r.rel]))[r.rel];
+    const problems = checkDocText(d, t.text, t.images);
+    assert(problems.length === 0, problems.join('; '));
+  }, { timeoutMs: 420_000 });
+
+  await s.step('(D4) Ohne Logo: Firmenname statt Bild (kein Bild im PDF), Logo-Route 404, Akzentfarbe bleibt', async () => {
+    await pace('logo');
+    const del = await prot('DELETE', '/api/settings/issuer/logo');
+    expectOk(del, 'Logo löschen');
+    assert(del.body.logo.hasLogo === false, 'Logo nach dem Löschen noch gesetzt');
+    const pub = await fetch(`${ctl.url}/api/public/logo`);
+    assert(pub.status === 404, `GET /api/public/logo nach Löschen: ${pub.status}`);
+    const pc = await publicConfig();
+    assert(pc.hasLogo === false && pc.accentColor === ACCENT.toLowerCase(), `public-config ${JSON.stringify(pc)}`);
+    const r = await issueDesignInvoice('ohne-logo-akzent');
+    const d = designDoc(r, 0);
+    ctx.docs.push(d);
+    const t = (await pdfText([r.rel]))[r.rel];
+    const problems = checkDocText(d, t.text, t.images);
+    assert(problems.length === 0, problems.join('; '));
+    assert(pdfHasColor(r.pdf, ACCENT.toLowerCase()), 'Akzentfarbe fehlt im PDF ohne Logo');
+    // Akzentfarbe zurücknehmen -> public-config wieder leer
+    expectOk(await setIssuer(GMBH.profile, null), 'PUT ohne Akzentfarbe');
+    assert((await publicConfig()).accentColor === null, 'Akzentfarbe nach null nicht zurückgesetzt');
+  }, { timeoutMs: 420_000 });
+
   // ======================================================================= (5) Validierung
-  await s.step('(5a) PDF/A-3b mit veraPDF (Docker verapdf/cli)', async () => {
+  await s.step('(5a) PDF/A-3b mit veraPDF (Docker verapdf/cli) für ALLE erzeugten PDFs (Hauptrechnungen, Matrix, Design)', async () => {
     const have = await docker(['image', 'inspect', 'verapdf/cli'], { allowFail: true });
     if (have.code !== 0) await docker(['pull', 'verapdf/cli'], { timeoutMs: 600_000 });
-    const ver = await docker(['run', '--rm', '--label', 'e2e=true', 'verapdf/cli', '--version'], { allowFail: true });
+    const ver = await docker(['run', '--rm', ...SUITE_LABELS, 'verapdf/cli', '--version'], { allowFail: true });
     note(`veraPDF: ${(ver.stdout || ver.stderr).trim().split('\n').slice(0, 2).join(' | ')}`);
-    let allCompliant = true;
-    const verdicts = [];
-    for (const key of ['b', 'h']) {
+    assert(ctx.pdfs.length >= 14, `nur ${ctx.pdfs.length} PDFs zu prüfen (erwartet mindestens 14)`);
+    const bad = [];
+    for (const rel of ctx.pdfs) {
       const r = await docker(
-        ['run', '--rm', '--label', 'e2e=true', '-v', `${OUT}:/data:ro`, 'verapdf/cli', '--format', 'mrr', '--flavour', '3b', `/data/rechnung-${inv[key].label}.pdf`],
+        ['run', '--rm', ...SUITE_LABELS, '-v', `${OUT}:/data:ro`, 'verapdf/cli', '--format', 'mrr', '--flavour', '3b', `/data/${rel}`],
         { allowFail: true, timeoutMs: 300_000 },
       );
-      writeOut(`verapdf-${inv[key].label}.xml`, r.stdout || r.stderr);
+      writeOut(`verapdf-${baseName(rel)}.xml`, r.stdout || r.stderr);
       const compliant = /isCompliant="true"/.test(r.stdout);
       const failed = (r.stdout.match(/failedRules="(\d+)"/) ?? [])[1];
-      verdicts.push(`${inv[key].label}: ${compliant ? 'PDF/A-3b konform' : `NICHT konform (failedRules ${failed})`}`);
-      if (!compliant) allCompliant = false;
+      if (!compliant) bad.push(`${rel} (failedRules ${failed ?? 'unbekannt'})`);
     }
-    note(`veraPDF-Ergebnis: ${verdicts.join('; ')}`);
-    assert(allCompliant, `veraPDF: ${verdicts.join('; ')}`);
-  }, { timeoutMs: 900_000 });
+    note(`veraPDF-Ergebnis: ${ctx.pdfs.length - bad.length}/${ctx.pdfs.length} PDF/A-3b konform${bad.length ? `; NICHT konform: ${bad.join(', ')}` : ''}`);
+    assert(bad.length === 0, `veraPDF: nicht konform: ${bad.join(', ')}`);
+  }, { timeoutMs: 1_800_000 });
 
   await s.step('(5b) KoSIT-Validator: XRechnung- und Factur-X-XML (eclipse-temurin:17-jre, Jar/Konfiguration in E2E_OUT/tools)', async () => {
     const jar = join(TOOLS, 'kosit-validator', `validator-${KOSIT_JAR_VERSION}-standalone.jar`);
@@ -421,10 +718,15 @@ try {
       writeFileSync(join(work, `${inv[key].label}.xrechnung.xml`), inv[key].xr);
       writeFileSync(join(work, `${inv[key].label}.factur-x.xml`), inv[key].xml);
     }
+    // Matrix: XRechnung der Formen GmbH & Co. KG, GmbH und eG (Spezifikation: diese drei zusätzlich mit KoSIT)
+    for (const f of ctx.xrFiles ?? []) writeFileSync(join(work, f.name), readFileSync(join(OUT, f.rel)));
+    for (const key of ['gmbh-co-kg', 'gmbh', 'eg']) {
+      assert((ctx.xrFiles ?? []).some((f) => f.name === `formen-${key}.xrechnung.xml`), `keine XRechnung der Form ${key} für KoSIT`);
+    }
     const results = {};
     for (const f of readdirSync(work).filter((n) => n.endsWith('.xml'))) {
       const r = await docker([
-        'run', '--rm', '--label', 'e2e=true', '-v', `${TOOLS}:/tools:ro`, '-v', `${work}:/work`, 'eclipse-temurin:17-jre',
+        'run', '--rm', ...SUITE_LABELS, '-v', `${TOOLS}:/tools:ro`, '-v', `${work}:/work`, 'eclipse-temurin:17-jre',
         'java', '-jar', `/tools/kosit-validator/validator-${KOSIT_JAR_VERSION}-standalone.jar`,
         '-s', '/tools/kosit-config/scenarios.xml', '-r', '/tools/kosit-config', '-o', '/work/out', '-h', `/work/${f}`,
       ], { allowFail: true, timeoutMs: 400_000 });
@@ -441,14 +743,12 @@ try {
       if (k.includes('xrechnung')) assert(/accept/i.test(v.verdict) || v.exit === 0, `KoSIT ${k}: ${v.verdict} ${v.messages.join(' | ').slice(0, 400)}`);
     }
     ctx.kosit = results;
-  }, { timeoutMs: 1_500_000 });
+  }, { timeoutMs: 2_400_000 });
 
   // ======================================================================= (6) Vorschau
-  await s.step('(6) PDF -> PNG (sips) als Vorschau', async () => {
-    let n = 0;
+  await s.step('(6) PDF -> PNG (sips) als Vorschau: GmbH & Co. KG an Behörde, GmbH an Unternehmenskunde', async () => {
     for (const key of ['b', 'h']) {
-      n++;
-      const dst = join(OUT, `vorschau-${n}.png`);
+      const dst = join(OUT, `vorschau-${inv[key].label}.png`);
       const r = await run('sips', ['-s', 'format', 'png', join(OUT, `rechnung-${inv[key].label}.pdf`), '--out', dst], { allowFail: true });
       assert(r.code === 0 && existsSync(dst), `sips: ${(r.stderr || r.stdout).slice(0, 200)}`);
       const head = readFileSync(dst).subarray(0, 8).toString('hex');
@@ -505,7 +805,7 @@ try {
   // ======================================================================= (8) Mail
   await s.step('(8a) Rechnungsversand: Mail, Anhang PDF, Betreff ohne "Verwaltung Verwaltung", Absender', async () => {
     await mp.clear();
-    const r = await withProof('POST', `/api/invoices/${inv.h.id}/send`, {});
+    const r = await prot('POST', `/api/invoices/${inv.h.id}/send`, {});
     expectOk(r, 'POST send');
     const m = await mp.waitFor((x) => x.To?.some((t) => t.Address === 'rechnung@handels.example.com'), 'Rechnungsmail');
     const att = m.Attachments ?? [];
@@ -570,11 +870,11 @@ try {
     });
     expectOk(tpl, 'Vorlage anlegen');
     await mp.clear();
-    const ts = await withProof('POST', `/api/broadcast/templates/${tpl.body.id}/test-send`, {});
+    const ts = await prot('POST', `/api/broadcast/templates/${tpl.body.id}/test-send`, {});
     expectOk(ts, 'test-send');
     assert(ts.body.sent !== false, `Testversand nicht gesendet: ${JSON.stringify(ts.body)}`);
     // der Versand läuft über die Warteschlange -> Lauf anstoßen
-    await withProof('POST', '/api/broadcast/queue/run', {});
+    await prot('POST', '/api/broadcast/queue/run', {});
     const rm = await mp.waitFor((x) => /Neuigkeiten/.test(x.Subject), 'Rundmail', 90_000);
     const unsub = linkOf(rm.Text + (rm.HTML ?? ''), /https?:\/\/[^\s"'<>]+\/api\/consent\/unsubscribe\/[A-Za-z0-9_-]+/);
     assert(unsub, 'kein Abmeldelink in der Rundmail');
@@ -614,5 +914,6 @@ try {
 
 // ---- Rohabruf mit Nachweis im Body (Bytes statt JSON) --------------------------------------------
 async function rawPost(path, body) {
-  return api('POST', path, { ...body, ...(await proof()) }, { raw: true });
+  // Rohabruf (Bytes): frische Sitzung genügt; sonst mit Nachweis im Body (siehe prot)
+  return prot('POST', path, body, { raw: true });
 }
