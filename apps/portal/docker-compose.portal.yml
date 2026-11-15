@@ -1,0 +1,19 @@
+# Schlankes Portal (nur Liste + Links). Wird von install.sh im Modus portal
+# gestartet: docker compose --env-file portal/portal.env -f apps/portal/docker-compose.portal.yml up -d --build
+name: ${COMPOSE_PROJECT_NAME:-saas-instant-portal}
+services:
+  portal:
+    build:
+      context: .
+    ports:
+      - "${PORTAL_PORT:-8090}:8080"
+    volumes:
+      # Verzeichnis statt Einzeldatei: install.sh ersetzt registry.json atomar.
+      - ../../portal:/srv/registry:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

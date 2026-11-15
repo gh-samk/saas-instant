@@ -1,0 +1,345 @@
+# Coolify-Deployment von saas-instant Control (CRM/Verwaltung) unter
+# https://verwaltung.example.com
+#
+# Kein Caddy: Coolifys Traefik terminiert TLS (Let's Encrypt) und routet die im
+# Coolify-UI am Dienst "control-web" gesetzte Domain auf control-web:80. Der
+# nginx dort liefert die Oberfläche UND proxyt /api -> control-api:3001 — daher
+# ist "control-web" der einzige nach außen gereichte Dienst; control-db und
+# control-api bleiben rein intern.
+#
+# HARTE REGEL R1: Die Verwaltung kennt GENAU EINE Datenbank (control).
+# Es gibt keine zweite DATABASE_URL, keinen SQL-Zugang zu Kundeninstanzen und
+# keinen Codepfad, der ein Deployment oder eine Datenbank löscht.
+#
+# Beim Start wendet control-api automatisch die Migrationen an
+# (apps/control/docker-entrypoint.sh -> prisma migrate deploy).
+#
+# In Coolify zu setzen:
+#   - Domain am Dienst "control-web":  https://verwaltung.example.com
+#   - Environment (als Secrets):
+#       CONTROL_POSTGRES_PASSWORD  Datenbankpasswort
+#       JWT_SECRET                 signiert Sitzungs- und Vorgangs-Token
+#       CONTROL_CONFIG_KEY         AES-256-GCM-Schlüssel, mind. 32 Zeichen.
+#                                  Wird er getauscht, sind alle verschlüsselten
+#                                  Werte (TOTP-Geheimnis) unlesbar.
+#       SMTP_HOST                  Postausgang für die E-Mail-Anmeldecodes.
+#                                  PFLICHT: fehlt er, kommt kein Code an und der
+#                                  Faktor „Code per E-Mail" ist unbrauchbar.
+#       SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM  je nach Postausgang.
+#                                  SMTP_PORT=465 spricht SMTPS, 587/25 STARTTLS.
+#   - Ein kaputter Postausgang meldet sich NICHT auf der Anmeldeseite (die
+#     antwortet immer gleich), sondern unter GET /api/gesundheit als
+#     { status: "beeintraechtigt", mail: { letzterFehler } }. Darauf triggern.
+#   - CONTROL_APP_URL und CONTROL_RP_ID müssen zur Domain passen; die rpID ist
+#     die nackte Domain ohne Schema und Port. Passt sie nicht, lassen sich
+#     bestehende Passkeys nicht mehr verwenden.
+#
+# Etappe 4 (Rechnungen) bringt einen VIERTEN Dienst mit: "rechnungsdienst".
+#   Er erzeugt das PDF/A-3b mit eingebettetem factur-x.xml und prueft es selbst
+#   nach. Er bekommt KEINE Domain und KEINEN Port — er kennt keine Anmeldung.
+#   Optional zu setzen:
+#       CONTROL_PRICE_TABLE          Preisstufen als JSON. Ohne den Wert gelten
+#                                   die Vorgaben aus dem Auftrag. IST ER
+#                                   GESETZT UND FEHLERHAFT, STARTET DIE
+#                                   ANWENDUNG NICHT — Absicht: eine still
+#                                   zurueckfallende Preistafel schriebe falsche
+#                                   Betraege auf echte Rechnungen.
+#       CONTROL_INVOICE_IBAN/-BIC/-MANAGING_DIRECTOR
+#                                   nur noetig, wenn sich Bankverbindung oder
+#                                   Geschaeftsfuehrung aendern.
+#   Rechnungen unterliegen ZEHN JAHREN AUFBEWAHRUNG. Das ausgegebene PDF liegt
+#   in der Datenbank (Spalte "pdfInhalt") und haengt damit an der Sicherung von
+#   control-db — nicht an einem Volume, das ein Ausrollen ueberschreiben kann.
+#
+# Etappe 3 (Instanzen) braucht zusaetzlich:
+#       COOLIFY_TOKEN                 API-Token, EIGENS fuer das CRM angelegt.
+#                                     Ohne ihn laesst sich keine Instanz
+#                                     anlegen oder archivieren (sichtbarer 503).
+#       CONTROL_BACKUP_KEY  Geheimnis des Sicherungswerkzeugs.
+#   Die Backup-Konfiguration in Coolify und der Weg zurueck aus einer Sicherung
+#   stehen in docs/operations/backup-and-recovery.md. KEIN Wiederherstellungsknopf im
+#   CRM: Zurueckspielen geschieht von Hand in Coolify (R1).
+#
+# Notfallzugang im laufenden Container (schreibt ins Audit-Log). <kennung> ist
+# Benutzername oder E-Mail:
+#   docker compose exec control-api node dist/cli/emergency.js enrollment <kennung>
+#   docker compose exec control-api node dist/cli/emergency.js password     <kennung>
+#   docker compose exec control-api node dist/cli/emergency.js unlock    <kennung>
+# `password` gibt NUR einen 15 Minuten gültigen Link aus — niemals ein Passwort.
+
+services:
+  control-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: control
+      POSTGRES_USER: control
+      POSTGRES_PASSWORD: ${CONTROL_POSTGRES_PASSWORD:?CONTROL_POSTGRES_PASSWORD muss gesetzt sein}
+    volumes:
+      - control-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U control -d control"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  control-api:
+    build:
+      context: .
+      dockerfile: apps/control/Dockerfile
+    environment:
+      # ZEITZONE DES CONTAINERS. Regel 1 der Projektkonventionen kennt nur Tagesdaten —
+      # welcher Tag "heute" ist, entscheidet damit die Zeitzone des Prozesses.
+      #
+      # Ohne diese Zeile lief der Container in UTC, waehrend die Betreiberin in
+      # Berlin sitzt. Zwischen 00:00 und 02:00 mitteleuropaeischer Zeit (22:00
+      # bis 24:00 UTC) lieferte `heute()` deshalb den VORTAG: eine Notiz, eine
+      # Zahlung oder ein Rechnungsdatum, das um 00:30 entsteht, trug den
+      # falschen Kalendertag. Bei @db.Date faellt das spaeter nicht mehr auf,
+      # weil die Uhrzeit gar nicht mit gespeichert wird.
+      #
+      # Auf Fristen wirkt sich das NICHT aus: 15 Minuten, 72 Stunden und die
+      # Sperrzeiten rechnen mit absoluten Zeitstempeln, 90 Tage / 7 Monate /
+      # 24 Monate rechnen auf Kalendertagen (common/kalender.ts). Verschoben
+      # wird allein die Frage, welcher Kalendertag gerade laeuft.
+      #
+      # node:20-alpine braucht dafuer KEIN tzdata-Paket: Node bringt die
+      # Zeitzonendaten in seiner ICU mit. Nachgemessen mit
+      #   docker run --rm -e TZ=Europe/Berlin node:20-alpine node -e "..."
+      # -> "GMT+0200 (Central European Summer Time)".
+      TZ: ${APP_TIMEZONE:-Europe/Berlin}
+      # Welcher Stand laeuft? — fuer /api/version.
+      #
+      # SOURCE_COMMIT MUSS BEIM AUSROLLEN GESETZT WERDEN. Coolify tut das bei
+      # Compose-Deployments NICHT von allein: Es legt die Variable an, weil sie
+      # hier erwaehnt wird, aber leer. Wer ausrollt, setzt sie auf den Commit,
+      # den er ausrollt. Den Bauzeitpunkt bringt das Image selbst mit
+      # (apps/control/Dockerfile schreibt BUILD_TIME) — der stimmt also immer.
+      APP_GIT_SHA: ${SOURCE_COMMIT:-}
+      APP_BUILD_TIME: ${APP_BUILD_TIME:-}
+      DATABASE_URL: postgresql://control:${CONTROL_POSTGRES_PASSWORD}@control-db:5432/control?schema=public
+      NODE_ENV: production
+      PORT: "3001"
+      CONTROL_APP_URL: ${CONTROL_APP_URL:-https://verwaltung.example.com}
+      CONTROL_RP_ID: ${CONTROL_RP_ID:-verwaltung.example.com}
+      CONTROL_RP_NAME: ${CONTROL_RP_NAME:-Verwaltung}
+      CONTROL_TOTP_ISSUER: ${CONTROL_TOTP_ISSUER:-Verwaltung}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
+      CONTROL_CONFIG_KEY: ${CONTROL_CONFIG_KEY:?CONTROL_CONFIG_KEY muss gesetzt sein}
+      # Läuft hinter TLS (Traefik) -> Secure-Cookies erzwingen.
+      COOKIE_SECURE: "1"
+      # ZWEI Hops: Coolify/Traefik -> control-web (nginx) -> control-api. Erst
+      # mit 2 steht die echte Client-Adresse im Audit-Log statt der internen
+      # Traefik-Adresse. 2 ist fuer genau diese Kette richtig und wird NICHT
+      # blind angepasst: zu hoch -> ein vom Client gesetzter X-Forwarded-For
+      # gilt (Rate-Limit umgehbar), zu niedrig -> nur die Proxy-Adresse.
+      # control-web (apps/control/nginx.conf) HAENGT die Adresse seines
+      # Aufrufers (Traefik) an X-Forwarded-For an; die API zaehlt dann zwei
+      # Stationen von RECHTS und ignoriert alles, was der Client davor
+      # hineinschreibt. Wird die Kette geaendert (z. B. nginx entfaellt),
+      # MUSS dieser Wert mitgezogen werden.
+      CONTROL_TRUST_PROXY: ${CONTROL_TRUST_PROXY:-2}
+      # Postausgang fuer die E-Mail-Anmeldecodes. OHNE SMTP_HOST verschickt die
+      # Anwendung nichts und schreibt den Code nur in die Containerkonsole —
+      # der Faktor "Code per E-Mail" waere dann in Produktion unbrauchbar.
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST muss gesetzt sein, sonst kommen keine Anmeldecodes an}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Verwaltung <noreply@example.com>}
+      # Verschluesselung ist Pflicht. Ueber diese Verbindung geht ein
+      # ANMELDEFAKTOR, dazu SMTP_USER und SMTP_PASS. Nicht abschalten.
+      SMTP_TLS_ERZWINGEN: "1"
+      # Oeffentlicher Anfrageweg (Etappe 2). OHNE CONTROL_INQUIRY_KEY
+      # antwortet POST /api/oeffentlich/anfrage mit 404 — dann kommt vom
+      # Formular der Webseite nichts mehr an. Derselbe Wert muss im nginx der
+      # Webseite als Header x-anfrage-schluessel gesetzt sein.
+      CONTROL_INQUIRY_KEY: ${CONTROL_INQUIRY_KEY:?CONTROL_INQUIRY_KEY muss gesetzt sein, sonst nimmt die Verwaltung keine Anfragen an}
+      CONTROL_INQUIRY_RECIPIENT: ${CONTROL_INQUIRY_RECIPIENT:-hallo@example.com}
+      # Die Kette vor dem Anfrageweg ist zwei Stationen laenger als die der
+      # Oberflaeche (ueber das nginx der Webseite). Ohne diesen Wert zaehlt das
+      # Rate-Limit gegen einen Proxy statt gegen den Besucher ([W1]).
+      CONTROL_INQUIRY_TRUST_PROXY: ${CONTROL_INQUIRY_TRUST_PROXY:-4}
+      DEMO_URL: ${DEMO_URL:-https://demo.example.com}
+      DEMO_LOGIN_USER: ${DEMO_LOGIN_USER:-demo-nutzer}
+      DEMO_LOGIN_PASS: ${DEMO_LOGIN_PASS:-demo-passwort-aendern}
+      # Taeglicher Statuswechsel-Lauf (ohne Geldfolge, R5).
+      CONTROL_SCHEDULE_ENABLED: ${CONTROL_SCHEDULE_ENABLED:-ja}
+
+      # --- Etappe 3: Instanzen ------------------------------------------------
+      # Coolify-API — PFLICHTWERT OHNE VORGABE ([A.19], [Review B4]).
+      #
+      # NICHT `localhost`: Im Container ist das die Rueckschleife des
+      # CONTAINERS, nicht die des Hosts — jeder Coolify-Aufruf endete mit
+      # ECONNREFUSED, und Instanz anlegen wie Abgleich liefen stumm in den
+      # Fehlerpfad.
+      #
+      # Es gibt zwei Wege, und welcher traegt, entscheidet der Server:
+      #   a) http://host.docker.internal:8000/api/v1 — ueber `extra_hosts`
+      #      unten. Traegt NUR, wenn Coolify auf dem Host auf allen Adressen
+      #      lauscht (0.0.0.0:8000) und die Firewall Container-zu-Host nicht
+      #      sperrt. Laut docs/operations/coolify-setup.md ist die API
+      #      "nur ueber SSH" erreichbar — das spricht fuer 127.0.0.1-Bindung,
+      #      und dann traegt dieser Weg NICHT.
+      #   b) http://coolify:8080/api/v1 — ueber Coolifys eigenes Docker-Netz.
+      #      Dazu diesen Dienst in Coolify an das Netz `coolify` haengen
+      #      (Einstellung "Connect to predefined network").
+      # Weil keine Vorgabe fuer beide Faelle richtig ist, gibt es keine: Ohne
+      # gesetzten Wert startet die Verwaltung nicht, statt mit einer Adresse zu
+      # starten, die ins Leere zeigt.
+      #
+      # OHNE COOLIFY_TOKEN antwortet die Instanzverwaltung mit einem sichtbaren
+      # Fehler (503, `coolify_nicht_eingerichtet`) statt still nichts zu tun.
+      # Fuer das CRM ein EIGENES Token anlegen, nicht das des Betreibers
+      # wiederverwenden — sonst laesst sich im Nachhinein nicht unterscheiden,
+      # wer gehandelt hat.
+      # ===================================================================
+      # DER PRAEFIX `CONTROL_COOLIFY_`, NICHT `COOLIFY_`
+      # ===================================================================
+      #
+      # Coolify spritzt in JEDEN Container, den es verwaltet, eigene
+      # Variablen mit dem Praefix `COOLIFY_`: COOLIFY_BRANCH, COOLIFY_URL,
+      # COOLIFY_FQDN, COOLIFY_CONTAINER_NAME, COOLIFY_RESOURCE_UUID.
+      #
+      # GEMESSEN am 08.09.2026 im laufenden Container:
+      #     COOLIFY_BRANCH = '"main"'      (mit Anfuehrungszeichen IM Wert)
+      #
+      # Die Verwaltung las diesen Namen als ihren eigenen und schickte
+      # `git_branch: "\"main\""` an Coolify -- das seine eigene Anfrage mit
+      # `422 The git branch contains invalid characters` abwies. Das Anlegen
+      # JEDER Kundeninstanz scheiterte daran, ohne dass ein Wert falsch
+      # gesetzt gewesen waere.
+      #
+      # Die alten Namen werden weiter gelesen (mit Warnung), damit eine
+      # bestehende Installation nicht stehenbleibt -- ausser dort, wo Coolify
+      # den Namen selbst belegt. Dort gilt nur noch der eigene.
+      # BEIDE NAMEN WERDEN DURCHGEREICHT, die Rangfolge macht die Anwendung
+      # (`coolify.konfig.ts`): eigener Name schlaegt alten, leer zaehlt als
+      # nicht gesetzt. So bleibt eine bestehende Installation lauffaehig,
+      # ohne dass hier eine Verschachtelung stehen muss.
+      #
+      # KEIN `${VAR:?Meldung}` MEHR an dieser Stelle: Coolify legt fuer jede
+      # erwaehnte Variable einen Eintrag an und nimmt bei der Pflichtform DIE
+      # MELDUNG als Wert (siehe `docs/operations/coolify-setup.md`).
+      # Aus der Schranke wuerde so eine URL, die aus einem Satz besteht.
+      # Geprueft wird stattdessen in der Anwendung, beim Lesen.
+      CONTROL_COOLIFY_API_URL: ${CONTROL_COOLIFY_API_URL:-}
+      COOLIFY_API_URL: ${COOLIFY_API_URL:-}
+      CONTROL_COOLIFY_TOKEN: ${CONTROL_COOLIFY_TOKEN:-}
+      COOLIFY_TOKEN: ${COOLIFY_TOKEN:-}
+      CONTROL_COOLIFY_PROJECT_UUID: ${CONTROL_COOLIFY_PROJECT_UUID:-}
+      COOLIFY_PROJECT_UUID: ${COOLIFY_PROJECT_UUID:-}
+      CONTROL_COOLIFY_SERVER_UUID: ${CONTROL_COOLIFY_SERVER_UUID:-}
+      COOLIFY_SERVER_UUID: ${COOLIFY_SERVER_UUID:-}
+      CONTROL_COOLIFY_DEPLOY_KEY_UUID: ${CONTROL_COOLIFY_DEPLOY_KEY_UUID:-}
+      COOLIFY_DEPLOY_KEY_UUID: ${COOLIFY_DEPLOY_KEY_UUID:-}
+      # Der Branch NUR unter eigenem Namen — `COOLIFY_BRANCH` gehoert Coolify
+      # und steht dort als '"main"', mit Anfuehrungszeichen im Wert.
+      CONTROL_COOLIFY_BRANCH: ${CONTROL_COOLIFY_BRANCH:-main}
+      # DER GETEILTE POSTAUSGANG ALLER KUNDENINSTANZEN. Die Verwaltung reicht
+      # ihn an jede neue Instanz weiter, wie es das Provisionierungsskript aus
+      # der zentralen SMTP-Datei tat. Fehlen HOST oder FROM, lehnt sie das
+      # Anlegen ab, statt eine stumme Instanz zu bauen.
+      #
+      # WIEDER OHNE `:?` — Coolify nimmt bei dieser Form die Meldung als Wert.
+      # Genau das ist den Kundeninstanzen mit `SMTP_HOST` passiert.
+      CONTROL_INSTANCE_SMTP_HOST: ${CONTROL_INSTANCE_SMTP_HOST:-}
+      CONTROL_INSTANCE_SMTP_PORT: ${CONTROL_INSTANCE_SMTP_PORT:-}
+      CONTROL_INSTANCE_SMTP_USER: ${CONTROL_INSTANCE_SMTP_USER:-}
+      CONTROL_INSTANCE_SMTP_PASS: ${CONTROL_INSTANCE_SMTP_PASS:-}
+      CONTROL_INSTANCE_SMTP_FROM: ${CONTROL_INSTANCE_SMTP_FROM:-}
+      CONTROL_INSTANCE_BASE_DOMAIN: ${CONTROL_INSTANCE_BASE_DOMAIN:-}
+      # Taeglicher Kennzahlen-Abruf (4 Uhr) und Coolify-Abgleich (4:30 Uhr).
+      # Beide sind LESEND gegenueber den Kundeninstanzen: das CRM fragt ab, die
+      # Instanzen schicken nichts. Faellt das CRM aus, merken sie es nicht.
+      CONTROL_METRICS_FETCH_ENABLED: ${CONTROL_METRICS_FETCH_ENABLED:-ja}
+      CONTROL_RECONCILIATION_ENABLED: ${CONTROL_RECONCILIATION_ENABLED:-ja}
+      # Gemeinsames Geheimnis mit dem Sicherungswerkzeug (>= 32 Zeichen). OHNE
+      # den Wert antwortet POST /api/sicherungen mit 404 — dann bleibt die
+      # Backup-Anzeige leer und meldet jede Instanz als „Sicherung ueberfaellig".
+      CONTROL_BACKUP_KEY: ${CONTROL_BACKUP_KEY:-}
+
+      # --- Etappe 4: Rechnungen ----------------------------------------------
+      # Der Rechnungsdienst laeuft im selben Compose-Netz und ist von aussen
+      # NICHT erreichbar (kein Port, keine Domain). Er hat weder Anmeldung noch
+      # Rechtepruefung — er nimmt HTML und XML entgegen und gibt ein PDF/A-3b
+      # zurueck. Genau deshalb darf ihn niemand ausser control-api erreichen.
+      #
+      # Ist er nicht erreichbar, meldet die Dokumentroute einen sichtbaren
+      # Fehler (502). Rechnungen anlegen, festschreiben, stornieren und
+      # Zahlungen vermerken funktionieren unveraendert weiter; das Dokument
+      # laesst sich spaeter nachziehen, weil es ausschliesslich aus dem
+      # Schnappschuss entsteht.
+      RECHNUNGSDIENST_URL: ${RECHNUNGSDIENST_URL:-http://rechnungsdienst:8080}
+      # Preistafel als JSON. OHNE diesen Wert gelten die Vorgaben aus dem
+      # Auftrag (19/35/59 EUR monatlich, 209/385/649 jaehrlich, 290/490/790
+      # Einrichtung). Ist der Wert gesetzt und fehlerhaft, STARTET DIE
+      # ANWENDUNG NICHT — eine still zurueckfallende Preistafel schriebe
+      # falsche Betraege auf echte Rechnungen.
+      CONTROL_PRICE_TABLE: ${CONTROL_PRICE_TABLE:-}
+      # Ausstellerdaten. Vorrangig im Manifest (billing.issuer); diese
+      # Variablen ueberschreiben es.
+      CONTROL_INVOICE_IBAN: ${CONTROL_INVOICE_IBAN:-}
+      CONTROL_INVOICE_BIC: ${CONTROL_INVOICE_BIC:-}
+      CONTROL_INVOICE_MANAGING_DIRECTOR: ${CONTROL_INVOICE_MANAGING_DIRECTOR:-}
+    # Der Weg zur Coolify-API auf dem Host (siehe COOLIFY_API_URL oben).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      control-db:
+        condition: service_healthy
+      rechnungsdienst:
+        # NUR `service_started` ([A.20]): Der Rechnungsdienst ist bewusst
+        # entbehrlich — Rechnungen anlegen, festschreiben und stornieren
+        # funktionieren ohne ihn, nur das PDF fehlt dann und der Dokumentpfad
+        # antwortet mit 502. Mit `service_healthy` haette ein fehlgeschlagener
+        # Healthcheck des PDF-Renderers (Chromium und Java, 25 Sekunden
+        # Anlaufzeit) den Start der ganzen Verwaltung verhindert — also auch
+        # die Anmeldung. Das widerspraeche der Zusage im Kommentar unten.
+        condition: service_started
+    restart: unless-stopped
+
+  # --- Rechnungsdokument (Etappe 4) -------------------------------------------
+  # Chromium setzt das sichtbare Dokument aus HTML, Mustangproject macht daraus
+  # als Java-Bibliothek PDF/A-3 mit eingebettetem factur-x.xml und PRUEFT SICH
+  # SELBST NACH (veraPDF + Schematron EN 16931). Bei einem Mangel antwortet er
+  # mit 422 und Pruefbericht statt mit einem ungueltigen PDF.
+  #
+  # KEINE DOMAIN, KEIN PORT. Der Dienst kennt keine Anmeldung; er ist
+  # ausschliesslich aus dem Compose-Netz erreichbar. Wer ihm eine Domain gibt,
+  # gibt jedem im Netz einen Renderer.
+  rechnungsdienst:
+    build:
+      context: ./werkzeug/rechnungsdokument
+    expose:
+      - "8080"
+    environment:
+      RECHNUNG_PORT: "8080"
+      # NICHT ABSCHALTEN. Die Selbstpruefung ist der Grund, warum nie ein
+      # ungueltiger Beleg das Haus verlaesst. Sie kostet rund eine Sekunde je
+      # Rechnung — bei etwa hundert Rechnungen im Jahr.
+      RECHNUNG_SELBSTPRUEFUNG: "1"
+    # Chromium legt beim Rendern Dateien unter /tmp an. tmpfs statt
+    # Schreibschicht: nach einem Neustart bleibt nichts von einer fremden
+    # Rechnung liegen.
+    tmpfs:
+      - /tmp:size=256m
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  control-web:
+    build:
+      context: .
+      dockerfile: apps/control/Dockerfile.web
+    # nginx lauscht auf 80. Coolify hängt die gesetzte Domain via Traefik hier
+    # an — KEIN Host-Port veröffentlichen.
+    expose:
+      - "80"
+    depends_on:
+      - control-api
+    restart: unless-stopped
+
+volumes:
+  control-db-data:

@@ -1,0 +1,76 @@
+# Beispielmanifest. Kopieren nach ./saas-instant.manifest.yaml oder Pfad per
+# Umgebungsvariable MANIFEST_PATH setzen. Alle Abschnitte sind optional;
+# fehlende Werte fallen auf neutrale Vorgaben zurück.
+
+product:
+  name: Mein Produkt
+  slug: mein-produkt          # a-z, 0-9, Bindestrich
+
+mail:
+  senderName: Mein Produkt
+  senderAddress: noreply@example.com
+  footer: |
+    Diese Nachricht wurde automatisch von Mein Produkt versendet.
+  imprint: |
+    Example Company, Example Street 1, 12345 Example City
+  domain: example.com                 # optional; Vorgabe: Domäne von senderAddress
+  replyTo: hello@example.com          # optional; Vorgabe: senderAddress
+  websiteUrl: https://example.com     # optional, https
+  legalLinks:                         # optional; Verweise der Mail-Fußzeile
+    - text: Impressum
+      url: https://example.com/imprint
+    - text: Datenschutz
+      url: https://example.com/privacy
+  inquiryTo: contact@example.com      # optional; Ziel des öffentlichen Anfrageweges
+
+billing:
+  issuer:
+    name: Example Company
+    address: Example Street 1, 12345 Example City
+    taxId: DE123456789
+    email: billing@example.com
+    bankDetails: IBAN DE00 0000 0000 0000 0000 00
+  # Optionale Rechnungsangaben (sonst Umgebung CONTROL_INVOICE_* bzw. neutrale Vorgaben):
+  #   street, postalCode, city, country, seat, phone, contactName, creditorId,
+  #   bankName, iban, bic, registerCourt, registerNumber, legalNotice
+  # Optional, nur bei persönlich haftender Gesellschafterin (z. B. GmbH & Co. KG); ohne
+  # generalPartnerName druckt die Rechnung diesen Block nicht:
+  #   generalPartnerName, generalPartnerSeat, generalPartnerRegisterCourt,
+  #   generalPartnerRegisterNumber, managingDirectors (Komma-getrennt)
+  # Optional: taxRatePercent (19), paymentTermDays (14), averageDays (90)
+  tiers:
+    # maxPersons = obere Schwelle aktiver Personen; die letzte Stufe lässt sie weg (offen).
+    # Optional je Stufe: monthlyCents, halfYearlyCents, yearlyCents, setupCents
+    # (Vorgaben: Monat = priceCents, Halbjahr = 5,5 Monate, Jahr = 11 Monate, Einrichtung 0).
+    - key: basic
+      label: Basic
+      priceCents: 1900
+      maxPersons: 10
+    - key: pro
+      label: Pro
+      priceCents: 4900
+
+provisioning:
+  instanceDomainBase: example.com
+  subdomainPattern: "{slug}.{base}"   # {slug} ist Pflicht
+  composeSource: https://git.example.com/example/instance-compose.git
+  instanceEnv:
+    INSTANCE_MODE: production
+  # Instanz-Vertrag: Pfade, die jede Instanz bereitstellt. Geschützt durch die
+  # Umgebungsvariablen SETUP_TOKEN (Erst-Setup) und METRICS_TOKEN (Kennzahlen),
+  # die die Verwaltung je Instanz erzeugt und der Instanz mitgibt.
+  metricsPath: /api/intern/kennzahlen    # optional; ohne Angabe werden keine Kennzahlen abgerufen
+  setupPath: /api/setup/start            # Einladungslink: <Pfad>?token=<SETUP_TOKEN>
+  setupStatusPath: /api/setup/status            # optional; ohne Angabe wird der Setup-Status nicht abgerufen
+  instancePrefix: instanz                # Coolify-Anwendung heißt <Präfix>-<slug>
+  repository: git@git.example.com:example/instance-compose.git
+  composePath: /docker-compose.coolify.yml
+  ownApplications: []                    # eigene Coolify-Anwendungen (z. B. instanz-control),
+                                         # die der Abgleich nicht als verwaist meldet
+
+ui:
+  productName: Mein Produkt
+  logoUrl: https://example.com/logo.svg   # optional
+  # Oberfläche: Name und Logo kommen über GET /api/public-config. Die Instanz-
+  # Domain zeigt die Oberfläche nur, wenn beim Build VITE_INSTANZ_BASISDOMAIN
+  # gesetzt ist (z. B. example.com); sonst steht nur die Subdomain.

@@ -1,0 +1,31 @@
+{
+  // Typprüfung des PRÜFCODES (Spec-Dateien und `src/test-support`).
+  //
+  // Seit [K3] schließt `tsconfig.json` beides aus, damit `nest build` es nicht
+  // ins Auslieferungsartefakt übersetzt. Ohne diese Datei wäre der Prüfcode
+  // damit auch aus der Typprüfung gefallen — ein Tausch von einem Problem gegen
+  // ein anderes. Hier wird er geprüft, aber nichts erzeugt (`noEmit`).
+  //
+  // Die Ausschlussliste wiederholt NUR die Frontend-Trennlinie aus
+  // `tsconfig.json`; `src/test-support` und `src/**/*.spec.ts` fehlen darin
+  // absichtlich — genau die sollen hier ja geprüft werden.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": ["src"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-web",
+    "src/**/*.tsx",
+    "src/setupTests.ts",
+    "src/components",
+    "src/context",
+    "src/i18n",
+    "src/lib",
+    "src/pages",
+    "src/utils"
+  ]
+}

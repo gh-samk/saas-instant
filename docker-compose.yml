@@ -1,0 +1,212 @@
+# Control-Stack von saas-instant (CRM/Verwaltung) zum Selbst-Hosten:
+#   control-db  (Postgres), control-api (NestJS), control-web (nginx + Oberfläche).
+#
+#   ./install.sh                        # empfohlen: legt installations/<slug>/.env an
+#   -- oder von Hand --
+#   cp apps/control/.env.example .env   # Werte eintragen, mindestens die unten
+#                                       # mit Pflicht-Hinweis
+#   docker compose up -d --build
+#
+# Mehrere Verwaltungen (Modus portal): Jede hat ihr eigenes Projekt
+# (COMPOSE_PROJECT_NAME), damit Datenbank-Volume, Netz und Container getrennt
+# bleiben. Aufruf: docker compose --env-file installations/<slug>/.env up -d
+# (bin/saas-instant up <slug> erledigt das). Der Dienstname control-api ist
+# fest, weil src/common/timezone.spec.ts ihn prüft.
+#
+# Die Oberfläche steht danach auf http://localhost:${CONTROL_WEB_PORT:-8080}.
+# Für den Betrieb hinter TLS (Traefik, Caddy, nginx) die Domain auf control-web
+# legen und CONTROL_APP_URL / CONTROL_RP_ID passend setzen. Die Variante für
+# Coolify steht in reference/docker-compose.control.coolify.yml; das Template
+# der Instanzen, die diese Verwaltung anlegt, in docker-compose.coolify.yml.
+#
+# HARTE REGEL R1: Die Verwaltung kennt GENAU EINE Datenbank (`control`). Es gibt
+# keine zweite DATABASE_URL, keinen SQL-Zugang zu Kundeninstanzen und keinen
+# Codepfad, der ein Deployment oder eine Datenbank löscht.
+#
+# Beim Start wendet control-api die Migrationen an
+# (apps/control/docker-entrypoint.sh -> prisma migrate deploy).
+
+services:
+  control-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: control
+      POSTGRES_USER: control
+      POSTGRES_PASSWORD: ${CONTROL_POSTGRES_PASSWORD:?CONTROL_POSTGRES_PASSWORD muss gesetzt sein}
+    volumes:
+      - control-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U control -d control"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  control-api:
+    build:
+      context: .
+      dockerfile: apps/control/Dockerfile
+    environment:
+      # ZEITZONE DES CONTAINERS. Gespeichert werden Tagesdaten ohne Uhrzeit;
+      # welcher Tag "heute" ist, entscheidet die Zeitzone des Prozesses. In UTC
+      # läge der Tag zwischen Mitternacht und dem Versatz der Betreiberzone
+      # beim VORTAG. Über APP_TIMEZONE auf die Zone des Betreibers stellen
+      # (IANA-Name). node:22-alpine braucht dafür kein tzdata-Paket.
+      TZ: ${APP_TIMEZONE:-Europe/Berlin}
+      APP_GIT_SHA: ${SOURCE_COMMIT:-}
+      APP_BUILD_TIME: ${APP_BUILD_TIME:-}
+      DATABASE_URL: postgresql://control:${CONTROL_POSTGRES_PASSWORD}@control-db:5432/control?schema=public
+      NODE_ENV: production
+      PORT: "3001"
+      MANIFEST_PATH: ${MANIFEST_PATH:-/app/saas-instant.manifest.yaml}
+      CONTROL_APP_URL: ${CONTROL_APP_URL:-http://localhost:8080}
+      CONTROL_RP_ID: ${CONTROL_RP_ID:-localhost}
+      CONTROL_RP_NAME: ${CONTROL_RP_NAME:-Verwaltung}
+      CONTROL_TOTP_ISSUER: ${CONTROL_TOTP_ISSUER:-Verwaltung}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
+      CONTROL_CONFIG_KEY: ${CONTROL_CONFIG_KEY:?CONTROL_CONFIG_KEY muss gesetzt sein}
+      # 1 = Secure-Cookies (nur hinter TLS). Lokal über http auf 0 stellen.
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}
+      # Anzahl der Proxys vor der API (control-web = 1, plus ein TLS-Proxy = 2).
+      CONTROL_TRUST_PROXY: ${CONTROL_TRUST_PROXY:-1}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS_ERZWINGEN: ${SMTP_TLS_ERZWINGEN:-1}
+      CONTROL_INQUIRY_KEY: ${CONTROL_INQUIRY_KEY:-}
+      CONTROL_INQUIRY_RECIPIENT: ${CONTROL_INQUIRY_RECIPIENT:-}
+      CONTROL_INQUIRY_TRUST_PROXY: ${CONTROL_INQUIRY_TRUST_PROXY:-2}
+      CONTROL_SCHEDULE_ENABLED: ${CONTROL_SCHEDULE_ENABLED:-ja}
+
+      # --- Optionale Werte: Durchreichen unter dem Namen, den der Code liest --
+      # Schreibweise `NAME:` ohne Wert = Durchreichen. Steht der Wert in der
+      # .env (oder in der Umgebung), erreicht er den Container; fehlt er, bleibt
+      # die Variable im Container UNGESETZT und die Vorgabe des Codes (oder des
+      # Manifests) gilt. Ein leerer String wäre etwas anderes als "nicht gesetzt".
+      # Rangfolge je Wert: Umgebung, Manifest, Vorgabe. Beschreibung der Werte:
+      # apps/control/.env.example.
+
+      # Instanzen und Coolify. Ohne CONTROL_COOLIFY_TOKEN bleibt die
+      # Instanzverwaltung sichtbar aus (503).
+      CONTROL_COOLIFY_API_URL:
+      CONTROL_COOLIFY_TOKEN:
+      CONTROL_COOLIFY_PROJECT_UUID:
+      CONTROL_COOLIFY_SERVER_UUID:
+      CONTROL_COOLIFY_DEPLOY_KEY_UUID:
+      CONTROL_COOLIFY_REPO:
+      CONTROL_COOLIFY_BRANCH:
+      CONTROL_COOLIFY_COMPOSE:
+      CONTROL_COOLIFY_UMGEBUNG:
+      CONTROL_COOLIFY_OWN_APPLICATIONS:
+      CONTROL_INSTANCE_BASE_DOMAIN:
+      CONTROL_INSTANCE_PREFIX:
+      CONTROL_INSTANCE_SETUP_PATH:
+      CONTROL_INSTANCE_SETUP_STATUS_PATH:
+      CONTROL_INSTANCE_METRICS_PATH:
+      CONTROL_INSTANCE_SMTP_HOST:
+      CONTROL_INSTANCE_SMTP_PORT:
+      CONTROL_INSTANCE_SMTP_USER:
+      CONTROL_INSTANCE_SMTP_PASS:
+      CONTROL_INSTANCE_SMTP_FROM:
+      CONTROL_METRICS_FETCH_ENABLED:
+      CONTROL_RECONCILIATION_ENABLED:
+      CONTROL_OUTBOX_PROBE_ENABLED:
+      CONTROL_BACKUP_KEY:
+
+      # Rechnungen: Preistafel, Datumsfenster, Ausstellerangaben.
+      CONTROL_PRICE_TABLE:
+      CONTROL_INVOICE_DATE_RETROACTIVE_DAYS:
+      CONTROL_INVOICE_DATE_AHEAD_DAYS:
+      CONTROL_INVOICE_ISSUER:
+      CONTROL_INVOICE_STREET:
+      CONTROL_INVOICE_POSTAL_CODE:
+      CONTROL_INVOICE_CITY:
+      CONTROL_INVOICE_COUNTRY:
+      CONTROL_INVOICE_SEAT:
+      CONTROL_INVOICE_USTIDNR:
+      CONTROL_INVOICE_CREDITOR_ID:
+      CONTROL_INVOICE_COMMERCIAL_REGISTER_A:
+      CONTROL_INVOICE_REGISTER_COURT:
+      CONTROL_INVOICE_GENERAL_PARTNER:
+      CONTROL_INVOICE_GENERAL_PARTNER_SEAT:
+      CONTROL_INVOICE_GENERAL_PARTNER_GERICHT:
+      CONTROL_INVOICE_COMMERCIAL_REGISTER_B:
+      CONTROL_INVOICE_MANAGING_DIRECTOR:
+      CONTROL_INVOICE_CONTACT_NAME:
+      CONTROL_INVOICE_PHONE:
+      CONTROL_INVOICE_EMAIL:
+      CONTROL_INVOICE_BANK:
+      CONTROL_INVOICE_IBAN:
+      CONTROL_INVOICE_BIC:
+      CONTROL_INVOICE_LEGAL_ADDITION:
+      # Rechnungsdienst (Dienst invoice-renderer, nur im Compose-Netz). Nicht
+      # gesetzt = der Dienst unten; ausdrücklich leer = PDF-Erzeugung aus.
+      RECHNUNGSDIENST_URL: ${RECHNUNGSDIENST_URL-http://invoice-renderer:8080}
+
+      # E-Mail: Absender, Zustellbarkeit, Rundmail, Einwilligung.
+      MAIL_DOMAIN:
+      MAIL_SENDER_INVOICE:
+      MAIL_SENDER_BROADCAST:
+      MAIL_REPLY_TO:
+      MAIL_RETURN_PATH:
+      MAIL_UNSUBSCRIBE_MAILTO:
+      CONTROL_MAIL_BASE_URL:
+      CONTROL_CONSENT_CLEANUP:
+      CONTROL_BROADCAST_ENABLED:
+      CONTROL_BROADCAST_PER_RUN:
+      CONTROL_BROADCAST_INTERVAL_MS:
+      CONTROL_BROADCAST_RETRY_MINUTES:
+
+      # Zugangsdaten der öffentlichen Demo (gehen bei einer Demo-Anfrage hinaus).
+      DEMO_URL:
+      DEMO_LOGIN_USER:
+      DEMO_LOGIN_PASS:
+    volumes:
+      # Manifest dieser Verwaltung (install.sh setzt MANIFEST_FILE).
+      - ${MANIFEST_FILE:-./saas-instant.manifest.example.yaml}:/app/saas-instant.manifest.yaml:ro
+    # Weg zu einer Coolify-API auf dem Host (nur relevant, wenn sie dort lauscht).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      control-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Rechnungsdienst: erzeugt PDF/A-3b mit eingebettetem ZUGFeRD-XML. Nur im
+  # Compose-Netz erreichbar (kein ports:), die API ruft ihn über
+  # RECHNUNGSDIENST_URL auf. Das Image läuft als unprivilegierter Benutzer.
+  # Fällt er aus, melden nur die Dokumentrouten einen Fehler (502).
+  invoice-renderer:
+    build:
+      context: ./tools/invoice-renderer
+    expose:
+      - "8080"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  control-web:
+    build:
+      context: .
+      dockerfile: apps/control/Dockerfile.web
+      args:
+        # Basisdomain der Instanzen für die Verweise in der Oberfläche. Wird beim
+        # Bauen eingesetzt; install.sh übernimmt sie aus dem Manifest
+        # (provisioning.instanceDomainBase). Leer = nur Subdomain, kein Verweis.
+        VITE_INSTANCE_BASE_DOMAIN: ${CONTROL_INSTANCE_BASE_DOMAIN:-}
+    ports:
+      # Nur Loopback: control-web haengt X-Forwarded-For an, statt es zu
+      # ueberschreiben. Von aussen direkt erreichbar waere die IP im Rate-Limit
+      # und im Audit-Log frei waehlbar. Fuer den Betrieb im Netz steht ein
+      # TLS-Proxy auf demselben Host davor (docs/installation.md, Abschnitt 5).
+      - "${CONTROL_WEB_BIND:-127.0.0.1}:${CONTROL_WEB_PORT:-8080}:80"
+    depends_on:
+      - control-api
+    restart: unless-stopped
+
+volumes:
+  control-db-data:

@@ -1,0 +1,12 @@
+{
+  // Typprüfung des Entwicklungs-Seeds. Eigene Datei, weil `prisma/seed.ts`
+  // nicht in das Emit-Verzeichnis des Backends geraten darf: sonst verschiebt
+  // TypeScript den gemeinsamen Wurzelpfad und aus dist/main.js würde
+  // dist/src/main.js — der Container-Entrypoint liefe dann ins Leere.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": ["prisma/seed.ts", "src"]
+}

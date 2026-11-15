@@ -1,0 +1,35 @@
+# Abhängigkeiten
+node_modules/
+
+# Build-Ausgaben
+dist/
+dist-web/
+*.tsbuildinfo
+coverage/
+
+# Geheimnisse und lokale Konfiguration (nie einchecken)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Laufzeitdaten einer Installation (install.sh)
+/installations/
+/portal/registry.json
+/portal/portal.env
+/.saas-instant-mode
+
+# Sicherungen und Dumps
+backups/
+*.dump
+*.dump.age
+
+# Erzeugte Schriftkopien (apps/control/scripts/copy-fonts.mjs)
+/apps/control/public/fonts/
+
+# Logs und Editor-/System-Dateien
+*.log
+.DS_Store
+.idea/
+.vscode/

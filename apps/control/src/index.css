@@ -1,0 +1,38 @@
+@import "tailwindcss";
+@import "@saas-instant/ui/tokens.css";
+
+/* Tailwind schließt node_modules von der Klassen-Suche aus. @saas-instant/ui liegt
+   im pnpm-Workspace nur als Symlink darunter und würde deshalb NICHT gescannt —
+   die Utility-Klassen der geteilten Komponenten fielen still aus dem Bundle.
+   Diese Zeile meldet die Quelle des Pakets explizit an. */
+@source "../../../packages/ui/src";
+/* Testdateien beschreiben keine Oberfläche. Ohne diese Zeile landen
+   Klassennamen aus Testfixtures im ausgelieferten Stylesheet. */
+@source not "../../../packages/ui/src/**/*.test.tsx";
+
+/* Fehlerhafte Felder auch sehen, nicht nur hören: `Eingabefeld` aus
+   @saas-instant/ui setzt bei gesetzter `fehler`-Eigenschaft bereits
+   aria-invalid="true", färbt den Rahmen aber nicht um (Finding DW2). Die Regel
+   greift den bestehenden Gefahr-Token auf — kein neuer Farbwert, und die
+   geteilte Komponente bleibt unangetastet.
+
+   BEWUSST OHNE @layer: Die Komponente setzt die Rahmenfarbe über die Utility
+   `border-rahmen`, und Utilities stehen bei Tailwind v4 in einer späteren
+   Kaskadenschicht als `base`. Ungeschichtetes CSS schlägt jede Schicht — nur so
+   greift die Regel überhaupt. */
+input[aria-invalid='true'],
+select[aria-invalid='true'],
+textarea[aria-invalid='true'] {
+  border-color: var(--farbe-gefahr);
+}
+
+/* Bewegung reduzieren, wenn vom System gewünscht. Identisch zu apps/web. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

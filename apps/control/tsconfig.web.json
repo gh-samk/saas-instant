@@ -1,0 +1,41 @@
+{
+  // Typprüfung des Frontend-Teils von apps/control. Spiegelt bewusst die
+  // Optionen von apps/web wider, damit beide Oberflächen unter denselben
+  // Regeln stehen (strict, keine ungenutzten Bindungen, react-jsx).
+  //
+  // Der `include`-Block ist das Spiegelbild des `exclude`-Blocks in
+  // tsconfig.json: alle .tsx-Dateien plus die vier reinen Frontend-Ordner und
+  // src/setupTests.ts. Wird hier etwas ergänzt, muss es dort ausgeschlossen
+  // werden — sonst versucht `nest build` React-Code als CommonJS zu übersetzen.
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": [
+    "src/**/*.tsx",
+    "src/setupTests.ts",
+    "src/vitest-axe.d.ts",
+    "src/components",
+    "src/context",
+    "src/i18n",
+    "src/lib",
+    "src/pages",
+    "src/utils",
+    "vite.config.mts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-web"]
+}

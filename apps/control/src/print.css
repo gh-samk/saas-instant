@@ -1,0 +1,19 @@
+/* Druckmechanik für die Wiederherstellungscodes (Design-Spezifikation 9.4).
+   Bewusst keine Design-Tokens: hier geht es ausschließlich darum, beim Drucken
+   alles außer dem Codeblatt auszublenden. Farben stehen in tokens.css. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .druckbereich,
+  .druckbereich * {
+    visibility: visible;
+  }
+  .druckbereich {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+  }
+}

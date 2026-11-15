@@ -1,0 +1,31 @@
+:root {
+  --bg: #f6f7f9; --fg: #14181f; --muted: #4b5563; --card: #ffffff;
+  --border: #d5d9e0; --accent: #1d4ed8; --accent-fg: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1218; --fg: #e8ebf0; --muted: #a3acba; --card: #181c24;
+    --border: #2b323d; --accent: #8ab4ff; --accent-fg: #0b1220;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header, main { max-width: 64rem; margin: 0 auto; padding: 1rem; }
+h1 { margin: 1.5rem 0 .25rem; font-size: 1.75rem; }
+header p { margin: 0; color: var(--muted); }
+.cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: .75rem;
+  padding: 1.25rem; display: flex; flex-direction: column; gap: .75rem; align-items: flex-start; }
+.card h2 { margin: 0; font-size: 1.15rem; overflow-wrap: anywhere; }
+.card img { border-radius: .5rem; object-fit: contain; }
+.button { display: inline-block; padding: .6rem 1rem; min-height: 2.75rem; border-radius: .5rem;
+  background: var(--accent); color: var(--accent-fg); text-decoration: none; font-weight: 600; }
+.button:hover { filter: brightness(1.08); }
+a:focus-visible, main:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+.skip { position: absolute; left: -999px; top: 0; background: var(--card); color: var(--fg); padding: .5rem 1rem; }
+.skip:focus { left: 0; z-index: 10; }
+#status:empty { display: none; }
+#status { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

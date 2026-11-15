@@ -1,0 +1,44 @@
+saas-instant
+Selbst-hostbare Verwaltung (Kunden/Organisationen, Instanzen, Rechnungen) für SaaS-Software.
+
+Lizenz
+------
+Dieses Projekt steht unter der GNU Affero General Public License, Version 3
+(AGPL-3.0-only). Den vollständigen Lizenztext enthält die Datei LICENSE.
+Wer eine veränderte Fassung als Netzdienst betreibt, muss den Nutzern den
+Quelltext dieser Fassung anbieten (AGPL-3.0, Abschnitt 13).
+
+Herkunft
+--------
+saas-instant wurde ursprünglich aus der Verwaltungskomponente der Software
+SozioLog extrahiert und anschließend umbenannt, verallgemeinert und vom
+Produktbezug gelöst. SozioLog ist ein eigenständiges Produkt und nicht Teil
+dieses Projekts. Der Name wird nur an dieser Stelle genannt, um die Herkunft des
+Quelltexts anzugeben.
+
+Drittlizenzen
+-------------
+saas-instant bündelt und benutzt Software und Schriften Dritter. Diese bleiben
+unter ihren eigenen Lizenzen und werden durch die AGPL-3.0 dieses Projekts nicht
+neu lizenziert. Maßgeblich sind die Lizenzdateien und Metadaten der jeweiligen
+Pakete (`node_modules/<paket>/LICENSE`, `pnpm-lock.yaml`). Die genauen Fassungen
+legt `pnpm-lock.yaml` fest. Beispiele aus den direkten Abhängigkeiten:
+
+- NestJS, React, Vite, argon2, otplib, SimpleWebAuthn, qrcode, helmet:
+  MIT-Lizenz
+- nodemailer: MIT-0
+- Prisma: Apache License 2.0
+- lucide-react (Icons), yaml: ISC-Lizenz
+- Hanken Grotesk und Source Serif 4 (Schriften, über die Pakete
+  @fontsource-variable/*): SIL Open Font License 1.1. Die Schriftdateien dürfen
+  gebündelt und weitergegeben, aber nicht für sich allein verkauft werden;
+  Lizenzvermerke der Schriftautoren bleiben erhalten.
+
+Nicht Teil dieses Repositories und deshalb nicht von dieser Lizenzierung erfasst:
+der separate Rechnungsdienst für PDF/A-3 (Betreiber richtet ihn selbst ein und
+prüft dessen Lizenzen), Coolify, PostgreSQL, Docker und die verwaltete Software.
+
+Wer weitergibt oder ein Container-Image veröffentlicht, ist selbst dafür
+verantwortlich, die Lizenzhinweise der enthaltenen Fremdkomponenten
+mitzuliefern. Die Werkzeuge `pnpm licenses list` und `pnpm licenses list --prod`
+helfen beim Erstellen einer vollständigen Liste.

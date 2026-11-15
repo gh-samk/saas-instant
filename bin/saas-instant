@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Hilfsbefehle für saas-instant: list | status | up | down | add <slug> | emergency <slug> ...
+set -euo pipefail
+
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+ROOT_DIR="${SAAS_INSTANT_ROOT:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+INSTALL_DIR="$ROOT_DIR/installations"
+LOCK_FILE="$ROOT_DIR/.saas-instant-mode"
+COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+
+die() { printf 'Fehler: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'USAGE'
+Verwendung: saas-instant <Befehl>
+
+  list                      Verwaltungen auflisten
+  status [slug]             Containerstatus anzeigen
+  up [slug]                 Starten (ohne slug: alle)
+  down [slug]               Stoppen (ohne slug: alle; Daten bleiben erhalten)
+  add <slug>                Weitere Verwaltung anlegen (nur Modus portal)
+  emergency <slug> [Args]   Emergency-Befehl (Notfallzugang) im Container ausführen, z. B.
+                            emergency <slug> password <benutzer-oder-email>
+USAGE
+}
+
+mode() { [ -f "$LOCK_FILE" ] && sed -n 's/^mode=//p' "$LOCK_FILE" | head -n 1 || true; }
+
+slugs() {
+  local f
+  for f in "$INSTALL_DIR"/*/.env; do
+    [ -f "$f" ] || continue
+    basename "$(dirname "$f")"
+  done
+}
+
+need_slug() {
+  [ -n "${1:-}" ] || die "Kennung fehlt."
+  [ -f "$INSTALL_DIR/$1/.env" ] || die "Unbekannte Verwaltung '$1'. 'saas-instant list' zeigt die vorhandenen."
+}
+
+dc() { # dc <slug> <compose-Argumente...>
+  local slug="$1"; shift
+  docker compose --project-directory "$ROOT_DIR" --env-file "$INSTALL_DIR/$slug/.env" -f "$COMPOSE_FILE" "$@"
+}
+
+for_each() { # for_each <Funktion> [slug]
+  local fn="$1" slug="${2:-}" s
+  if [ -n "$slug" ]; then need_slug "$slug"; "$fn" "$slug"; return; fi
+  for s in $(slugs); do "$fn" "$s"; done
+}
+
+portal_dc() {
+  [ "$(mode)" = "portal" ] || return 0
+  docker compose --env-file "$ROOT_DIR/portal/portal.env" -f "$ROOT_DIR/apps/portal/docker-compose.portal.yml" "$@"
+}
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  list)
+    [ -n "$(slugs)" ] || { echo "Keine Verwaltung installiert."; exit 0; }
+    printf 'Modus: %s\n' "$(mode)"
+    for s in $(slugs); do
+      printf '%s\t%s\n' "$s" "$(sed -n 's/^CONTROL_APP_URL=//p' "$INSTALL_DIR/$s/.env" | head -n 1)"
+    done
+    ;;
+  status)
+    st() { echo "== $1"; dc "$1" ps; }
+    for_each st "${1:-}"
+    ;;
+  up)
+    upone() { dc "$1" up -d; }
+    for_each upone "${1:-}"
+    [ -n "${1:-}" ] || portal_dc up -d
+    ;;
+  down)
+    downone() { dc "$1" down; }
+    for_each downone "${1:-}"
+    [ -n "${1:-}" ] || portal_dc down
+    ;;
+  add)
+    [ -n "${1:-}" ] || die "Kennung fehlt: saas-instant add <slug>"
+    [ "$(mode)" = "portal" ] || die "'add' gibt es nur im Modus portal. Diese Installation läuft im Modus '$(mode)'."
+    exec "$ROOT_DIR/install.sh" --dir "$ROOT_DIR" --mode portal --software "$1" --non-interactive --yes
+    ;;
+  emergency)
+    need_slug "${1:-}"
+    slug="$1"; shift
+    [ $# -gt 0 ] || die "Unterbefehl fehlt (first-account, enrollment, password, unlock)."
+    dc "$slug" exec control-api node dist/cli/emergency.js "$@"
+    ;;
+  ""|-h|--help|help) usage ;;
+  *) usage >&2; die "Unbekannter Befehl: $cmd" ;;
+esac

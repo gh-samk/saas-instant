@@ -1,0 +1,61 @@
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2022",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src", "test"],
+  // Der Frontend-Teil (React) liegt laut Design-Spezifikation ebenfalls unter
+  // src/, wird aber von Vite gebaut und von tsconfig.web.json geprüft. Er ist
+  // hier ausgeschlossen, damit `nest build` und `tsc --noEmit` ausschließlich
+  // das CommonJS-Backend übersetzen.
+  //
+  // Trennlinie (spiegelbildlich zu tsconfig.web.json): ALLE .tsx-Dateien plus
+  // die vier reinen Frontend-Ordner und src/setupTests.ts. Das Backend legt
+  // dort nichts ab.
+  //
+  // ZWEITE Trennlinie, aus [K3]: PRUEFCODE GEHOERT NICHT INS AUSLIEFERUNGS-
+  // ARTEFAKT. Vorher uebersetzte `nest build` alle 38 Spec-Dateien und alle
+  // drei test-support-Module mit nach dist/ — darunter
+  // `test-support/organisation-aufbau.ts` mit `raeumeAuf(praefix)`, das per
+  // `startsWith` erst das Audit-Log, dann Notizen, dann Organisationen
+  // loescht. Mit dem leeren Praefix trifft es alles. Damit lag ein
+  // Massenloeschpfad ohne Schranke im Produktionsimage, und „kein Loeschpfad"
+  // (R1) sowie die Unversehrtheit des Nachweises (R6) waren im ausgelieferten
+  // Artefakt eine Verabredung statt einer Eigenschaft.
+  //
+  // `build-inhalt.spec.ts` haelt das Programm gegen diese Liste; die Regel
+  // steht damit nicht nur hier, sondern wird geprueft.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-web",
+    "src/**/*.tsx",
+    "src/setupTests.ts",
+    "src/vitest-axe.d.ts",
+    "src/components",
+    "src/context",
+    "src/i18n",
+    "src/lib",
+    "src/pages",
+    "src/utils",
+    "src/test-support",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts"
+  ]
+}

@@ -1,0 +1,105 @@
+# Compose-Vorlage einer INSTANZ — das, was die Verwaltung (apps/control) je
+# Kunde in Coolify anlegt, erreichbar unter <subdomain>.<instanceDomainBase>.
+# Quelle und Pfad stehen im Manifest (provisioning.repository / composePath)
+# oder in CONTROL_COOLIFY_REPO / CONTROL_COOLIFY_COMPOSE.
+#
+# Diese Datei beschreibt den VERTRAG zwischen Verwaltung und Instanz. Die
+# Image-Quellen (build.dockerfile unten) sind auf die Instanz-Anwendung des
+# Produkts anzupassen, das provisioniert werden soll.
+#
+# Kein eigener Reverse-Proxy: Coolifys Traefik terminiert TLS und routet die am
+# Dienst "web" gesetzte Domain auf web:80. db und api bleiben intern.
+#
+# INSTANZ-VERTRAG
+#   Die Verwaltung setzt je Instanz (Namen in apps/control/src/instanz/
+#   instanz.regeln.ts, UMGEBUNGSVARIABLEN; compose-pflicht.spec.ts hält beide
+#   gegeneinander):
+#     APP_URL, COOKIE_SECURE, NODE_ENV, POSTGRES_PASSWORD, JWT_SECRET,
+#     SESSION_SECRET, CONFIG_KEY, METRICS_TOKEN, SETUP_TOKEN,
+#     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM.
+#   Die Instanz stellt bereit (Pfade im Manifest konfigurierbar):
+#     GET  <metricsPath>      Kennzahlen, nur mit METRICS_TOKEN (sonst 404)
+#     GET  <setupStatusPath>  Einrichtungsstand, ohne Anmeldung
+#     GET  <setupPath>?token= Einladungslink; prüft SETUP_TOKEN
+#
+# COOLIFY-FALLE: Coolify legt für jede hier erwähnte Variable einen Eintrag an
+# und nimmt bei der Pflichtform (Doppelpunkt, Fragezeichen) DIE MELDUNG als
+# Wert. Deshalb gehört jede Pflichtvariable in die Liste der Verwaltung; wer
+# eine neue Pflichtvariable ergänzt, ergänzt sie dort auch.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: instanz
+      POSTGRES_USER: instanz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD muss gesetzt sein}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U instanz -d instanz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      # Zeitzone des Containers: bestimmt, welcher Kalendertag "heute" ist
+      # (Tagesdaten ohne Uhrzeit). IANA-Name, über APP_TIMEZONE änderbar.
+      TZ: ${APP_TIMEZONE:-Europe/Berlin}
+      DATABASE_URL: postgresql://instanz:${POSTGRES_PASSWORD}@db:5432/instanz?schema=public
+      NODE_ENV: production
+      PORT: "3000"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET muss gesetzt sein}
+      CONFIG_KEY: ${CONFIG_KEY:?CONFIG_KEY muss gesetzt sein}
+      COOKIE_SECURE: "1"
+      # Proxys vor der API: Coolify/Traefik -> web (nginx) -> api = ZWEI. Die
+      # Vorgabe 2 ist hier richtig und bleibt; sie ist NICHT blind zu erhoehen:
+      # jede Station zu viel laesst einen vom Client gesetzten X-Forwarded-For
+      # gelten (Rate-Limit und Audit-IP umgehbar), jede zu wenig zeigt nur die
+      # Proxy-Adresse. Aendert sich die Kette (nginx entfaellt, ein CDN kommt
+      # davor), MUSS dieser Wert mitgezogen werden.
+      TRUST_PROXY: ${TRUST_PROXY:-2}
+      APP_URL: ${APP_URL:?APP_URL (https://<subdomain>.<basis-domain>) muss gesetzt sein}
+      # Pflicht: ohne SMTP geht keine Einladung und kein Passwort-Reset heraus.
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST muss gesetzt sein, sonst kommen weder Einladungen noch Passwort-Reset an}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS_ERZWINGEN: "1"
+      # /api/version: SOURCE_COMMIT setzt die Verwaltung beim Anlegen selbst.
+      APP_GIT_SHA: ${SOURCE_COMMIT:-}
+      APP_BUILD_TIME: ${APP_BUILD_TIME:-}
+      # Lesegeheimnis des Kennzahlen-Endpunkts, je Instanz eigen, mindestens 32
+      # Zeichen. Nicht gesetzt: der Endpunkt existiert nicht (404).
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # Schützt das Erst-Setup, je Instanz eigen, mindestens 32 Zeichen. Nicht
+      # gesetzt: das Setup ist bis zum Abschluss unauthentifiziert (nur für
+      # selbst betriebene Instanzen; von der Verwaltung angelegte bekommen es).
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+    volumes:
+      - uploads-data:/app/apps/api/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    expose:
+      - "80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  uploads-data:
+  db-data:

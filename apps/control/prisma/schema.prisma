@@ -1,0 +1,1242 @@
+// Datenmodell von saas-instant Control (CRM/Verwaltung).
+//
+// HARTE REGEL R1: Dieses Schema beschreibt AUSSCHLIESSLICH die eigene Datenbank
+// `control`. Es gibt keine zweite DATABASE_URL und keine SQL-Verbindung
+// zu Kundeninstanzen. Kennzahlen kommen später ausschließlich über HTTP.
+//
+// Fachliche Datumsangaben sind `@db.Date` ohne Uhrzeit (Regel 1 der Projektkonventionen).
+// Technische Zeitstempel (Anmeldung, Sperre, Token-Ablauf) sind volle DateTime —
+// sie brauchen Minuten-Genauigkeit und sind keine fachlichen Daten.
+//
+// Auf Audit- und Rechnungsdaten gibt es KEIN Cascade-Delete: Nachweise dürfen
+// nicht durch das Löschen eines Bezugsobjekts verschwinden.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/control-client"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// DIE ROLLE UNTERSCHEIDET KEINE RECHTE.
+///
+/// Jedes Konto der Verwaltung kann dasselbe: festschreiben, stornieren,
+/// sperren, loeschen, weitere Konten eintragen. Das ist eine ausdrueckliche
+/// Entscheidung des Auftraggebers -- ein Betrieb mit zwei Personen braucht
+/// keine Rechteverwaltung, sondern Vertrauen und einen Nachweis darueber, wer
+/// was getan hat. Den Nachweis gibt es (Audit-Log, R6) und seit Etappe 6
+/// laesst er sich auch lesen.
+///
+/// Wozu die Rolle dann noch dient: Sie haelt fest, WELCHES Konto am Anfang
+/// stand.
+enum UserRole {
+  /// Das Konto aus der Ersteinrichtung.
+  owner
+
+  /// Jedes weitere eingetragene Konto.
+  administrator
+
+  /// UNBENUTZT und das bleibt so.
+  ///
+  /// Der Wert stammt aus einem verworfenen Entwurf mit abgestuften Rechten.
+  /// Er wird nirgends vergeben; `UserService` kennt genau eine Rolle fuer
+  /// neue Konten. Ihn zu entfernen waere eine nicht-additive Aenderung an
+  /// einem Enum -- dieselbe Lage wie bei `InvoiceStatus.overdue`.
+  staff
+}
+
+/// Zweck eines Notfall-Links. Ein Link fuer den einen Zweck taugt nie fuer den
+/// anderen — deshalb ein Feld und nicht zwei Tabellen mit gleicher Struktur.
+enum EmergencyKind {
+  passkey
+  password
+}
+
+enum CompanyStatus {
+  inquiry
+  demo
+  pilot_approved
+  pilot_running
+  paying
+  review_pending
+  dormant
+  ended
+}
+
+/// DER ZAHLUNGSRHYTHMUS — die drei, die die Webseite anbietet.
+///
+/// „Bei jaehrlicher Zahlung zahlt ihr elf Monate statt zwoelf, bei
+/// halbjaehrlicher einen halben weniger" (Produkt-Webseite). Die Betraege stehen
+/// in der Preistafel; hier steht nur, in welchem Takt abgerechnet wird.
+enum PaymentInterval {
+  yearly
+  half_yearly
+  monthly
+}
+
+/// WIE GEZAHLT WIRD — getrennt vom RHYTHMUS, weil es zwei Fragen sind.
+///
+/// Die Webseite bindet beides aneinander: „Halbjaehrlich und jaehrlich per
+/// Ueberweisung oder Lastschrift, monatlich per Lastschrift." Zwoelf einzelne
+/// Ueberweisungen im Jahr sind fuer beide Seiten Aufwand ohne Gegenwert.
+///
+/// DIE REGEL GILT SERVERSEITIG (`CompanyService`), nicht nur im
+/// Formular: Eine monatliche Zahlweise ohne Mandat waere eine Zusage, die
+/// niemand einloesen kann.
+enum PaymentMethod {
+  direct_debit
+  bank_transfer
+}
+
+enum Source {
+  form
+  phone
+  referral
+  event
+}
+
+enum InstanceStatus {
+  provisioning
+  active
+  stopped
+  archived
+}
+
+enum InvoiceStatus {
+  draft
+  finalized
+  sent
+  paid
+  /// Teilzahlung eingegangen. Kam mit Etappe 4 dazu.
+  partially_paid
+  /// UNBENUTZT und das bleibt so.
+  ///
+  /// Ueberfaelligkeit ist kein Zustand, der GESCHRIEBEN wird, sondern einer,
+  /// der sich aus `dueDate`, `status` und `paidAmount` ergibt.
+  /// Ein naechtlicher Lauf, der ihn setzte, waere ein automatischer
+  /// Schreibvorgang mit Geldfolge — genau das, was R5 ausschliesst. Statt-
+  /// dessen entsteht eine Dashboard-Aufgabe (`rechnung_ueberfaellig`), und
+  /// die Antwort traegt einen ABGELEITETEN `zahlungsstatus`.
+  ///
+  /// Der Wert steht seit der Init-Migration im Enum. Ihn zu entfernen waere
+  /// eine nicht-additive Aenderung an einer Tabelle mit zehn Jahren
+  /// Aufbewahrungspflicht.
+  overdue
+  cancelled
+}
+
+enum MailChannel {
+  transactional
+  marketing
+}
+
+enum DeliveryStatus {
+  queued
+  /// ETAPPE 5: Ein Versandlauf hat die Zeile uebernommen, SMTP laeuft gerade.
+  ///
+  /// Der Zustand ist noetig, damit die Freigabepruefung und die Uebernahme in
+  /// EINER Transaktion stattfinden koennen (R3). Ohne ihn muesste entweder
+  /// vor dem Versand "gesendet" geschrieben werden — dann gilt nach dem
+  /// naechsten SMTP-Ausfall eine Mail als zugestellt, die niemand bekommen
+  /// hat — oder gar nichts, dann nimmt ein zweiter Lauf dieselbe Zeile noch
+  /// einmal. Eine haengengebliebene Zeile in diesem Zustand ist ausserdem
+  /// SICHTBAR; eine faelschlich als gesendet vermerkte waere es nicht.
+  sending
+  sent
+  rejected
+  failed
+}
+
+enum ConsentStatus {
+  unconfirmed
+  confirmed
+  unsubscribed
+  hard_bounced
+  spam_reported
+}
+
+// ---------------------------------------------------------------------------
+// Zugang
+// ---------------------------------------------------------------------------
+
+model User {
+  id                    String    @id @default(uuid())
+  name                  String
+  // Anmeldung ist wahlweise über nutzername ODER email möglich; beide sind
+  // eindeutig, damit die Kennung immer genau ein Konto trifft.
+  username              String    @unique
+  email                 String    @unique
+  role                  UserRole  @default(owner)
+  // argon2id-Hash des Passworts (Faktor eins). Nullable: ein Konto kann
+  // ausschließlich per Passkey bestehen, bis per `emergency password` eines
+  // gesetzt wird. Der Klartext wird nirgends gespeichert oder geloggt.
+  passwordHash          String?
+  // TOTP-Geheimnis, verschlüsselt (AES-256-GCM, CONTROL_CONFIG_KEY).
+  // EINE von drei möglichen zweiten Faktoren (TOTP, E-Mail-Code, Passkey).
+  // Abschaltbar — aber nie als LETZTER: `ZugangService.pruefeNichtLetzterFaktor`
+  // weist das serverseitig ab, nicht die Oberfläche.
+  // Niemals im Klartext speichern, loggen oder ins Audit-Log schreiben.
+  totpSecret            String?
+  // NOCH NICHT BESTAETIGTES TOTP-Geheimnis, ebenso verschluesselt.
+  //
+  // `totp/einrichten` schreibt ausschliesslich hierher; erst `totp/bestaetigen`
+  // uebernimmt den Wert nach `totpSecret`. Vorher ueberschrieb die
+  // Einrichtung das aktive Geheimnis SOFORT — wer den Dialog oeffnete und
+  // abbrach, hatte einen toten Authenticator. Dieselbe Bauweise wie beim
+  // E-Mail-Faktor, wo die Zieladresse auch erst mit der Bestaetigung gilt.
+  totpSecretPending     String?
+  // Zuletzt akzeptierter TOTP-Zeitschritt (Replay-Schutz): ein Code gilt je
+  // Benutzer höchstens einmal. Wird atomar per bedingtem UPDATE fortgeschrieben.
+  totpLastStep          Int?
+  // Ablauf des vorlaeufigen Geheimnisses (10 Minuten, wie das
+  // Anmeldevorgang-Cookie).
+  //
+  // Ohne Ablauf blieb der Zustand „unbestaetigtes Geheimnis liegt am Konto"
+  // DAUERHAFT bestehen — der Normalfall nach jedem abgebrochenen
+  // Einrichtungsdialog. Und solange er bestand, war `totp/bestaetigen` ein
+  // Orakel: wer den Code errät, macht das vorlaeufige Geheimnis aktiv und hat
+  // damit einen gueltigen zweiten Faktor fuer ALLE geschuetzten Routen ([K5]).
+  // Ein abgelaufenes Geheimnis wird bei der naechsten Bestaetigung verworfen;
+  // zusaetzlich entwerten „alle abmelden" und der Passwortwechsel es sofort.
+  totpPendingValidUntil DateTime?
+  // Adresse, an die E-Mail-Anmeldecodes gehen. NULL heißt „nimm `email`" —
+  // so bleibt die Vorgabe automatisch richtig, wenn sich `email` später ändert.
+  // Wird erst gesetzt, wenn ein an diese Adresse geschickter Code bestätigt
+  // wurde; eine unbestätigte Wunschadresse steht solange auf dem Code-Datensatz
+  // (`EmailLoginCode.targetEmail`) und nirgends sonst.
+  loginCodeEmail        String?
+  // Ist der Faktor „Code per E-Mail" eingerichtet? Muss ein eigenes Feld sein:
+  // eine E-Mail-Adresse hat jedes Konto, eingerichtet ist der Faktor deshalb
+  // noch lange nicht.
+  loginCodeEnabled      Boolean   @default(false)
+  lastLoginAt           DateTime?
+  /// ZUGANG ENTZOGEN -- aber das Konto bleibt (R4).
+  ///
+  /// Ein geloeschtes Konto verloere die Zuordnung seiner Audit-Eintraege. Wer
+  /// wissen will, wer im Mai eine Rechnung festgeschrieben hat, braucht es
+  /// noch. Ein deaktiviertes Konto kann sich nicht anmelden; geprueft wird das
+  /// im Anmeldeweg, nicht nur in der Oberflaeche.
+  deactivatedAt         DateTime?
+  // Zählt hoch, sobald alle laufenden Sitzungen ungültig werden sollen:
+  // Passwortwechsel, Passkey-Registrierung, Passkey-Widerruf, „alle abmelden".
+  // Der Wert steht im Sitzungs-JWT; stimmt er nicht mehr überein, ist das
+  // Token wertlos. Ohne das bliebe ein gestohlenes Cookie 30 Tage gültig —
+  // und weil sich die Sitzung bei Nutzung selbst erneuert, sogar unbegrenzt.
+  sessionGeneration     Int       @default(0)
+  // Zählt hoch, sobald eine Anmeldung ABGESCHLOSSEN wurde. Der Wert steht im
+  // kurzlebigen Vorgangs-Cookie `anmeldung`; stimmt er nicht mehr überein, ist
+  // das Cookie wertlos. Ohne das könnte derselbe abgefangene Vorgangstoken ein
+  // zweites Mal eine Anmeldung abschließen ([H1]).
+  loginFlowGeneration   Int       @default(0)
+  failedAttempts        Int       @default(0)
+  // Selbstheilende Sperre: liegt der Zeitpunkt in der Zukunft, ist das Konto
+  // gesperrt. Nach Ablauf greift die Anmeldung wieder ohne Zutun.
+  lockedUntil           DateTime?
+  createdAt             DateTime  @default(now())
+
+  passkeys             PasskeyCredential[]
+  recoveryCodes        RecoveryCode[]
+  emailLoginCodes      EmailLoginCode[]
+  devices              Device[]
+  emergencyEnrollments EmergencyEnrollment[]
+  auditEntries         AuditLog[]
+}
+
+model PasskeyCredential {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String    @unique
+  publicKey    String
+  counter      Int       @default(0)
+  // Kommagetrennte Liste der WebAuthn-Transports (z. B. "internal,hybrid").
+  transports   String?
+  label        String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
+}
+
+model RecoveryCode {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // argon2id-Hash des Codes. Der Klartext existiert nur einmal bei der Ausgabe.
+  codeHash   String
+  createdAt  DateTime  @default(now())
+  consumedAt DateTime?
+
+  @@index([userId])
+}
+
+/// Ein achtstelliger Zahlen-Code, der per E-Mail als zweiter Faktor zugestellt
+/// wird. Es gibt je Benutzer IMMER HÖCHSTENS EINEN Datensatz — erzwungen durch
+/// `@@unique([userId])`, nicht durch Verabredung. Das Anfordern schreibt
+/// diese eine Zeile um; ein alter Code ist damit sofort wertlos.
+///
+/// Die Eindeutigkeit ist zugleich der Serialisierungspunkt der
+/// 60-Sekunden-Sperre: fünf gleichzeitige Anforderungen ringen um DIESELBE
+/// Zeile, genau eine gewinnt (siehe `EmailAnmeldecodeService.fordereAn`).
+model EmailLoginCode {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // argon2id-Hash des Codes. Der Klartext existiert nur in der einen E-Mail.
+  codeHash       String
+  // Adresse, an die dieser Code ging. Bei einem Einrichtungscode ist das die
+  // NOCH NICHT bestätigte Wunschadresse; erst das Einlösen schreibt sie nach
+  // `User.loginCodeEmail`. Ein Tippfehler sperrt so niemanden aus.
+  targetEmail    String
+  // true = dieser Code richtet den Faktor ein (bzw. ändert die Adresse),
+  // false = regulärer Anmeldecode. Ein Einrichtungscode darf keine Anmeldung
+  // abschließen und umgekehrt.
+  forSetup       Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  // Fehlversuche AUF DIESEN CODE. Ab dem fünften ist er verbrannt und muss neu
+  // angefordert werden — unabhängig von der Kontosperre, die zusätzlich greift.
+  failedAttempts Int       @default(0)
+  consumedAt     DateTime?
+
+  // EIGENSCHAFT, nicht Konvention: die Datenbank lässt keinen zweiten Code je
+  // Benutzer zu. Ersetzt den frueheren blossen @@index.
+  @@unique([userId])
+}
+
+model Device {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label      String
+  // SHA-256 des Merk-Tokens. Der Klartext steht nur im Cookie des Geräts.
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  validUntil DateTime
+
+  @@index([userId])
+}
+
+model EmergencyEnrollment {
+  id         String        @id @default(uuid())
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Zweck des Links: neuen Passkey anlegen ODER neues Passwort setzen.
+  kind       EmergencyKind @default(passkey)
+  // SHA-256 des Tokens. Der Klartext erscheint nur einmal auf stdout.
+  tokenHash  String        @unique
+  createdAt  DateTime      @default(now())
+  expiresAt  DateTime
+  redeemedAt DateTime?
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Kunden (ab Etappe 2 in Benutzung, hier bereits vollständig angelegt)
+// ---------------------------------------------------------------------------
+
+model Company {
+  id        String  @id @default(uuid())
+  name      String
+  legalForm String?
+  website   String?
+
+  // Anschrift
+  street      String?
+  houseNumber String?
+  postalCode  String?
+  city        String?
+  country     String? @default("Deutschland")
+
+  // Rechnungsadresse als eigene Felder (kann von der Anschrift abweichen)
+  billingName        String?
+  billingStreet      String?
+  billingHouseNumber String?
+  billingPostalCode  String?
+  billingCity        String?
+  billingCountry     String?
+  billingEmail       String?
+
+  // Hauptansprechpartnerin als feste Felder (bewusst keine eigene Tabelle:
+  // genau eine Person je Rolle, kein Verwaltungsaufwand für Etappe 2).
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  contactRole  String?
+
+  // Stellvertretung, dieselben Felder, durchgehend optional
+  deputyName  String?
+  deputyEmail String?
+  deputyPhone String?
+  deputyRole  String?
+
+  status             CompanyStatus @default(inquiry)
+  lastStatusChangeAt DateTime?     @db.Date
+
+  priceTier       String?
+  customAmount    Decimal?         @db.Decimal(10, 2)
+  paymentInterval PaymentInterval?
+
+  /// Lastschrift oder Ueberweisung. Bei `monthly` ist nur `direct_debit`
+  /// zulaessig -- geprueft im Dienst, nicht nur im Formular.
+  paymentMethod PaymentMethod?
+
+  // Reine Textfelder ohne Logik. SEPA-XML und Zahlungsabgleich sind
+  // ausdrücklich nicht Teil dieses Systems: Das Mandat wird ERFASST, der
+  // Einzug loest die Betreiberin im Onlinebanking aus. Was das System dazu
+  // beitraegt, ist die Vorabankuendigung auf der Rechnung.
+  sepaMandateReference String?
+  sepaMandateDate      DateTime? @db.Date
+  iban                 String?
+
+  /// Bankleitzahl im internationalen Format. Im Inland nicht zwingend, aber
+  /// die Betreiberin gibt im Onlinebanking ein, was ihre Bank verlangt.
+  bic String?
+
+  /// Kontoinhaberin, wenn sie NICHT die Organisation ist -- Traegerverein,
+  /// Vorstand, Privatperson. Ohne dieses Feld waere das Mandat inhaltlich
+  /// falsch: Es ermaechtigt die, der das Konto gehoert.
+  accountHolder String?
+
+  /// DER NACHWEIS DES ELEKTRONISCHEN MANDATS -- dieselbe Bauweise wie bei
+  /// `Consent`: der Wortlaut, wie er dastand, der Zeitpunkt und die
+  /// Absender-IP. Ein Verweis auf eine Vorlage genuegt NICHT: Wer sie
+  /// spaeter aendert, belegt rueckwirkend etwas anderes, als die
+  /// Kontoinhaberin gelesen hat.
+  sepaMandateText String?
+
+  /// ZEITPUNKT, nicht Tag -- bewusste Ausnahme von Regel 1 der Projektkonventionen,
+  /// mit derselben Begruendung wie `Consent.subscribedAt`: Ein Nachweis
+  /// ueber eine Willenserklaerung, der nur den Tag kennt, laesst offen,
+  /// welche von zwei Erklaerungen desselben Tages gilt.
+  sepaMandateGrantedAt DateTime?
+
+  /// Die Absender-IP beim Erteilen. Teil des Nachweises, wie bei der
+  /// Einwilligung.
+  sepaMandateIp String?
+
+  /// QUITTUNG des Aufnahmeformulars: der Tag, an dem die Organisation ihre
+  /// Angaben abgeschickt hat. Vorbild `reviewDoneAt` -- ein
+  /// Vorgang ohne Quittung wird immer wieder faellig.
+  intakeCompletedAt DateTime? @db.Date
+
+  /// DER RIEGEL FUER DEN EINMALIGEN AUTOMATIKVERSAND. Gesetzt im SELBEN
+  /// bedingten UPDATE wie der Statuswechsel auf `pilot_approved`;
+  /// ausgeloest wird der Versand nur, wenn er vorher leer war.
+  ///
+  /// WARUM NICHT AM STATUS: Es gibt keine Vorwaerts-Regel. Jeder Status
+  /// laesst sich auf jeden anderen setzen -- `StatuswechselDialog.tsx`
+  /// begruendet ausdruecklich, warum bewusst keine Zustandsmaschine
+  /// erfunden wurde. Ein Hin und Her wuerde die Mail sonst erneut ausloesen.
+  intakeLinkSentAt DateTime?
+
+  pilotDecisionDate DateTime? @db.Date
+  reviewDueDate     DateTime? @db.Date
+  /// QUITTUNG der Ueberpruefung: der Tag, an dem die Betreiberin den Status
+  /// `review_pending` wieder verlassen hat.
+  ///
+  /// Ohne dieses Feld liess sich die Ueberpruefung NIE abschliessen ([K2]):
+  /// Die Faelligkeit haengt an `pilotDecisionDate + 7 Monate`, und dieses
+  /// Datum wandert nie. Wer den Status zurueck auf `paying` setzte, bekam ihn
+  /// in der naechsten Nacht wieder auf `review_pending` — mit zwei
+  /// Systemnotizen und zwei Audit-Zeilen pro Tag und Organisation, dauerhaft.
+  ///
+  /// Der Zeitplan uebergeht eine Organisation, deren Quittung NICHT VOR dem
+  /// faelligen Termin liegt. Verschiebt sich der Termin, weil das
+  /// Beschlussdatum berichtigt wurde, greift die alte Quittung dadurch von
+  /// selbst nicht mehr — verglichen wird zeilenweise, nicht gegen ein
+  /// Stichdatum.
+  reviewDoneAt      DateTime? @db.Date
+  instanceStartDate DateTime? @db.Date
+
+  newsletterConsentStatus ConsentStatus?
+  source                  Source?
+  notes                   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  instance         Instance?
+  instancePreviews InstancePreview[]
+  intakeAccesses   IntakeAccess[]
+  noteEntries      Note[]
+  invoices         Invoice[]
+  mailDeliveries   MailDelivery[]
+  consents         Consent[]
+  inquiries        Inquiry[]
+
+  @@index([status])
+}
+
+model Instance {
+  id        String  @id @default(uuid())
+  // Höchstens EINE Instanz je Organisation — als unique erzwungen.
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  subdomain             String  @unique
+  coolifyApplicationId  String?
+  coolifyDatabaseId     String?
+  // Lesetoken für die Kennzahlen-Schnittstelle der Instanz, AES-256-GCM
+  // verschlüsselt. Es gibt keinen Codepfad, der damit eine Instanz löscht.
+  metricsTokenEncrypted String?
+
+  /// Geheimnis des EINLADUNGSLINKS, ebenso AES-256-GCM verschlüsselt ([K4]).
+  ///
+  /// Ohne dieses Feld war der „Einladungslink" die frei erratbare Konstante
+  /// `https://<subdomain>.<basis>/setup`, und `POST /api/setup` ist bis
+  /// zum Abschluss der Einrichtung unauthentifiziert: Wer die frische
+  /// Subdomain zuerst erreicht, wird Admin der Organisation. Die Instanz wird
+  /// dabei nicht einmal zufällig gefunden — der Aufbau wartet auf ein
+  /// TLS-Zertifikat, und jedes ausgestellte Zertifikat steht sekundengenau im
+  /// Certificate-Transparency-Log.
+  ///
+  /// Das Geheimnis geht beim Anlegen als Umgebungsvariable `SETUP_TOKEN` an
+  /// die Instanz — derselbe Weg wie der Kennzahlen-Token, also KEINE
+  /// Schreiboperation in das Schema der Kundeninstanz (R1).
+  setupTokenEncrypted String?
+
+  status             InstanceStatus @default(provisioning)
+  createdAt          DateTime       @default(now())
+  archivedAt         DateTime?      @db.Date
+  appVersion         String?
+  /// ZEITPUNKT DES LETZTEN VERSUCHS, nicht der letzten erfolgreichen Abfrage.
+  ///
+  /// Aus dem Feldnamen allein war das nicht eindeutig (Offener Punkt 12.5 der
+  /// Etappe-3-Spezifikation). Die Entscheidung fiel bewusst auf „Versuch":
+  /// nur so ist unterscheidbar, ob der taegliche Lauf eine Instanz UEBERGANGEN
+  /// hat (Feld bleibt alt) oder ob er sie ERREICHT und keine Antwort bekommen
+  /// hat. Der vom Auftrag verlangte Zeitpunkt der letzten ERFOLGREICHEN
+  /// Abfrage wird aus der `Metric`-Historie abgeleitet
+  /// (`letzteErfolgreicheAbfrageAm`) und nirgends doppelt gefuehrt.
+  ///
+  /// BEWUSSTE AUSNAHME VON REGEL 1 DER PROJEKTKONVENTIONEN (nur Tagesdatum) — mit
+  /// demselben Grund wie `User.lastLoginAt` und die Sperrzeiten
+  /// ([H5]): Das hier ist ein TECHNISCHER Zeitstempel, keine fachliche
+  /// Datumsangabe. Er beantwortet „laeuft der naechtliche Job noch?", und
+  /// dafuer braucht es die Uhrzeit: Ein Tagesdatum sagt nicht, ob der Lauf um
+  /// 4 Uhr stattgefunden hat oder seit 20 Stunden haengt. Die FACHLICHE Angabe
+  /// — an welchem Tag welche Zahlen galten — steht im Tagesdatum von
+  /// `Metric.datum`.
+  lastMetricsFetchAt DateTime?
+  /// Tag, an dem die Instanz als EINGERICHTET erkannt wurde — erste
+  /// Admin-Person angelegt, Einrichtungslink verbraucht.
+  ///
+  /// Gesetzt wird er nur von `null` auf einen Tag, nie zurück: vom
+  /// Kennzahlenabruf (aktive Personen oder eine Organisation gemeldet) und beim
+  /// Öffnen der Karte über `GET /api/setup/status` der Instanz. Vorher kannte
+  /// das CRM den Zustand nur aus dem nächtlichen Abruf und zeigte bis zu 24
+  /// Stunden lang „noch nicht eingelöst" für eine längst eingerichtete Instanz.
+  setupCompletedAt   DateTime?      @db.Date
+
+  /// Klartext-Zwischenstand waehrend `provisioning` und `stopped`, z. B.
+  /// „Warte auf Health-Check ..." oder „Fehlgeschlagen: ...".
+  ///
+  /// Der Grund fuer dieses Feld ist E3-12: Scheitert das Anlegen mittendrin,
+  /// muss der Zustand SICHTBAR sein. Ohne die Meldung bliebe nur ein
+  /// `provisioning`, das nach 15 Minuten als „haengt fest" erscheint — der
+  /// stille Halbzustand, den der Auftrag ausschliesst. Enthaelt NIEMALS
+  /// Geheimnisse; die Texte sind fest im Code formuliert.
+  message String?
+
+  metrics Metric[]
+  backups Backup[]
+}
+
+/// EINE gelungene Sicherung einer Kundeninstanz — Zeitpunkt und Groesse.
+///
+/// BEWUSST OHNE `status`-FELD. Der Normalfall des Scheiterns ist bei Backups
+/// nicht ein Fehlerstatus, sondern STILLES AUSBLEIBEN. Eine Zeile existiert
+/// genau dann, wenn eine Sicherung gelungen ist; ihr FEHLEN ist das Signal,
+/// das die Aufgabenquelle `backup_ausgeblieben` auswertet. Ein zusaetzliches
+/// Flag „fehlgeschlagen" wuerde nur den Fall abdecken, der sich ohnehin
+/// meldet.
+///
+/// Geschrieben wird ausschliesslich vom externen Sicherungswerkzeug ueber
+/// `POST /api/backups` (Schluessel im Header). Es gibt KEINEN Codepfad,
+/// der von hier aus eine Sicherung zurueckspielt oder loescht (R1, R4).
+model Backup {
+  id         String   @id @default(uuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Restrict)
+
+  /// Fachliches Tagesdatum ohne Uhrzeit (Regel 1 der Projektkonventionen).
+  date      DateTime @db.Date
+  sizeBytes BigInt
+  createdAt DateTime @default(now())
+
+  /// Hoechstens EINE Zeile je Instanz und Tag. Zwei Laeufe am selben Tag
+  /// (der Betrieb sichert zweimal taeglich) schreiben dieselbe Zeile um,
+  /// statt die Historie zu verdoppeln.
+  @@unique([instanceId, date])
+  @@index([instanceId, date])
+}
+
+/// DIE PFLICHT-VORSCHAU VOR DEM ANLEGEN EINER INSTANZ — serverseitig.
+///
+/// Der Auftrag nennt den Grund selbst: „Eine falsch getippte Subdomain, die
+/// eine bestehende ueberschreibt, ist bei voller Automatik ein stiller
+/// Datenverlust." Waere die Vorschau nur ein Dialogschritt im Browser, waere
+/// die Pflicht eine UI-Hoeflichkeit — ein direkter Aufruf des
+/// Anlege-Endpunkts umginge sie.
+///
+/// Deshalb existiert diese Zeile: `POST .../instanz/vorschau` legt sie an,
+/// `POST .../instanz` findet sie oder lehnt ab. Sie wird beim Anlegen
+/// ATOMAR verbraucht (`updateMany` mit `usedAt: null`) — damit ist sie
+/// zugleich die Schranke gegen den Doppelklick und gegen zwei gleichzeitige
+/// Anfragen.
+model InstancePreview {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  subdomain  String
+  createdAt  DateTime  @default(now())
+  /// Technischer Zeitstempel: eine Vorschau ist kurzlebig (15 Minuten). Wer
+  /// den Dialog offen liegen laesst, prueft die Verfuegbarkeit neu.
+  validUntil DateTime
+  usedAt     DateTime?
+
+  @@index([companyId, subdomain])
+}
+
+/// Ergebnis eines taeglichen Abgleichs zwischen Coolify und dem CRM-Register.
+///
+/// Der Abgleich MELDET, er korrigiert nicht (E3-16). Gespeichert wird er nur,
+/// weil er extern nachfragen muss und das nicht bei jedem Dashboard-Aufruf
+/// wiederholt werden soll. Fuer die Oberflaeche zaehlt ausschliesslich der
+/// JEWEILS LETZTE Lauf; aeltere Zeilen sind Historie (Offener Punkt 12.7 —
+/// Entscheidung: Historie, weil „wann faengt eine Abweichung an" sonst nicht
+/// beantwortbar waere und ein Ueberschreiben Nachweis vernichtete).
+model ReconciliationRun {
+  id                   String   @id @default(uuid())
+  executedAt           DateTime @default(now())
+  /// `[{ subdomain, coolifyUrl, erkanntAm }]` — Anwendungen in Coolify ohne
+  /// passenden CRM-Eintrag.
+  orphanedApplications Json
+  /// `[{ instanceId, companyId, art, crmStatus, coolifyStatus }]` —
+  /// organisationsgebundene Abweichungen, die zu Aufgaben werden.
+  deviations           Json
+  /// false = der Lauf selbst ist gescheitert (Coolify nicht erreichbar).
+  /// Dann sind beide Listen leer und `message` nennt den Grund — ein leeres
+  /// Ergebnis darf nicht als „kein Befund" gelesen werden.
+  successful           Boolean  @default(true)
+  message              String?
+
+  @@index([executedAt])
+}
+
+model Metric {
+  id         String   @id @default(uuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Restrict)
+
+  date               DateTime  @db.Date
+  /// NULLABLE, und das ist der Kern von E3-7: Eine fehlgeschlagene Abfrage
+  /// wird GESPEICHERT, nicht verschluckt — aber sie hat keine Zahlen. Eine 0
+  /// an dieser Stelle waere eine Falschaussage und loeste die Aufgabe
+  /// „seit 45 Tagen kein Eintrag" aus, obwohl niemand etwas darueber weiss.
+  activePersons      Int?
+  circles            Int?
+  lastEntryAt        DateTime? @db.Date
+  lastLoginAt        DateTime? @db.Date
+  appVersion         String?
+  fetchSuccessful    Boolean   @default(true)
+  /// Grund eines Fehlschlags als FESTER SCHLUESSEL, nie als durchgereichte
+  /// Fehlermeldung: `zeitueberschreitung`, `nicht_erreichbar`, `rejected`,
+  /// `nicht_aktiv`, `unerwartete_antwort`, `kein_token`. Eine rohe Meldung
+  /// koennte URL samt Token enthalten — dasselbe Geheimnis, das anderswo
+  /// verschluesselt liegt.
+  errorKind          String?
+  /// Zustand der Datenbank der Instanz (`erreichbar` / `gestoert`), wie ihn
+  /// der Kennzahlen-Endpunkt gemeldet hat.
+  databaseState      String?
+  /// Stimmt der Organisationsname IN DER INSTANZ mit dem Vertragsnamen im CRM
+  /// ueberein? `null` = nicht gemessen (alte Instanz, gescheiterte Abfrage,
+  /// Instanz noch ohne Organisation).
+  ///
+  /// Verglichen werden ABDRUECKE, nie Namen: Das CRM schickt den Abdruck des
+  /// erwarteten Namens mit, die Instanz antwortet mit ja oder nein. Damit ist
+  /// E3-20 erfuellt, ohne E3-3 zu verletzen — ueber die Leitung geht in keiner
+  /// Richtung ein Name.
+  companyNameMatches Boolean?
+
+  @@unique([instanceId, date])
+  @@index([date])
+}
+
+/// ===========================================================================
+/// DER EINMAL-ZUGANG ZUM AUFNAHMEFORMULAR
+/// ===========================================================================
+///
+/// WARUM EIN EIGENES MODELL UND KEIN ANBAU AN `EmergencyEnrollment`:
+/// Deren `userId` ist nicht-nullbar mit `onDelete: Cascade`. Sie nullbar
+/// zu machen verwandelte eine Invariante („ein Link gehoert zu genau einem
+/// Konto") in eine Disjunktion, die jeder Leser von `pruefe()` mitdenken
+/// muesste. `GeprueftesNotfallToken` liefert ausserdem `username`, `role`
+/// und `email` -- fuer eine Organisation ist jedes davon bedeutungslos.
+///
+/// Das Argument der Migration `einladungstabelle_entfernt` gilt hier NICHT:
+/// Sie richtete sich gegen ein zweites, KONTO-AEHNLICHES Ding mit eigenem
+/// Zustandsdiagramm neben dem Konto. Hier ist der Gegenstand eine
+/// Organisation, der Token gewaehrt keine Anmeldung, und es gibt keine
+/// Doppeldeutigkeit zwischen zwei Dingen desselben Typs.
+///
+/// GETEILT WIRD DIE MECHANIK, NICHT ABGESCHRIEBEN: Erzeugung und Hashing
+/// stehen in `common/einmal-token.ts`, das auch `NotfallService` benutzt.
+model IntakeAccess {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// NUR der Hash. Der Klartext verlaesst den Prozess genau einmal -- beim
+  /// Erzeugen -- und steht nirgends in der Datenbank.
+  tokenHash String @unique
+
+  createdAt DateTime @default(now())
+
+  /// 14 Tage. Begruendung wie bei `EINLADUNG_GUELTIG_MS`: Der Link wird
+  /// weitergereicht und intern abgestimmt; eine kurze Frist waere in der
+  /// Praxis fast immer verstrichen.
+  expiresAt DateTime
+
+  /// Gesetzt beim Absenden des Formulars, in derselben Transaktion wie die
+  /// Schreibvorgaenge. KEIN Zwischenschritt fasst ihn an.
+  redeemedAt DateTime?
+
+  /// Ersetzt durch einen neuen Link -- NICHT dasselbe wie eingeloest.
+  /// Dieselbe Unterscheidung, die `Consent` zwischen `unsubscribedAt` und
+  /// `deactivatedAt` trifft: eine Handlung der Kundin gegen eine
+  /// Entscheidung des Systems.
+  revokedAt DateTime?
+
+  /// Wann der Link zuletzt hinausging und wie oft insgesamt -- fuer die
+  /// Karte in der Verwaltung: „am 07.09.2026 an … gesendet (2x)".
+  lastSentAt DateTime?
+  sendCount  Int       @default(0)
+
+  @@index([companyId])
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  /// FACHLICHES Tagesdatum ohne Uhrzeit (Regel 1 der Projektkonventionen): der Tag, an dem
+  /// das Telefonat stattfand oder der Status wechselte. Frei wählbar — ein
+  /// Telefonat wird oft erst am Folgetag erfasst und gehört trotzdem an den Tag
+  /// des Telefonats.
+  date      DateTime @db.Date
+  text      String
+  /// true = vom System VERFASST (Statuswechsel, Wechsel der Ansprechpartnerin,
+  /// Eingang einer Anfrage). Solche Notizen sind unveraenderlich.
+  ///
+  /// false = NICHT vom System verfasst: von Hand erfasst ODER von aussen
+  /// uebermittelt (die Angaben aus dem oeffentlichen Formular). Nur diese
+  /// lassen sich aendern und loeschen.
+  ///
+  /// DIE GRENZE VERLAEUFT AM WORTLAUT, NICHT AM AUSLOESER ([K1]): Frueher schrieb
+  /// der oeffentliche Anfrageweg den Freitext des Absenders in eine
+  /// `bySystem`-Notiz. Damit konnte ein Unbeteiligter mit nichts als der
+  /// Kontaktadresse aus dem Impressum unloeschbaren Text in den Nachweis
+  /// stellen — und ihn ueber Zeilenumbrueche wie eine echte Systemzeile
+  /// aussehen lassen.
+  bySystem  Boolean  @default(false)
+  /// TECHNISCHER Zeitstempel, wann die Zeile geschrieben wurde. Dieselbe
+  /// Trennlinie wie überall in diesem Schema: `datum` ist die fachliche Angabe,
+  /// `createdAt` der Nachweiszeitpunkt — und nur er ordnet.
+  ///
+  /// Ohne ihn hatten mehrere Notizen DESSELBEN Tages gar keine Reihenfolge; der
+  /// Verlauf sortierte ersatzweise nach `id`, also nach Zufall. Sichtbar wurde
+  /// das genau dort, wo der Verlauf am meisten leistet: systemerzeugte Notizen
+  /// häufen sich am selben Tag (Statuswechsel und Wechsel der
+  /// Ansprechpartnerin), und dann stand die spätere Änderung mit gleicher
+  /// Wahrscheinlichkeit über wie unter der früheren.
+  createdAt DateTime @default(now())
+  /// LAUFENDE NUMMER, die die Reihenfolge entscheidet.
+  ///
+  /// `createdAt` hat Millisekunden-Aufloesung, und zwei Notizen entstehen
+  /// durchaus in derselben Millisekunde — der oeffentliche Anfrageweg schreibt
+  /// zwei Notizen in EINER Transaktion. Dann war die Reihenfolge wieder offen,
+  /// obwohl der Kommentar an `createdAt` das Gegenteil behauptete ([W9]); der
+  /// Verlaufstest fiel im vollen Lauf gelegentlich um.
+  ///
+  /// Eine Sequenz kann nicht kollidieren. `createdAt` bleibt fuer die
+  /// Anzeige, `folge` ordnet.
+  sequence  BigInt   @unique @default(autoincrement())
+
+  @@index([companyId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Rechnungen (Etappe 4). Kein Cascade-Delete, Rechnungsnummer erst beim
+// Festschreiben, Empfänger- und Ausstellerdaten als Schnappschuss-SPALTEN.
+// ---------------------------------------------------------------------------
+
+model Invoice {
+  id        String  @id @default(uuid())
+  // Referenz NUR für die Zuordnung (Filter, Auswertung), NIEMALS für die
+  // Darstellung auf der Rechnung — dafür sind die Schnappschussfelder da.
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  // Bleibt null, solange die Rechnung Entwurf ist. Erst das Festschreiben
+  // vergibt eine lückenlose Nummer.
+  invoiceNumber String? @unique
+
+  invoiceDate        DateTime @db.Date
+  servicePeriodFrom  DateTime @db.Date
+  servicePeriodUntil DateTime @db.Date
+  dueDate            DateTime @db.Date
+
+  status      InvoiceStatus @default(draft)
+  paymentDate DateTime?     @db.Date
+  paidAmount  Decimal?      @db.Decimal(10, 2)
+
+  /// NACHWEISZEITPUNKT des Festschreibens — nicht das Rechnungsdatum.
+  ///
+  /// `invoiceDate` ist die fachliche Angabe nach § 14 UStG und darf
+  /// abweichen; `createdAt` gehoert zum ENTWURF. Fuer die zehnjaehrige
+  /// Aufbewahrung zaehlt der Zeitpunkt, ab dem das Dokument unveraenderlich
+  /// ist, und das ist keiner von beiden.
+  finalizedAt DateTime?
+
+  // Gegenseitige Verweise Storno <-> Original als 1:1-Selbstrelation:
+  // `cancelledInvoiceId` steht auf der Stornorechnung, `cancellationInvoice`
+  // ist der Rückverweis auf der stornierten Rechnung.
+  cancelledInvoiceId  String?  @unique
+  cancelledInvoice    Invoice? @relation("Cancellation", fields: [cancelledInvoiceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cancellationInvoice Invoice? @relation("Cancellation")
+
+  /// Warum storniert wurde. Steht auf der STORNORECHNUNG, nie auf dem
+  /// Original: die Stornorechnung ist das Dokument, das die Begruendung
+  /// tragen muss.
+  cancellationReason String?
+
+  /// Einleitungssatz und Zahlungshinweis auf dem BELEG (Entwurf, Abschnitt 5).
+  /// Sie werden mit dem Festschreiben unveraenderlich wie alles andere am
+  /// Beleg — deshalb hier und nicht in der Konfiguration.
+  introduction String?
+  paymentNote  String?
+  /// Der Zettel am Vorgang. Steht NICHT auf dem Beleg und geht in keine Mail.
+  internalNote String?
+
+  /// UNBENUTZT. Beide Felder stammen aus der Init-Migration und setzen einen
+  /// dauerhaften Datentraeger neben dem Container voraus — den es nicht gibt.
+  /// Das ausgegebene Dokument liegt stattdessen in `pdfContent`/`xmlContent`.
+  /// Entfernt werden sie nicht: das waere eine nicht-additive Aenderung an
+  /// einer Tabelle mit zehn Jahren Aufbewahrungspflicht.
+  pdfPath String?
+  xmlPath String?
+
+  /// DAS AUSGEGEBENE DOKUMENT SELBST: PDF/A-3b mit eingebettetem
+  /// `factur-x.xml` (Profil EN 16931), erzeugt und selbst geprueft vom
+  /// Rechnungsdienst. Bleibt `null`, solange die Rechnung Entwurf ist oder
+  /// der Dienst nicht erreichbar war — das Dokument laesst sich jederzeit
+  /// aus dem Schnappschuss nachziehen, weil dort alle Werte stehen.
+  pdfContent Bytes?
+  /// Dieselbe Rechnung als reines CII-XML. Liegt getrennt vor, damit sie sich
+  /// ohne PDF-Werkzeug pruefen und an ein Buchhaltungsprogramm uebergeben
+  /// laesst.
+  xmlContent Bytes?
+
+  /// Uebertragung an die Buchhaltung (lexoffice, sevDesk o. a.).
+  ///
+  /// AUSDRUECKLICH OHNE SCHNITTSTELLE. Es gibt keinen Codepfad, der Belege an
+  /// einen Buchhaltungsdienst schickt; die Betreiberin uebertraegt sie von
+  /// Hand und setzt dieses Feld dabei.
+  transferStatus String?
+
+  // --- Schnappschuss Empfänger (Kopien, KEINE Relationen) ---
+  recipientName    String
+  recipientAddress String
+  recipientEmail   String?
+
+  // --- Schnappschuss Aussteller (Kopien, KEINE Relationen) ---
+  issuerCompanyName                       String
+  issuerAddress                           String
+  /// SITZ DER KG im Sinne des § 125a HGB — nicht dasselbe wie die
+  /// Geschaeftsanschrift, auch wenn beide meist zusammenfallen. Fehlte bis
+  /// [W3] auf Fusszeile und BT-33, obwohl die Rundmail ihn nannte: Die beiden
+  /// Geschaeftsbriefe des Hauses widersprachen sich.
+  issuerSeat                              String?
+  issuerVatId                             String?
+  issuerRegisterCourt                     String?
+  issuerCommercialRegisterA               String?
+  issuerGeneralPartner                    String?
+  /// Sitz der Komplementaerin. § 125a i. V. m. § 177a HGB verlangt ihn
+  /// ausdruecklich; er fehlte bis [W3] ganz.
+  issuerGeneralPartnerSeat                String?
+  issuerGeneralPartnerRegisterCourt       String?
+  issuerGeneralPartnerCommercialRegisterB String?
+  issuerManagingDirector                  String?
+  /// Die Mandatsreferenz, unter der DIESE Rechnung eingezogen wird.
+  ///
+  /// SCHNAPPSCHUSS, wie `recipientName` und `issuerSeat`: Wer das Mandat
+  /// spaeter wechselt, darf die Rechnung von 2026 nicht rueckwirkend eine
+  /// andere Referenz nennen lassen, als in der Vorabankuendigung stand.
+  ///
+  /// `null` heisst: Diese Rechnung wird nicht eingezogen -- dann steht auf dem
+  /// Beleg die gewoehnliche Zahlungsbedingung.
+  directDebitMandateReference             String?
+
+  issuerBankDetails String?
+
+  createdAt DateTime @default(now())
+
+  lines InvoiceLine[]
+
+  @@index([companyId])
+  @@index([status])
+  /// Faellige, noch offene Rechnungen sind eine abgeleitete Dashboard-Aufgabe
+  /// und werden bei jedem Aufruf neu gesucht.
+  @@index([dueDate])
+}
+
+model InvoiceLine {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  label        String
+  /// Mengeneinheit nach UN/ECE Rec. 20, z. B. `C62` (Stueck), `MON` (Monat),
+  /// `HUR` (Stunde). Landet als `unitCode` im CII-XML (BT-130).
+  ///
+  /// [H2]: Das Feld wurde vom DTO entgegengenommen, validiert, bis in
+  /// `PostenEingabe` gereicht — und dann nie gespeichert; im XML stand fest
+  /// `C62`. Auf einem UNVERAENDERLICHEN Beleg ist eine stillschweigend
+  /// verworfene Eingabe besonders unangenehm: Wer „Monat" eintraegt und
+  /// festschreibt, hat einen Beleg mit „Stueck", den niemand mehr aendern
+  /// kann.
+  ///
+  /// Nullbar, damit die Migration additiv bleibt. Fehlt der Wert — bei jedem
+  /// vor [H2] angelegten Posten —, gilt beim Rendern weiterhin `C62`.
+  unit         String?
+  /// Freitext unter der Bezeichnung. Wurde bis zum Redesign im DTO
+  /// entgegengenommen und beim Schreiben stillschweigend verworfen —
+  /// derselbe Fehlertyp wie [H2] eine Zeile darueber.
+  description  String?
+  /// Leistungszeitraum JE POSTEN. Der Zeitraum an der Rechnung bleibt: Er ist
+  /// die Klammer, diese hier sind die Einzelposten darin — Einrichtung und
+  /// Jahresabo derselben Rechnung decken verschiedene Zeitraeume ab.
+  periodFrom   DateTime? @db.Date
+  periodUntil  DateTime? @db.Date
+  quantity     Decimal   @db.Decimal(10, 3)
+  unitPriceNet Decimal   @db.Decimal(10, 2)
+  // Steuersatz AM POSTEN, nicht global: eine spätere Satzänderung darf alte
+  // Rechnungen nicht rückwirkend verändern.
+  taxRate      Decimal   @db.Decimal(5, 2)
+  netAmount    Decimal   @db.Decimal(10, 2)
+  taxAmount    Decimal   @db.Decimal(10, 2)
+  grossAmount  Decimal   @db.Decimal(10, 2)
+
+  @@index([invoiceId])
+}
+
+// ---------------------------------------------------------------------------
+// Mail und Einwilligung (Etappe 5)
+// ---------------------------------------------------------------------------
+
+model MailTemplate {
+  id           String      @id @default(uuid())
+  name         String      @unique
+  channel      MailChannel
+  subject      String
+  contentText  String
+  contentHtml  String?
+  // Kommagetrennte Liste der erlaubten Platzhalter, z. B. "name,betrag".
+  placeholders String?
+  active       Boolean     @default(true)
+
+  // --- Redesign, Etappe 5 --------------------------------------------------
+  //
+  // DIE STRUKTUR EINER WERBEMAIL, aus dem Fliesstext herausgeloest.
+  //
+  // Vorher gab es ein einziges Redaktionsfeld. Vorueberschrift, Ueberschrift
+  // und Handlungsknopf liessen sich darin nicht ausdruecken: Der Saeuberer
+  // laesst kein `<a>` durch (und soll es nicht), und eine Serif-Ueberschrift
+  // ist eine Rolle im Rahmen, keine Formatierung im Text.
+  //
+  // ALLE VIER NULLBAR. Eine Vorlage ohne sie rahmt sich wie bisher; der
+  // Rahmen laesst weg, was fehlt.
+
+  /// Die kleine Zeile ueber der Ueberschrift („Neues in <Produktname>").
+  eyebrow String?
+
+  /// Die Serif-Ueberschrift der Mail. Nicht der Betreff -- ihn ein zweites
+  /// Mal ueber die Nachricht zu setzen ist die haeufigste Verdopplung in
+  /// Mailvorlagen.
+  heading String?
+
+  /// Beschriftung und Ziel des Handlungsknopfes. BEIDE ODER KEINER: Ein Knopf
+  /// ohne Ziel ist eine Schaltflaeche, die nichts tut, ein Ziel ohne
+  /// Beschriftung ein unsichtbarer Link.
+  buttonText   String?
+  buttonTarget String?
+
+  createdAt DateTime @default(now())
+  // ETAPPE 5: Wann zuletzt redigiert. Eine Vorlage ist ein WORTLAUT, der
+  // hinausgeht; wer sie beurteilt, muss wissen, ob er von heute oder von
+  // vorletztem Jahr ist.
+  updatedAt DateTime @default(now()) @updatedAt
+
+  deliveries MailDelivery[]
+}
+
+model MailDelivery {
+  id        String   @id @default(uuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  recipientAddress    String
+  channel             MailChannel
+  subject             String
+  // Wortlaut der versendeten Mail zum Versandzeitpunkt (Nachweis).
+  contentSnapshot     String
+  /// Der HTML-Teil derselben Mail, ebenfalls zum Versandzeitpunkt.
+  ///
+  /// Seit dem Mailrahmen geht jede Mail mit ZWEI Teilen hinaus. Der Nachweis
+  /// muss beide zeigen: Was die Empfaengerin gesehen hat, war in aller Regel
+  /// der HTML-Teil, und ein Nachweis, der nur den Textteil kennt, belegt
+  /// etwas anderes als das, was ankam.
+  ///
+  /// NULLABLE, und das bleibt so: Zeilen aus der Zeit vor dem Rahmen wurden
+  /// ohne HTML-Teil verschickt. Ein nachtraeglich erzeugter HTML-Teil waere
+  /// eine Behauptung ueber eine Mail, die so nie hinausging.
+  contentSnapshotHtml String?
+  sentAt              DateTime?
+  deliveryStatus      DeliveryStatus @default(queued)
+  errorCount          Int            @default(0)
+
+  createdAt DateTime @default(now())
+
+  // --- Etappe 5 ------------------------------------------------------------
+
+  /// Die Einwilligung, unter der diese Mail hinausging.
+  ///
+  /// NUR beim werblichen Kanal gesetzt. Transaktionsmails haben hier bewusst
+  /// nichts stehen: sie brauchen keine Einwilligung, und eine Abmeldung vom
+  /// Newsletter darf eine Rechnung nicht aufhalten.
+  ///
+  /// `Restrict` wie ueberall auf Nachweisen: Der Beleg, dass eine werbliche
+  /// Mail unter einer bestimmten Einwilligung hinausging, darf nicht
+  /// verschwinden, weil jemand die Einwilligung entfernt.
+  consentId String?
+  consent   Consent? @relation(fields: [consentId], references: [id], onDelete: Restrict)
+
+  /// Aus welcher Vorlage der Wortlaut stammt (nur zur Nachvollziehbarkeit —
+  /// massgeblich ist der Schnappschuss, nicht die Vorlage).
+  templateId String?
+  template   MailTemplate? @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  /// FEHLERKLASSE des letzten Versuchs, niemals der Wortlaut des Relays
+  /// (R6: keine Fremdtexte, keine Empfaengeradressen aus fremden Meldungen).
+  ///
+  /// Sie entscheidet, WOGEGEN ein Fehlschlag zaehlt: `verbindung`, `tls` und
+  /// `anmeldung` sind Fehler UNSERES Postausgangs und duerfen keine
+  /// Empfaengeradresse stilllegen — sonst legt ein falsches SMTP-Passwort den
+  /// gesamten Verteiler still. Nur empfaengerbezogene Fehlschlaege zaehlen.
+  lastErrorClass  String?
+  lastAttemptAt   DateTime?
+  /// Fruehester Zeitpunkt des naechsten Versuchs (Wiederholung mit Abstand).
+  nextAttemptFrom DateTime?
+
+  @@index([companyId])
+  @@index([deliveryStatus])
+  @@index([consentId])
+  @@index([templateId])
+  @@index([recipientAddress, createdAt])
+  @@index([nextAttemptFrom])
+}
+
+model Consent {
+  id        String   @id @default(uuid())
+  email     String
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  status            ConsentStatus @default(unconfirmed)
+  // BEWUSSTE Ausnahme von Regel 1 der Projektkonventionen: angemeldetAm, bestaetigtAm
+  // und abgemeldetAm sind Nachweiszeitpunkte, keine fachlichen Datumsangaben.
+  // Verlangt ist der Zeitpunkt, nicht der Tag — die IP wird schließlich auch
+  // festgehalten.
+  subscribedAt      DateTime?
+  ipAtSubscription  String?
+  // Der eigentliche Nachweis: der Wortlaut des Formulartextes, dem zugestimmt
+  // wurde. Niemals nur ein Verweis auf eine Vorlage — die kann sich ändern.
+  formText          String
+  confirmedAt       DateTime?
+  confirmationToken String?       @unique
+  // Eine Ein-Klick-Abmeldung muss UNVERZÜGLICH wirken, und genau das muss
+  // belegbar sein: mit einer Tagesangabe ließe sich nicht zeigen, dass
+  // zwischen Abmeldung und letzter Zustellung keine Stunden lagen.
+  unsubscribedAt    DateTime?
+  unsubscribeToken  String?       @unique
+
+  // --- Etappe 5 ------------------------------------------------------------
+
+  /// IP zum Zeitpunkt der BESTAETIGUNG.
+  ///
+  /// Der Nachweis des Double-Opt-in braucht beide Adressen: Die Anmeldung
+  /// kann jeder fuer jede fremde Adresse ausloesen — erst der Klick im
+  /// Postfach beweist, dass der Inhaber der Adresse zugestimmt hat. Ohne die
+  /// zweite IP fehlt genau dieser Teil.
+  ipAtConfirmation String?
+
+  /// Welches Formular. Freitext, z. B. "webseite-newsletter".
+  ///
+  /// Nicht der Nachweis selbst — der ist `formText` —, sondern
+  /// die Angabe, WO er stand. Ein Formular kann seinen Wortlaut aendern; der
+  /// gespeicherte bleibt.
+  origin String?
+
+  /// WANN zuletzt eine Bestaetigungsmail an diese Adresse hinausging, und WIE
+  /// VIELE es im laufenden Bestaetigungsvorgang waren.
+  ///
+  /// [K2]: Ohne dieses Kontingent liess sich ueber das Formular eine FREMDE
+  /// Adresse mit Bestaetigungsmails belegen — gemessen zwoelf Stueck in
+  /// Sekunden, je eigene Quell-IP. Abgeschickt von der Produkt-Webseite, bei
+  /// p=quarantine ohne DKIM der schnellste Weg, die Domaenenreputation zu
+  /// verlieren, an der auch die Rechnungen haengen.
+  ///
+  /// Der Zaehler gilt JE VORGANG: Ist die letzte Mail aelter als die
+  /// Gueltigkeit des Bestaetigungslinks, ist der Vorgang erloschen und der
+  /// Zaehler beginnt von vorn. Sonst koennte sich niemand ein Jahr spaeter
+  /// noch einmal eintragen.
+  confirmationMailAt    DateTime?
+  confirmationMailCount Int       @default(0)
+
+  /// Zeitpunkt, an dem die Adresse stillgelegt wurde (harte Abweisung oder
+  /// Spam-Meldung). Getrennt von `unsubscribedAt`, weil es etwas anderes ist:
+  /// Eine Abmeldung ist eine Handlung der Person, eine Stilllegung eine
+  /// Entscheidung des Systems.
+  deactivatedAt DateTime?
+
+  /// WOHER der Widerspruch kam, im Wortlaut: „telefonisch am 30.08.",
+  /// „Rueckmeldung Provider", „5x hard bounce".
+  ///
+  /// NUR bei einer Sperre VON HAND gesetzt. Wer sich selbst ueber den Link
+  /// abmeldet, nennt keinen Anlass -- und einen zu erfinden waere eine
+  /// Behauptung ueber eine fremde Handlung.
+  ///
+  /// Bis Etappe 5 des Redesigns gab es diese Spalte nicht: Der Wortlaut wurde
+  /// als Pflichtfeld erhoben und dann nur als LAENGE ins Audit-Log
+  /// geschrieben. Er steht hier und nicht dort, weil das Audit-Log keinen
+  /// Loeschweg hat -- ein Freitext ueber eine Person muss mit ihr
+  /// verschwinden koennen.
+  blockReason String?
+
+  deliveries MailDelivery[]
+
+  /// DIE SPERRLISTE IST NUR DANN EINE, WENN ES JE ADRESSE GENAU EINE ZEILE
+  /// GIBT.
+  ///
+  /// Ohne diese Eindeutigkeit koennte neben einem Sperreintrag eine zweite,
+  /// bestaetigte Zeile derselben Adresse stehen — und dann entschiede die
+  /// Reihenfolge der Abfrage darueber, ob jemand angeschrieben wird, der
+  /// widersprochen hat. Adressen werden vor jedem Schreibvorgang in
+  /// Kleinschreibung normalisiert (`consent.norm.ts`), sonst waere
+  /// "Anna@..." eine zweite Adresse.
+  @@unique([email])
+}
+
+// ---------------------------------------------------------------------------
+// Audit-Log (R6): jede Aktion mit Benutzerbezug, auch gescheiterte Versuche.
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id     String  @id @default(uuid())
+  // Nullable, damit Fehlversuche an unbekannten Konten und CLI-Aktionen
+  // protokollierbar sind. Kein Cascade-Delete: der Nachweis überlebt das Konto.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  timestamp   DateTime @default(now())
+  // Akteur im Klartext, auch wenn kein Benutzer aufgelöst werden konnte,
+  // z. B. "cli:sam" oder die eingegebene Kennung eines Fehlversuchs.
+  actor       String
+  action      String
+  objectType  String
+  objectId    String?
+  beforeValue Json?
+  afterValue  Json?
+  ip          String?
+  userAgent   String?
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([action])
+}
+
+/// Welche Art von Anfrage über das Formular der Webseite kam.
+enum InquiryKind {
+  demo
+  pilot
+}
+
+/// Was auf eine Anfrage hin tatsächlich passierte.
+enum InquiryOutcome {
+  /// Demo: Die Zugangsdaten gingen hinaus.
+  credentials_sent
+  /// Pilot: Die Eingangsbestätigung ging hinaus.
+  confirmation_sent
+  /// Dieselbe Art war für diese Organisation schon erfüllt – nichts erneut.
+  already_triggered
+  /// Schutzgrenze der Adresse erreicht ([W2]) – nichts hinaus.
+  quota_exhausted
+  /// Versand versucht und gescheitert – bei der nächsten Anfrage erneut.
+  send_failed
+}
+
+/// WAS ÜBER DAS FORMULAR DER WEBSEITE ANGEFRAGT WURDE – und was daraufhin
+/// passierte. Eine Zeile je eingegangener Anfrage.
+///
+/// WARUM EINE EIGENE TABELLE (15.09.2026): Die Anfrage stand bisher nur als
+/// Notiz im Verlauf. Welche Art eine Organisation angefragt hatte und ob darauf
+/// wirklich etwas hinausging, ließ sich nicht abfragen – und genau daran hängt
+/// die Regel „je Art genau einmal pro Organisation". Vorher verschickte eine
+/// Demo-Anfrage zu einer schon bekannten Adresse GAR NICHTS, auch wenn die
+/// erste Anfrage eine Pilot-Anfrage gewesen war.
+///
+/// `onDelete: Cascade`, anders als Notiz und Versand: Die Zeile enthält weder
+/// eine Person noch einen Nachweis, nur Art, Zeitpunkt und Ergebnis. Ohne die
+/// Organisation hat sie keine Bedeutung.
+model Inquiry {
+  id         String          @id @default(uuid())
+  companyId  String
+  company    Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind       InquiryKind
+  /// `null` = vor dem 15.09.2026 eingegangen; das Ergebnis wurde damals nicht
+  /// erfasst (Nachtrag aus dem Audit-Log). Zählt NICHT als erfüllt.
+  outcome    InquiryOutcome?
+  /// TECHNISCHER Zeitstempel des Eingangs – wie `Note.createdAt`.
+  receivedAt DateTime        @default(now())
+
+  @@index([companyId, kind])
+}
+
+/// BETRIEBSSCHALTER FÜR ALLE KUNDENINSTANZEN (15.09.2026).
+///
+/// Eine Zeile je ausdrücklich umgestelltem Schalter; fehlt sie, gilt die
+/// Vorgabe aus `funktionsschalter.katalog.ts`. Die Instanzen LESEN den Stand
+/// über `GET /api/flags` — die Verwaltung schreibt nichts auf eine Instanz
+/// (R1).
+///
+/// `changedById` bewusst OHNE Relation zum Benutzer: Der Stand soll ein
+/// entferntes Konto überleben, wie der Audit-Eintrag, der ihn belegt.
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean
+  /// TECHNISCHER Zeitstempel der letzten Änderung.
+  changedAt   DateTime @updatedAt
+  changedById String?
+}
