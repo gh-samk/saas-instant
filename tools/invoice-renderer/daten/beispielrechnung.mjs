@@ -26,6 +26,22 @@ export const beispielrechnung = {
       geschaeftsfuehrer: ['Erika Mustermann'],
     },
     bank: { institut: 'Example Bank', iban: 'DE02120300000000202051', bic: 'BYLADEM1001' },
+    // Fertige Druckzeilen, wie sie das Backend je Rechtsform bildet. Der Renderer
+    // druckt nur diese Zeilen und kennt keine Rechtsformlogik.
+    blocks: {
+      companyLines: ['Example Company GmbH & Co KG', 'Example Street 1', '12345 Example City'],
+      contactLines: ['Tel. +49 000 0000000', 'billing@example.com', 'www.example.com'],
+      bankLines: ['Example Bank', 'Kontoinhaber: Example Management GmbH', 'IBAN DE02 1203 0000 0000 2020 51', 'BIC BYLADEM1001'],
+      legalLines: [
+        'Amtsgericht Example City, HRA 00000',
+        'Persönlich haftende Gesellschafterin:',
+        'Example Management GmbH, HRB 00000',
+        'Geschäftsführung Erika Mustermann',
+        'USt-IdNr. DE123456789',
+      ],
+    },
+    logoDataUri: null,
+    accentColor: null,
     rechtlicherZusatz:
       'Example Company GmbH & Co KG, Sitz Example City, Amtsgericht Example City HRA 00000. ' +
       'Persönlich haftende Gesellschafterin: Example Management GmbH, Sitz Example City, ' +

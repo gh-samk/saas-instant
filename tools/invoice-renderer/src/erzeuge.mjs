@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Schreibt aus einer Rechnung die drei Ausgangsdateien:
 //   rechnung.html   sichtbares Dokument, Vorstufe des PDF
-//   rechnung.typ    dasselbe Dokument als Typst-Quelle (zweiter Renderkandidat)
 //   factur-x.xml    ZUGFeRD/Factur-X CII, Profil EN 16931 (wird ins PDF eingebettet)
 //   xrechnung.xml   XRechnung 3.0 als UBL (separater Download)
 //
@@ -16,7 +15,6 @@ import { berechneRechnung } from './rechnung.mjs';
 import { erzeugeCii } from './cii-en16931.mjs';
 import { erzeugeUbl } from './ubl-xrechnung.mjs';
 import { erzeugeHtml } from './layout-html.mjs';
-import { erzeugeTypst } from './layout-typst.mjs';
 
 const hier = dirname(fileURLToPath(import.meta.url));
 const ziel = resolve(process.argv[2] ?? resolve(hier, '..', 'ergebnis'));
@@ -25,7 +23,6 @@ const rechnung = berechneRechnung(beispielrechnung);
 
 await mkdir(ziel, { recursive: true });
 await writeFile(resolve(ziel, 'rechnung.html'), erzeugeHtml(rechnung), 'utf8');
-await writeFile(resolve(ziel, 'rechnung.typ'), erzeugeTypst(rechnung), 'utf8');
 await writeFile(resolve(ziel, 'factur-x.xml'), erzeugeCii(rechnung), 'utf8');
 await writeFile(resolve(ziel, 'xrechnung.xml'), erzeugeUbl(rechnung), 'utf8');
 

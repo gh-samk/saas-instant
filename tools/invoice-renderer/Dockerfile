@@ -44,6 +44,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Inter (variable font, SIL OFL 1.1, licence text in fonts/OFL.txt): the font of
+# the invoice design. Chromium embeds the subset it uses into the PDF.
+COPY fonts/InterVariable.ttf fonts/OFL.txt /usr/share/fonts/truetype/inter/
+RUN fc-cache -f
+
 COPY --from=bau /opt/mustang-cli.jar /opt/mustang-cli.jar
 COPY --from=bau /opt/dienst /opt/dienst
 

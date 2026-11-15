@@ -46,7 +46,7 @@ Build and tests:
 ```bash
 docker build -t saas-instant-invoice-renderer tools/invoice-renderer
 node --test "src/*.test.mjs"      # calculation and XML/HTML generators (no Docker)
-node src/erzeuge.mjs [outdir]     # writes sample HTML, Typst, CII and UBL files
+node src/erzeuge.mjs [outdir]     # writes sample HTML, CII and UBL files
 ```
 
 The `.mjs` files in `src/` are a standalone reference implementation of
@@ -90,3 +90,18 @@ nach, bevor er es herausgibt (`422` mit Prüfbericht, wenn es nicht besteht).
   Gesellschafterin“ und das Land erscheinen im Rechnungs-PDF nur, wenn sie im
   Manifest (`billing.issuer.generalPartner*`, `managingDirectors`, `country`)
   gesetzt sind; sonst wird nichts gedruckt.
+
+## Layout und Schrift / Layout and font
+
+Das Rechnungsdesign (Briefkopf, 6-Spalten-Raster, eine Schriftgroesse 9 pt,
+Gewicht 600 und Grau als einzige Hierarchie) steht in `src/layout-html.mjs`;
+Vorlage ist `docs/design-proposals/rechnung-entwurf-b.html`. Der Renderer druckt
+nur die Zeilen aus `issuer.blocks` (`companyLines`, `contactLines`, `bankLines`,
+`legalLines`), dazu `issuer.logoDataUri` (data:-URI oder `null`) und
+`issuer.accentColor` (`#RRGGBB` oder `null`, Vorgabe `#0369A1`). Der
+ZUGFeRD-Hinweis steht nur beim Profil `EN16931`.
+
+The font is **Inter** (variable, SIL Open Font License 1.1; licence text in
+`fonts/OFL.txt`). The Dockerfile installs `fonts/InterVariable.ttf` into the
+system font directory; DejaVu Sans stays as fallback. Chromium embeds the
+font subset in the PDF, as PDF/A requires.
