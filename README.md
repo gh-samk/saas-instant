@@ -29,14 +29,15 @@ Alle Punkte sind im Code vorhanden; ob sie in Ihrer Umgebung laufen, hängt von 
 
 ## Screenshots
 
-Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/control seed:demo` (siehe [CONTRIBUTING.md](CONTRIBUTING.md)).
+Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/control seed:demo` (siehe [CONTRIBUTING.md](CONTRIBUTING.md)). Das Design ist bewusst neutral (Inter, Slate-Grau, ein ruhiger Blauakzent) und folgt automatisch dem hellen oder dunklen Farbschema des Systems; in der Seitenleiste lässt es sich auch von Hand umschalten.
 
 | | |
 |---|---|
 | ![Tagesübersicht](docs/screenshots/02-dashboard.png)<br>**Heute:** offene Aufgaben aus Rechnungen und Instanzen | ![Organisationen](docs/screenshots/03-companies.png)<br>**Organisationen** mit Status |
 | ![Organisation](docs/screenshots/04-company-detail.png)<br>**Organisation:** Kontakt, Verlauf, nächste Schritte | ![Instanzen](docs/screenshots/05-instances.png)<br>**Instanzen** je Organisation |
 | ![Rechnungen](docs/screenshots/06-invoices.png)<br>**Rechnungen** | ![Rechnung](docs/screenshots/07-invoice-detail.png)<br>**Rechnung** mit PDF/XML, Zahlung, Erinnerung |
-| ![Anmeldung](docs/screenshots/01-login.png)<br>**Anmeldung** mit Passkey oder Passwort + zweitem Faktor | ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (Modus „Portal“): Liste der Verwaltungen |
+| ![Rechnungen, dunkel](docs/screenshots/06-invoices-dark.png)<br>**Dunkelmodus** | ![Anmeldung](docs/screenshots/01-login.png)<br>**Anmeldung** mit Passkey oder Passwort + zweitem Faktor |
+| ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (Modus „Portal“): Liste der Verwaltungen | ![Portal, dunkel](docs/screenshots/09-portal-dark.png)<br>**Portal** im Dunkelmodus |
 
 ## Architektur in Kürze
 
@@ -104,6 +105,7 @@ Schritt für Schritt, mit TLS und Proxy-Hinweisen: [docs/installation.md](docs/i
 
 ## Einschränkungen in v1
 
+- **Teststand:** Unit-, Integrations- (echtes Postgres) und Oberflächentests sind grün; die Images (Verwaltung, Oberfläche, Portal, Rechnungsdienst) bauen, und der Stapel im Modus `single` startet über `install.sh` (Health-Check, Anmeldeseite, Anlegen des ersten Kontos). **Nicht geprüft:** der Modus `portal` mit echten Containern, das tatsächliche Erzeugen eines Rechnungs-PDF im Rechnungsdienst, Mailversand gegen einen echten SMTP-Server und der Betrieb hinter TLS.
 - **Nur Coolify** als Provisioner. Die Schnittstelle ist vorbereitet, ein zweiter Anbieter existiert nicht.
 - **Die Coolify-Anbindung ist nur gegen eine Attrappe getestet**, nicht gegen eine echte Coolify-Installation. Pfade und Abläufe sind aus einem funktionierenden Provisionierungsskript übernommen (`reference/provision-tenant.py`), aber nicht belegt. Rechnen Sie bei der ersten echten Inbetriebnahme mit Nacharbeit.
 - **Backend-Meldungen und Mailtexte sind nur deutsch.** Die Oberfläche ist über eine i18n-Schicht übersetzbar ([docs/i18n.md](docs/i18n.md)), liegt aber nur auf Deutsch vor.

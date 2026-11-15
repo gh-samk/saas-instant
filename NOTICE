@@ -29,14 +29,29 @@ legt `pnpm-lock.yaml` fest. Beispiele aus den direkten Abhängigkeiten:
 - nodemailer: MIT-0
 - Prisma: Apache License 2.0
 - lucide-react (Icons), yaml: ISC-Lizenz
-- Hanken Grotesk und Source Serif 4 (Schriften, über die Pakete
-  @fontsource-variable/*): SIL Open Font License 1.1. Die Schriftdateien dürfen
-  gebündelt und weitergegeben, aber nicht für sich allein verkauft werden;
-  Lizenzvermerke der Schriftautoren bleiben erhalten.
+- Inter (Schrift, über das Paket @fontsource-variable/inter): SIL Open Font
+  License 1.1. Die Schriftdateien dürfen gebündelt und weitergegeben, aber nicht
+  für sich allein verkauft werden; Lizenzvermerke der Schriftautoren bleiben
+  erhalten. Den Lizenztext (OFL-1.1) bringt das Paket als `LICENSE` mit; er
+  gehört zu jeder weitergegebenen Kopie der Schriftdateien (auch zu den nach
+  `apps/control/public/fonts/` kopierten).
+
+Rechnungsdienst (`tools/invoice-renderer`, Teil dieses Repositories, eigenes
+Container-Image). Er bringt folgende Fremdkomponenten mit:
+
+- Mustangproject (Mustang-CLI, enthält veraPDF und Schematron-Prüfungen):
+  Apache License 2.0
+- Chromium (headless, aus dem Debian-Paket): BSD-ähnliche Lizenzen, dazu die
+  Lizenzen der darin enthaltenen Bibliotheken; maßgeblich sind die
+  Lizenzdateien des Pakets im Image (`/usr/share/doc/chromium`)
+- OpenJDK 17 (Laufzeit): GPL-2.0 mit Classpath-Ausnahme
+- DejaVu-Schriften (`fonts-dejavu-core`): freie Bitstream-Vera/DejaVu-Lizenz
+
+Eigener Quelltext des Rechnungsdienstes steht unter der AGPL-3.0 dieses Projekts.
+Wer das Image weitergibt, liefert die Lizenzhinweise dieser Komponenten mit.
 
 Nicht Teil dieses Repositories und deshalb nicht von dieser Lizenzierung erfasst:
-der separate Rechnungsdienst für PDF/A-3 (Betreiber richtet ihn selbst ein und
-prüft dessen Lizenzen), Coolify, PostgreSQL, Docker und die verwaltete Software.
+Coolify, PostgreSQL, Docker und die verwaltete Software.
 
 Wer weitergibt oder ein Container-Image veröffentlicht, ist selbst dafür
 verantwortlich, die Lizenzhinweise der enthaltenen Fremdkomponenten

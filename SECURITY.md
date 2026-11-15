@@ -19,11 +19,12 @@ schreiben. Test- oder Beispielwerte genügen.
 
 ## Was danach geschieht
 
-Wir bestätigen den Eingang so bald wie möglich, prüfen die Meldung, stimmen eine
-Behebung im Advisory ab und veröffentlichen das Advisory erst, wenn eine
-korrigierte Fassung vorliegt. Auf Wunsch nennen wir die meldende Person als
-Entdecker. Eine feste Reaktionszeit können wir bei einem Projekt dieser Größe
-nicht zusagen.
+Wir haben die Absicht, den Eingang zeitnah zu bestätigen, die Meldung zu prüfen,
+eine Behebung im Advisory abzustimmen und das Advisory erst zu veröffentlichen,
+wenn eine korrigierte Fassung vorliegt. Auf Wunsch nennen wir die meldende Person
+als Entdecker. Das ist eine Absicht und keine Zusage: Eine feste Reaktionszeit
+können wir bei einem Projekt dieser Größe nicht garantieren. Weitere Meldewege
+(Telefon, E-Mail) gibt es nicht; bitte nur den oben beschriebenen Weg nutzen.
 
 ## Unterstützte Versionen
 

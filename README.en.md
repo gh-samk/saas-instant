@@ -29,14 +29,15 @@ Everything listed exists in the code. Whether it works in your setup depends on 
 
 ## Screenshots
 
-Taken with the fictitious demo data from `pnpm --filter @saas-instant/control seed:demo` (see [CONTRIBUTING.md](CONTRIBUTING.md)). The interface is in German in v1.
+Taken with the fictitious demo data from `pnpm --filter @saas-instant/control seed:demo` (see [CONTRIBUTING.md](CONTRIBUTING.md)). The design is deliberately neutral (Inter, slate grays, one calm blue accent) and follows the system's light or dark color scheme automatically; it can also be switched by hand in the sidebar. The interface text is German in v1.
 
 | | |
 |---|---|
 | ![Daily overview](docs/screenshots/02-dashboard.png)<br>**Today:** open tasks from invoices and instances | ![Companies](docs/screenshots/03-companies.png)<br>**Companies** with status |
 | ![Company](docs/screenshots/04-company-detail.png)<br>**Company:** contact, history, next steps | ![Instances](docs/screenshots/05-instances.png)<br>**Instances** per company |
 | ![Invoices](docs/screenshots/06-invoices.png)<br>**Invoices** | ![Invoice](docs/screenshots/07-invoice-detail.png)<br>**Invoice** with PDF/XML, payment, reminder |
-| ![Sign-in](docs/screenshots/01-login.png)<br>**Sign-in** with passkey or password + second factor | ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (mode "portal"): list of the managers |
+| ![Invoices, dark](docs/screenshots/06-invoices-dark.png)<br>**Dark mode** | ![Sign-in](docs/screenshots/01-login.png)<br>**Sign-in** with passkey or password + second factor |
+| ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (mode "portal"): list of the managers | ![Portal, dark](docs/screenshots/09-portal-dark.png)<br>**Portal** in dark mode |
 
 ## Architecture at a glance
 
@@ -104,6 +105,7 @@ Step by step, with TLS and proxy notes (German): [docs/installation.md](docs/ins
 
 ## Limitations in v1
 
+- **Test status:** unit, integration (real Postgres) and UI tests are green; the images (manager, web, portal, invoice service) build, and the stack in `single` mode starts through `install.sh` (health check, sign-in page, creating the first account). **Not verified:** `portal` mode with real containers, actually rendering an invoice PDF in the invoice service, mail delivery against a real SMTP server, and operation behind TLS.
 - **Coolify only** as provisioner. The interface is prepared, but there is no second provider.
 - **The Coolify integration has only been tested against a mock**, not against a real Coolify installation. Paths and sequences were taken from a working provisioning script (`reference/provision-tenant.py`) but are not proven. Expect rework on first real use.
 - **Backend messages and mail texts are German only.** The UI goes through an i18n layer ([docs/i18n.md](docs/i18n.md)) but only a German dictionary exists.

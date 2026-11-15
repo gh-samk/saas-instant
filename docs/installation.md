@@ -109,6 +109,14 @@ CONTROL_TRUST_PROXY=2
 
 Der TLS-Proxy muss `X-Forwarded-For` selbst setzen (anhängen oder überschreiben) und auf demselben Host laufen oder `CONTROL_WEB_BIND` auf seine Adresse stehen.
 
+Zum Betrieb gehört:
+
+- `JWT_SECRET` wird beim Start geprüft: mindestens 32 Zeichen und kein Beispielwert, sonst startet die Verwaltung nicht. `install.sh` erzeugt einen passenden Wert.
+- „Abmelden“ beendet alle Sitzungen des Kontos, nicht nur die des aktuellen Geräts.
+- Eine Sitzung endet spätestens 90 Tage nach der Anmeldung, auch wenn sie laufend erneuert wird.
+- Ein TOTP-Code ist nur einmal verwendbar; derselbe Code wird innerhalb seines Zeitfensters nicht ein zweites Mal angenommen.
+- Der Docker-Port von `control-web` ist standardmäßig an `127.0.0.1` gebunden (`CONTROL_WEB_BIND`, Vorgabe `127.0.0.1`).
+
 Danach `bin/saas-instant up <slug>` (Compose erzeugt den Container mit den neuen Werten neu).
 
 | Variable | Bedeutung und Folge bei falschem Wert |
@@ -119,7 +127,7 @@ Danach `bin/saas-instant up <slug>` (Compose erzeugt den Container mit den neuen
 | `CONTROL_RP_NAME` | Name im Passkey-Dialog des Browsers. |
 | `CONTROL_TOTP_ISSUER` | Name in der Authenticator-App. |
 | `CONTROL_TRUST_PROXY` | Anzahl der Proxys vor der API, denen `X-Forwarded-For` geglaubt wird: `1` = nur das mitgelieferte nginx in `control-web`, `2` = zusätzlich ein TLS-Proxy davor. Bestimmt die IP im Audit-Log und im Rate-Limit. Zu hoch ist gefährlich (ein selbst gesetzter `X-Forwarded-For` wird geglaubt, das Rate-Limit lässt sich umgehen), zu niedrig zeigt nur die Proxy-Adresse. Ein leerer Wert gilt als 0, ein ungültiger bricht den Start ab. |
-| `CONTROL_INQUIRY_TRUST_PROXY` | Dasselbe für den öffentlichen Anfrageweg, dessen Proxy-Kette länger sein kann (Compose-Vorgabe 2). |
+| `CONTROL_INQUIRY_TRUST_PROXY` | Dasselbe für den öffentlichen Anfrageweg (`/api/public`, `/api/consent/subscription`), dessen Kette länger ist, weil das Formular über das nginx der Webseite kommt. Die Zahl nennt, wie viele Einträge von rechts in `X-Forwarded-For` bis zum Besucher zu überspringen sind. Sie ist der Rückfall; Vorrang hat die Kopfzeile `x-sender-ip`, die das nginx der Webseite selbst schreibt. Sie greift nur mit gültigem `CONTROL_INQUIRY_KEY`. Vorgabe im mitgelieferten `docker-compose.yml`: `2` (Webseiten-nginx, `control-web`, keine weiteren Proxys). Steht davor ein TLS-Proxy, ist es `3`. Die Coolify-Referenz `reference/docker-compose.control.coolify.yml` hat zwei Traefik in der Kette (Traefik, Webseiten-nginx, Traefik, `control-web`) und steht deshalb auf `4`. Zu hoch macht die Herkunft im Nachweis und das Rate-Limit fälschbar, zu niedrig lässt alle Besucher ein Kontingent teilen. Ein ungültiger Wert (keine ganze Zahl >= 1) bricht den Start ab. |
 
 Hinweise zum Proxy:
 

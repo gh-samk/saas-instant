@@ -53,9 +53,10 @@ Anmeldemittel ersetzt der Betreiber im Container ([emergency-access.md](emergenc
 | E-Mail-Code | 8 Stellen, 10 Minuten gültig, nach 3 Fehleingaben verbrannt; die Zahl liegt bewusst unter der Kontosperre, damit man sich nicht durch Raten aussperrt |
 | Anmelderoute | 5 Versuche je Minute; übrige Routen 100 je Minute |
 | Antworten der Anmeldung | gleich für bekannte und unbekannte Konten, mit Scheinhash gegen Zeitunterschiede: die Anmeldeseite ist kein Kontoverzeichnis |
-| Sitzung | httpOnly-Cookie, `SameSite=Strict`, `Secure` hinter TLS, 30 Tage und erneuert sich bei Nutzung einmal je Tag |
+| Sitzung | httpOnly-Cookie, `SameSite=Strict`, `Secure` hinter TLS, 30 Tage und erneuert sich bei Nutzung einmal je Tag; absolute Obergrenze 90 Tage ab der Anmeldung, auch bei laufender Erneuerung |
 | laufender Anmeldevorgang | eigenes kurzlebiges Cookie, 10 Minuten |
-| Beenden aller Sitzungen | „Alle abmelden“, Passwortwechsel und jede Passkey-Änderung beenden sofort alle laufenden Sitzungen |
+| Beenden aller Sitzungen | „Abmelden“, „Alle abmelden“, Passwortwechsel und jede Passkey-Änderung beenden sofort alle laufenden Sitzungen des Kontos |
+| TOTP-Codes | einmalig verwendbar: der Zeitschritt des zuletzt angenommenen Codes wird gespeichert (atomar), derselbe Code wird nicht ein zweites Mal akzeptiert |
 | CSRF | Double-Submit-Cookie, ein Ausnahmeweg muss begründet sein (`@WithoutCsrf`) |
 
 **Zweiter Faktor für sensible Aktionen.** Zahlungsdaten ansehen, Zahlungen
@@ -78,7 +79,7 @@ Im Repository liegen nur Beispieldateien mit Platzhaltern (`.env.example`).
 
 | Geheimnis | Zweck | Besonderheit |
 |---|---|---|
-| `JWT_SECRET` | signiert Sitzungs- und Vorgangs-Token | fehlt es, startet die Anwendung nicht |
+| `JWT_SECRET` | signiert Sitzungs- und Vorgangs-Token | wird beim Start geprüft: mindestens 32 Zeichen und kein Beispielwert, sonst startet die Anwendung nicht |
 | `CONTROL_CONFIG_KEY` | Schlüssel für ruhende Geheimnisse (Abschnitt 4) | mindestens 32 Zeichen, **kein Entwicklungs-Fallback**; ohne ihn startet die Anwendung nicht |
 | `CONTROL_POSTGRES_PASSWORD` | Datenbank der Verwaltung | nur bei der ersten Einrichtung wirksam |
 | `CONTROL_BACKUP_KEY` | Meldeweg des Sicherungswerkzeugs | mindestens 32 Zeichen; ungesetzt existiert die Route nicht (404) |
@@ -148,7 +149,8 @@ gesicherte Backups. Das ist Aufgabe des Betreibers.
   verworfen, nicht halb übernommen.
 - Der Rechnungsdienst hat weder Anmeldung noch Rechteprüfung und gehört
   ausschließlich ins interne Netz, ohne Domain und ohne veröffentlichten Port.
-- `CONTROL_TRUST_PROXY` muss genau zur Zahl der Proxys passen (0, 1 oder 2). Zu hoch
+- Der Docker-Port von `control-web` ist standardmäßig an `127.0.0.1` gebunden (`CONTROL_WEB_BIND`). Wer ihn auf eine öffentliche Adresse legt, muss ihn per Firewall außerhalb von Docker schützen, weil `X-Forwarded-For` sonst frei wählbar ist.
+- `CONTROL_TRUST_PROXY` muss genau zur Zahl der Proxys passen (0, 1 oder 2; `CONTROL_INQUIRY_TRUST_PROXY` für den Anfrageweg je nach Kette 2 bis 4, siehe [installation.md](../installation.md)). Zu hoch
   macht die IP im Audit-Log und das Rate-Limit fälschbar, zu niedrig bewirkt nur,
   dass die Adresse des Proxys im Log steht.
 
