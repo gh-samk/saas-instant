@@ -228,7 +228,7 @@ describe('Logo', () => {
     await renderCard();
     fetchIssuer.mockResolvedValue(
       settings(emptyIssuerProfile('einzelunternehmen'), {
-        logo: { present: true, mime: 'image/png', sha256: 'abc123' },
+        logo: { hasLogo: true, mime: 'image/png', sha256: 'abc123' },
       }),
     );
     fireEvent.change(fileInput(), {
@@ -246,7 +246,7 @@ describe('Logo', () => {
     const user = userEvent.setup();
     deleteIssuerLogo.mockResolvedValue(null);
     await renderCard(emptyIssuerProfile('einzelunternehmen'), {
-      logo: { present: true, mime: 'image/png', sha256: 'abc' },
+      logo: { hasLogo: true, mime: 'image/png', sha256: 'abc' },
     });
     fetchIssuer.mockResolvedValue(settings(emptyIssuerProfile('einzelunternehmen')));
     await user.click(screen.getByRole('button', { name: 'Logo entfernen' }));

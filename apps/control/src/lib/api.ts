@@ -2883,9 +2883,9 @@ export async function downloadGobdExport(
 // ---------------------------------------------------------------------------
 
 export interface IssuerLogoInfo {
-  present: boolean;
-  mime: string;
-  sha256: string;
+  hasLogo: boolean;
+  mime: string | null;
+  sha256: string | null;
 }
 
 /** Eine fehlende oder fehlerhafte Pflichtangabe, wie der Server sie meldet. */

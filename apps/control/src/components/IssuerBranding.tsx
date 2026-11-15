@@ -99,7 +99,7 @@ export function IssuerBranding({
     }
   }
 
-  const hasLogo = logo?.present === true;
+  const hasLogo = logo?.hasLogo === true;
   const logoSrc = hasLogo ? publicLogoUrl(logo?.sha256) : null;
 
   return (
