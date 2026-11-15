@@ -25,3 +25,12 @@ export function applyMailBrand(manifest: ManifestService): void {
     links: mail.legalLinks,
   });
 }
+
+/**
+ * Anzeigename der Verwaltung: hängt ' Verwaltung' nur an, wenn der Name nicht
+ * schon auf 'Verwaltung' endet (sonst 'SAAS Verwaltung Verwaltung').
+ */
+export function displayName(name: string, joiner: ' ' | '-' = ' '): string {
+  const trimmed = name.trim();
+  return /(^|[\s-])Verwaltung$/i.test(trimmed) ? trimmed : `${trimmed}${joiner}Verwaltung`;
+}

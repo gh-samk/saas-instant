@@ -12,10 +12,9 @@ import { PrismaService } from "../src/prisma/prisma.service";
  * demo.example.com, Bankfelder bleiben leer.
  *
  * MARKIERUNG: Jeder Datensatz trägt eine feste ID mit Präfix `demo-`
- * (Rechnungsnummern: `DEMO-…`). Das Skript räumt vor dem Anlegen NUR Zeilen
- * auf, die an diesen festen Organisations-IDs hängen — es ist damit
- * wiederholbar und fasst nichts Echtes an. Es löscht ausschließlich lokale
- * Datenbankzeilen; Coolify und Instanzen werden nie angesprochen (Regel R1).
+ * (Rechnungsnummern: `DEMO-…`). Existieren die Demo-Organisationen schon, legt das Skript
+ * nichts neu an und löscht nichts. Coolify und Instanzen werden nie
+ * angesprochen (Regel R1).
  *
  * Sicherheitsschranken wie `seed.ts`: Abbruch bei NODE_ENV=production und
  * ohne CONTROL_SEED_ALLOWED=ja. Außerdem muss der Testbenutzer aus
@@ -370,34 +369,19 @@ const INVOICES: DemoInvoice[] = [
   },
 ];
 
-async function removeOldDemoData(prisma: PrismaService): Promise<void> {
-  const where = { companyId: { in: COMPANY_IDS } };
-  const instances = await prisma.instance.findMany({
-    where,
-    select: { id: true },
+/**
+ * Gibt es die Demo-Organisationen schon? Dann wird NICHTS neu angelegt.
+ *
+ * Frueher raeumte das Skript alte Demo-Daten weg. Festgeschriebene Rechnungen
+ * lassen sich seit den GoBD-Triggern der Datenbank nicht mehr loeschen (und
+ * das ist gewollt); deshalb gibt es hier keinen Loeschpfad mehr. Wer frische
+ * Demo-Daten braucht, legt die Entwicklungsdatenbank neu an.
+ */
+async function demoDataExists(prisma: PrismaService): Promise<boolean> {
+  const count = await prisma.company.count({
+    where: { id: { in: COMPANY_IDS } },
   });
-  const invoices = await prisma.invoice.findMany({
-    where,
-    select: { id: true },
-  });
-  // Reihenfolge wegen `onDelete: Restrict`: erst Kinder, dann Eltern. Alles
-  // hängt an den festen Demo-Organisations-IDs.
-  await prisma.$transaction([
-    prisma.metric.deleteMany({
-      where: { instanceId: { in: instances.map((i) => i.id) } },
-    }),
-    prisma.invoiceLine.deleteMany({
-      where: { invoiceId: { in: invoices.map((i) => i.id) } },
-    }),
-    prisma.invoice.deleteMany({
-      where: { id: { in: invoices.map((i) => i.id) } },
-    }),
-    prisma.instance.deleteMany({
-      where: { id: { in: instances.map((i) => i.id) } },
-    }),
-    prisma.note.deleteMany({ where }),
-    prisma.company.deleteMany({ where: { id: { in: COMPANY_IDS } } }),
-  ]);
+  return count > 0;
 }
 
 async function createCompanies(prisma: PrismaService): Promise<void> {
@@ -574,7 +558,15 @@ async function main(): Promise<void> {
       );
     }
 
-    await removeOldDemoData(prisma);
+    if (await demoDataExists(prisma)) {
+      process.stdout.write(
+        "\nDemo-Daten sind bereits vorhanden - es wurde nichts neu angelegt " +
+          "und nichts gelöscht. Für frische Demo-Daten die " +
+          "Entwicklungsdatenbank neu aufsetzen.\n\n",
+      );
+      return;
+    }
+
     await createCompanies(prisma);
     await createInstances(prisma);
     await createInvoices(prisma);
@@ -585,7 +577,7 @@ async function main(): Promise<void> {
         "Demo-Daten angelegt (alles erfunden, nur Entwicklung):",
         `  ${COMPANIES.length} Organisationen, ${INSTANCES.length} Instanzen, ` +
           `${INVOICES.length} Rechnungen (ID-Präfix demo-, Nummern DEMO-…)`,
-        "  Erneutes Ausführen ersetzt nur diese Demo-Datensätze.",
+        "  Erneutes Ausführen legt nichts doppelt an (vorhandene Demo-Daten bleiben).",
         "",
       ].join("\n"),
     );

@@ -90,3 +90,37 @@ describe('StatusWechselnDto', () => {
     expect(check(StatusChangeDto, { status: 'erfunden' })).not.toHaveLength(0);
   });
 });
+
+describe('E-Rechnung: Käuferart, USt-IdNr., Leitweg-ID, elektronische Adresse', () => {
+  it('nimmt alle fünf Felder beim Anlegen und Ändern an', () => {
+    const fields = {
+      buyerType: 'authority',
+      vatId: 'DE811111111',
+      buyerReference: '991-12345-67',
+      electronicAddress: '991-12345-67',
+      electronicAddressScheme: '0204',
+    };
+    expect(check(CompanyCreateDto, { name: 'Stadt Weimar', ...fields })).toHaveLength(0);
+    expect(check(CompanyUpdateDto, fields)).toHaveLength(0);
+  });
+
+  it.each(['business', 'authority', 'consumer'])('erlaubt buyerType %s', (buyerType) => {
+    expect(check(CompanyUpdateDto, { buyerType })).toHaveLength(0);
+  });
+
+  it('weist eine unbekannte Käuferart, ein unbekanntes Schema und eine krumme USt-IdNr. ab', () => {
+    expect(check(CompanyUpdateDto, { buyerType: 'verein' }).map((f) => f.property)).toContain('buyerType');
+    expect(
+      check(CompanyUpdateDto, { electronicAddressScheme: 'XX' }).map((f) => f.property),
+    ).toContain('electronicAddressScheme');
+    expect(check(CompanyUpdateDto, { vatId: '12345' }).map((f) => f.property)).toContain('vatId');
+    expect(check(CompanyUpdateDto, { vatId: 'de 811' }).map((f) => f.property)).toContain('vatId');
+  });
+
+  it('begrenzt die Leitweg-ID auf 46 Zeichen', () => {
+    expect(check(CompanyUpdateDto, { buyerReference: 'x'.repeat(46) })).toHaveLength(0);
+    expect(
+      check(CompanyUpdateDto, { buyerReference: 'x'.repeat(47) }).map((f) => f.property),
+    ).toContain('buyerReference');
+  });
+});

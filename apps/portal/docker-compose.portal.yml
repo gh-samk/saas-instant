@@ -6,7 +6,8 @@ services:
     build:
       context: .
     ports:
-      - "${PORTAL_PORT:-8090}:8080"
+      # Nur Loopback; vor dem Netz steht ein TLS-Proxy auf demselben Host.
+      - "${PORTAL_BIND:-127.0.0.1}:${PORTAL_PORT:-8090}:8080"
     volumes:
       # Verzeichnis statt Einzeldatei: install.sh ersetzt registry.json atomar.
       - ../../portal:/srv/registry:ro

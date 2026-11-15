@@ -18,6 +18,7 @@ import {
   day,
   disconnect,
 } from '../test-support/company-provisioning';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 
 /**
  * Die abgeleiteten Aufgaben gegen eine ECHTE Datenbank.
@@ -342,7 +343,8 @@ describe('[W5] Aufbewahrungsfrist des Audit-Logs', () => {
       await prisma.auditLog.count({ where: { id: old.id } }),
     ).toBe(1);
 
-    await prisma.auditLog.delete({ where: { id: old.id } });
+    // AuditLog ist append-only (GoBD-Trigger): Aufräumen nur per TRUNCATE.
+    await truncateAuditLog(prisma);
   });
 });
 

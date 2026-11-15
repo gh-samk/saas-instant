@@ -7,7 +7,22 @@ import {
   type ErrorList,
 } from '../validation';
 
+/**
+ * Rechtsform der Ausstellerin, soweit sie für die Pflichtangaben auf der
+ * Rechnung zählt.
+ *
+ * - `company`: Handelsgesellschaft (KG, GmbH, GmbH & Co. KG …) — Sitz,
+ *   Registergericht und Registernummer sind Pflicht (§ 125a HGB).
+ * - `sole_proprietor`: Einzelunternehmen / freiberuflich — keine
+ *   Registerpflicht auf der Rechnung.
+ * - `association`: Verein — ebenso keine Pflicht auf Sitz/Register der Rechnung.
+ */
+export const ISSUER_LEGAL_FORMS = ['company', 'sole_proprietor', 'association'] as const;
+export type IssuerLegalForm = (typeof ISSUER_LEGAL_FORMS)[number];
+
 export interface IssuerManifest {
+  /** Fehlt die Angabe, gilt `company` (strengste Prüfung). */
+  legalForm: IssuerLegalForm | null;
   name: string;
   address: string;
   taxId: string | null;
@@ -75,9 +90,19 @@ export interface BillingManifest {
   paymentTermDays: number | null;
   /** Tage für den Durchschnitt aktiver Personen; null = Vorgabe. */
   averageDays: number | null;
+  /**
+   * Aufbewahrungsfrist festgeschriebener Rechnungen in Jahren (Ende des
+   * Festschreibungsjahres + n). Vorgabe 8; die Dauer klärt der Betreiber mit
+   * der Steuerberatung.
+   */
+  retentionYears: number | null;
 }
 
+/** Vorgabe der Aufbewahrungsfrist in Jahren. */
+export const DEFAULT_RETENTION_YEARS = 8;
+
 const NO_DETAILS_ISSUER = {
+  legalForm: null,
   street: null,
   postalCode: null,
   city: null,
@@ -124,6 +149,7 @@ export const BILLING_PRESET: BillingManifest = {
   taxRatePercent: null,
   paymentTermDays: null,
   averageDays: null,
+  retentionYears: null,
 };
 
 export function checkBilling(raw: unknown, error: ErrorList): BillingManifest {
@@ -160,8 +186,25 @@ export function checkBilling(raw: unknown, error: ErrorList): BillingManifest {
       });
     }
   }
+  const rawLegalForm = optionalTextField(i, 'legalForm', 'billing.issuer', error);
+  let legalForm: IssuerLegalForm | null = null;
+  if (rawLegalForm !== null && rawLegalForm !== '') {
+    if ((ISSUER_LEGAL_FORMS as readonly string[]).includes(rawLegalForm)) {
+      legalForm = rawLegalForm as IssuerLegalForm;
+    } else {
+      error.push(
+        `billing.issuer.legalForm: "${rawLegalForm}" ist unbekannt ` +
+          `(erlaubt: ${ISSUER_LEGAL_FORMS.join(', ')})`,
+      );
+    }
+  }
+  const retentionYears = optionalNumber(o, 'retentionYears', 'billing', error, 1);
+  if (retentionYears !== null && (!Number.isInteger(retentionYears) || retentionYears > 30)) {
+    error.push('billing.retentionYears: muss eine ganze Zahl von 1 bis 30 sein');
+  }
   return {
     issuer: {
+      legalForm,
       name: textField(i, 'name', 'billing.issuer', v.name, error, { notEmpty: true }),
       address: textField(i, 'address', 'billing.issuer', v.address, error),
       taxId: optionalTextField(i, 'taxId', 'billing.issuer', error),
@@ -191,5 +234,6 @@ export function checkBilling(raw: unknown, error: ErrorList): BillingManifest {
     taxRatePercent: optionalNumber(o, 'taxRatePercent', 'billing', error),
     paymentTermDays: optionalNumber(o, 'paymentTermDays', 'billing', error),
     averageDays: optionalNumber(o, 'averageDays', 'billing', error, 1),
+    retentionYears,
   };
 }

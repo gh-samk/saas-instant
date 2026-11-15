@@ -31,6 +31,8 @@ import { TotpInput } from '../components/TotpInput';
 import { RecoveryCodeList } from '../components/RecoveryCodeList';
 import { UserManagement } from '../components/UserManagement';
 import { FeatureFlagManagement } from '../components/FeatureFlagManagement';
+import { PricesCard } from '../components/PricesCard';
+import { BackupSettingsCard } from '../components/BackupSettingsCard';
 import { SecurityLog } from '../components/SecurityLog';
 import { SecondFactorEvidenceDialog } from '../components/SecondFactorEvidenceDialog';
 import { useAuth } from '../context/AuthContext';
@@ -122,6 +124,8 @@ const TABS = [
   { value: 'user', label: t('einstellungen.tabUsers') },
   { value: 'devices', label: t('einstellungen.tabDevices') },
   { value: 'features', label: t('einstellungen.tabFeatures') },
+  { value: 'prices', label: t('einstellungen.tabPrices') },
+  { value: 'backup', label: t('backup.settingsTitle') },
 ] as const;
 
 type TabsValue = (typeof TABS)[number]['value'];
@@ -1055,6 +1059,12 @@ export function SettingsPage() {
 
       {/* ============================================ Reiter „Funktionen" */}
       {tabs === 'features' && <FeatureFlagManagement />}
+
+      {/* ================================================ Reiter „Preise" */}
+      {tabs === 'prices' && <PricesCard totpPossible={state?.totpSetUp ?? false} />}
+
+      {/* =============================================== Reiter „Sicherung" */}
+      {tabs === 'backup' && <BackupSettingsCard totpPossible={state?.totpSetUp ?? false} />}
 
       {/* --- Dialoge ------------------------------------------------------ */}
       <Dialog

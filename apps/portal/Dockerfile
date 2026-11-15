@@ -8,4 +8,4 @@ COPY security-headers.conf /etc/nginx/portal/security-headers.conf
 COPY index.html tokens.css style.css app.js strings.de.js /usr/share/nginx/html/
 COPY fonts/ /usr/share/nginx/html/fonts/
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1
+HEALTHCHECK --interval=5s --timeout=3s --retries=5 CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1

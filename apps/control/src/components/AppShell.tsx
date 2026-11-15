@@ -187,7 +187,7 @@ function NavList({
 export function AppShell() {
   const t = useT();
   const { logout } = useAuth();
-  const { productName, logoUrl } = useProduct();
+  const { productName, logoUrl, showBrand } = useProduct();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [counter, setCounter] = useState<NavigationCounters | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -265,8 +265,10 @@ export function AppShell() {
               <span className="block text-lg font-semibold text-primaer">
                 {productName}
               </span>
-              <span className="block text-[11px] font-semibold uppercase tracking-[0.06em] text-still">
-                {t('components.appShell.label7')}</span>
+              {showBrand && (
+                <span className="block text-[11px] font-semibold uppercase tracking-[0.06em] text-still">
+                  {t('components.appShell.label7')}</span>
+              )}
             </span>
           </div>
           <div className="flex-1 overflow-y-auto p-4 pt-2">

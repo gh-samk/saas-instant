@@ -14,6 +14,7 @@ import { InvoiceCancelDialog } from './InvoiceCancelDialog';
 import { TransferNoteDialog } from './TransferNoteDialog';
 import { PaymentRecordDialog } from './PaymentRecordDialog';
 import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
+import { InvoiceIntegrity } from './InvoiceIntegrity';
 import { apiFile, errorText } from '../lib/api-client';
 import { tableRow } from '../lib/density';
 import { TEXT_BUTTON, TEXT_BUTTON_ACTION } from '../lib/styles';
@@ -23,6 +24,7 @@ import {
   sendPaymentReminder,
   sendInvoice,
   type Invoice,
+  type InvoiceWithRetention,
   type SecondFactorEvidence,
 } from '../lib/api';
 import { formatAmount } from '../utils/amount';
@@ -131,7 +133,7 @@ export function InvoiceView({
   onChanged,
   onCancelled,
 }: {
-  invoice: Invoice;
+  invoice: InvoiceWithRetention;
   companyId: string;
   totpPossible: boolean;
   /**
@@ -162,7 +164,7 @@ export function InvoiceView({
    */
   async function fetch(
     event: React.MouseEvent<HTMLAnchorElement>,
-    weg: 'document' | 'xml',
+    weg: 'document' | 'xml' | 'xrechnung',
     ending: string,
   ): Promise<void> {
     // Mittelklick, Cmd/Strg-Klick und Kontextmenü NICHT abfangen: Wer
@@ -397,9 +399,33 @@ export function InvoiceView({
         </dl>
       </Card>
 
+      {/* GoBD: Integrität, Aufbewahrungsfrist und Verlauf (rein lesend). */}
+      <InvoiceIntegrity
+        invoiceId={invoice.id}
+        finalized={invoice.finalizedAt !== null}
+        retentionUntil={invoice.retentionUntil}
+      />
+
       {/* Genau die fünf Handlungen einer festgeschriebenen Rechnung — keine
           mehr. Kein Bearbeiten, kein Löschen. */}
-      <div className="mt-6 flex flex-wrap gap-3">
+      {invoice.recipientBuyerType && (
+        <p className="mt-6 text-sm text-leise">
+          {t(
+            invoice.recipientBuyerType === 'authority'
+              ? 'components.invoiceView.hintAuthority'
+              : invoice.recipientBuyerType === 'business'
+                ? 'components.invoiceView.hintBusiness'
+                : 'components.invoiceView.hintConsumer',
+          )}
+        </p>
+      )}
+      <div
+        className={
+          invoice.recipientBuyerType
+            ? 'mt-2 flex flex-wrap gap-3'
+            : 'mt-6 flex flex-wrap gap-3'
+        }
+      >
         {/* ES BLEIBT EIN `<a href>`, und zwar mit Absicht: Mittelklick,
             „Link in neuem Tab öffnen" und ein Browser ohne Skript
             funktionieren damit unverändert. Der Klick wird nur ABGEFANGEN,
@@ -427,6 +453,15 @@ export function InvoiceView({
         >
           <FileCode className="h-4 w-4" aria-hidden="true" />
           {t('components.invoiceView.text11')}</a>
+        <a
+          href={`/api/invoices/${invoice.id}/xrechnung`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(ev) => fetch(ev, 'xrechnung', 'xml')}
+          className={BUTTON_SECONDARY_AS_LINK}
+        >
+          <FileCode className="h-4 w-4" aria-hidden="true" />
+          {t('components.invoiceView.xrechnung')}</a>
 
         {!cancelled && (
           <Button

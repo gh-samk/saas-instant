@@ -1,4 +1,6 @@
+import type { BuyerType } from '.prisma/control-client';
 import type { Issuer } from './document/issuer.config';
+import type { IssuerLegalForm } from '../manifest/sections/billing';
 
 /**
  * DER SCHNAPPSCHUSS — R2, wörtlich: „Eine festgeschriebene Rechnung ist ein
@@ -31,6 +33,12 @@ export interface CompanyForSnapshot {
   billingCountry: string | null;
   billingEmail: string | null;
   contactEmail: string | null;
+  /** E-Rechnung: Art der Empfängerin; fehlt sie, gilt `business`. */
+  buyerType?: BuyerType;
+  vatId?: string | null;
+  buyerReference?: string | null;
+  electronicAddress?: string | null;
+  electronicAddressScheme?: string | null;
 }
 
 export interface RecipientSnapshot {
@@ -38,6 +46,14 @@ export interface RecipientSnapshot {
   /** Mehrzeilig, wie sie im Anschriftenfeld steht. */
   recipientAddress: string;
   recipientEmail: string | null;
+  recipientBuyerType: BuyerType;
+  /** BT-48. */
+  recipientVatId: string | null;
+  /** BT-10: Leitweg-ID bzw. Käuferreferenz. */
+  recipientBuyerReference: string | null;
+  /** BT-49 samt Schema (`EM`, `0204`, …). */
+  recipientElectronicAddress: string | null;
+  recipientElectronicAddressScheme: string | null;
 }
 
 export interface IssuerSnapshot {
@@ -53,6 +69,14 @@ export interface IssuerSnapshot {
   issuerGeneralPartnerCommercialRegisterB: string | null;
   issuerManagingDirector: string | null;
   issuerBankDetails: string | null;
+  /** Rückfrageweg (BR-DE-2), eingefroren wie jede andere Angabe. */
+  issuerContactName: string | null;
+  issuerContactPhone: string | null;
+  issuerContactEmail: string | null;
+  /** Bank STRUKTURIERT — das XML liest sie von hier, nicht per Regex. */
+  issuerIban: string | null;
+  issuerBic: string | null;
+  issuerBankName: string | null;
 }
 
 function row(...parts: (string | null)[]): string {
@@ -78,6 +102,9 @@ export function recipientSnapshot(
     (company.billingPostalCode ?? '').trim() !== '' ||
     (company.billingCity ?? '').trim() !== '';
 
+  const recipientEmail =
+    company.billingEmail?.trim() || company.contactEmail?.trim() || null;
+
   const address = ownBillingAddress
     ? {
         street: row(company.billingStreet, company.billingHouseNumber),
@@ -98,11 +125,26 @@ export function recipientSnapshot(
     recipientAddress: [address.street, address.postalCodeCity, address.country?.trim()]
       .filter((part): part is string => (part ?? '') !== '')
       .join('\n'),
-    recipientEmail:
-      company.billingEmail?.trim() ||
-      company.contactEmail?.trim() ||
-      null,
+    recipientEmail,
+    recipientBuyerType: company.buyerType ?? 'business',
+    recipientVatId: clean(company.vatId),
+    recipientBuyerReference: clean(company.buyerReference),
+    // BT-49 ist bei XRechnung Pflicht: Ohne eigene Angabe dient die
+    // Rechnungs-E-Mail (Schema EM).
+    recipientElectronicAddress: clean(company.electronicAddress) ?? recipientEmail,
+    recipientElectronicAddressScheme:
+      clean(company.electronicAddress) !== null
+        ? clean(company.electronicAddressScheme) ??
+          (company.electronicAddress?.includes('@') ? 'EM' : null)
+        : recipientEmail !== null
+          ? 'EM'
+          : null,
   };
+}
+
+function clean(value: string | null | undefined): string | null {
+  const t = value?.trim() ?? '';
+  return t === '' ? null : t;
 }
 
 /** Ausstellerteil aus der geltenden Konfiguration. */
@@ -132,6 +174,12 @@ export function issuerSnapshot(
       `IBAN ${issuer.bank.iban}`,
       `BIC ${issuer.bank.bic}`,
     ].join(', '),
+    issuerContactName: issuer.contact.name,
+    issuerContactPhone: issuer.contact.phone,
+    issuerContactEmail: issuer.contact.email,
+    issuerIban: issuer.bank.iban.replace(/\s+/g, ''),
+    issuerBic: issuer.bank.bic,
+    issuerBankName: issuer.bank.institution,
   };
 }
 
@@ -149,8 +197,13 @@ export function issuerSnapshot(
  */
 export function missingMandatoryDetails(
   invoice: RecipientSnapshot &
-    IssuerSnapshot & { linesCount: number },
+    IssuerSnapshot & {
+      linesCount: number;
+      /** Fehlt sie, gilt `company` (strengste Prüfung). */
+      legalForm?: IssuerLegalForm;
+    },
 ): string[] {
+  const legalForm = invoice.legalForm ?? 'company';
   const missing: string[] = [];
   const required = (label: string, value: string | null): void => {
     if ((value ?? '').trim() === '') missing.push(label);
@@ -163,15 +216,18 @@ export function missingMandatoryDetails(
   required('Anschrift der Ausstellerin', invoice.issuerAddress);
   // § 14 Abs. 4 Nr. 2 UStG: Steuernummer oder USt-IdNr. der Ausstellerin.
   required('Umsatzsteuer-Identifikationsnummer', invoice.issuerVatId);
-  // § 125a HGB: Registerangaben der KG und ihrer Komplementärin.
+  // § 125a HGB: Registerangaben der Gesellschaft. Einzelunternehmen und
+  // Vereine ohne Handelsregistereintrag müssen sie nicht nennen.
   // [W3]: Der SITZ ist eine eigene Pflichtangabe und nicht durch die
   // Geschäftsanschrift gedeckt.
-  required('Sitz der KG', invoice.issuerSeat);
-  required('Registergericht der KG', invoice.issuerRegisterCourt);
-  required('Handelsregisternummer der KG', invoice.issuerCommercialRegisterA);
+  if (legalForm === 'company') {
+    required('Sitz der KG', invoice.issuerSeat);
+    required('Registergericht der KG', invoice.issuerRegisterCourt);
+    required('Handelsregisternummer der KG', invoice.issuerCommercialRegisterA);
+  }
   // Die Komplementärin ist OPTIONAL (nicht jede Ausstellerin ist eine
   // GmbH & Co KG). Ist sie genannt, gehören ihre Angaben vollständig dazu.
-  if ((invoice.issuerGeneralPartner ?? '').trim() !== '') {
+  if (legalForm === 'company' && (invoice.issuerGeneralPartner ?? '').trim() !== '') {
     required('Sitz der Komplementärin', invoice.issuerGeneralPartnerSeat);
     required(
       'Registergericht der Komplementärin',
@@ -186,6 +242,22 @@ export function missingMandatoryDetails(
   // Ohne Bankverbindung weiß niemand, wohin gezahlt werden soll. Keine
   // gesetzliche Pflicht, aber eine Rechnung ohne sie ist unbrauchbar.
   required('Bankverbindung', invoice.issuerBankDetails);
+
+  // XRechnung (BR-DE-2): Ansprechpartner der Ausstellerin mit Telefon und
+  // E-Mail. Kommt aus der Konfiguration; fehlt es, scheitert die Validierung
+  // beim Empfänger, nicht erst bei uns.
+  required('Ansprechpartner der Ausstellerin', invoice.issuerContactName ?? null);
+  required('Telefon der Ausstellerin', invoice.issuerContactPhone ?? null);
+  required('E-Mail der Ausstellerin', invoice.issuerContactEmail ?? null);
+
+  // Eine Behörde erwartet ihre Leitweg-ID (BT-10). Ohne sie kann die
+  // Rechnung dort nicht zugeordnet werden und wird abgewiesen.
+  if (invoice.recipientBuyerType === 'authority') {
+    required(
+      'Leitweg-ID der Behörde (Käuferreferenz)',
+      invoice.recipientBuyerReference,
+    );
+  }
 
   // § 14 Abs. 4 Nr. 5 UStG: Menge und Art der Leistung.
   if (invoice.linesCount < 1) missing.push('Mindestens ein Rechnungsposten');

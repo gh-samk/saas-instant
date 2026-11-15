@@ -24,12 +24,16 @@ export interface DocumentLine {
   netCent: number;
   taxCategory: string;
   taxRate: number;
+  /** BT-120 der Position; nur für E/AE/K/G/O. */
+  taxExemptionReason?: string;
   period?: { from: string; until: string };
 }
 
 export interface DocumentTaxShare {
   category: string;
   record: number;
+  /** BT-120. */
+  exemptionReason?: string;
   basisCent: number;
   taxCent: number;
 }
@@ -38,7 +42,25 @@ export interface DocumentRecipient {
   name: string;
   address: { street: string; postalCode: string; city: string; country: string };
   email?: string;
+  /** BT-48, Umsatzsteuer-Identifikationsnummer der Empfängerin. */
+  vatId?: string;
+  /** BT-49 mit Schema (`EM`, `0204`, …). */
+  electronicAddress?: { id: string; scheme: string };
+  buyerType?: 'business' | 'authority' | 'consumer';
 }
+
+/** Lastschrift: Angaben für BG-19 (BT-89, BT-90, BT-91). */
+export interface DocumentDirectDebit {
+  /** BT-89 Mandatsreferenz. */
+  mandateReference: string;
+  /** BT-90 Gläubiger-Identifikationsnummer. */
+  creditorId: string;
+  /** BT-91 Konto der Zahlerin; im Schnappschuss nicht enthalten, daher optional. */
+  debtorIban?: string;
+}
+
+/** Ausgabeprofil der CII-Datei. */
+export type CiiProfile = 'EN16931' | 'XRECHNUNG';
 
 export interface InvoiceDocument {
   number: string;
@@ -47,8 +69,16 @@ export interface InvoiceDocument {
   currency: string;
   servicePeriod: { from: string; until: string };
   deliveryDate: string;
-  /** BT-10. Bei uns die eigene Rechnungsnummer als Zeichen der Kundin. */
+  /**
+   * Fallback für BT-10, wenn die Empfängerin keine Käuferreferenz
+   * (Leitweg-ID) hat: die eigene Rechnungsnummer.
+   */
   orderReference: string;
+  /** BT-10: Leitweg-ID bzw. Käuferreferenz der Empfängerin (Schnappschuss). */
+  buyerReference?: string;
+  /** UNTDID 4461: `58` Überweisung (Vorgabe) oder `59` Lastschrift. */
+  paymentMeansCode?: string;
+  directDebit?: DocumentDirectDebit;
   issuer: Issuer;
   recipient: DocumentRecipient;
   lines: DocumentLine[];

@@ -177,3 +177,162 @@ describe('issuerSnapshot', () => {
     expect(s.issuerBankDetails).toContain('IBAN');
   });
 });
+
+describe('E-Rechnung im Schnappschuss (Empfänger)', () => {
+  it('nimmt standardmäßig `business` ohne Kennungen, E-Mail als elektronische Adresse', () => {
+    const s = recipientSnapshot(COMPLETE);
+    expect(s.recipientBuyerType).toBe('business');
+    expect(s.recipientVatId).toBeNull();
+    expect(s.recipientBuyerReference).toBeNull();
+    expect(s.recipientElectronicAddress).toBe('vorstand@gruenspecht-weimar.example.com');
+    expect(s.recipientElectronicAddressScheme).toBe('EM');
+  });
+
+  it('übernimmt USt-IdNr., Leitweg-ID und eigene elektronische Adresse samt Schema', () => {
+    const s = recipientSnapshot({
+      ...COMPLETE,
+      buyerType: 'authority',
+      vatId: ' DE811111111 ',
+      buyerReference: '991-12345-67',
+      electronicAddress: '991-12345-67',
+      electronicAddressScheme: '0204',
+    });
+    expect(s).toMatchObject({
+      recipientBuyerType: 'authority',
+      recipientVatId: 'DE811111111',
+      recipientBuyerReference: '991-12345-67',
+      recipientElectronicAddress: '991-12345-67',
+      recipientElectronicAddressScheme: '0204',
+    });
+    // Die E-Mail für den Versand bleibt davon unberührt.
+    expect(s.recipientEmail).toBe('vorstand@gruenspecht-weimar.example.com');
+  });
+
+  it('erkennt eine E-Mail als elektronische Adresse auch ohne Schema (EM)', () => {
+    const s = recipientSnapshot({ ...COMPLETE, electronicAddress: 'rechnung@amt.example.org' });
+    expect(s.recipientElectronicAddressScheme).toBe('EM');
+  });
+
+  it('lässt die elektronische Adresse leer, wenn es weder Adresse noch E-Mail gibt', () => {
+    const s = recipientSnapshot({ ...COMPLETE, contactEmail: null });
+    expect(s.recipientElectronicAddress).toBeNull();
+    expect(s.recipientElectronicAddressScheme).toBeNull();
+  });
+});
+
+describe('E-Rechnung im Schnappschuss (Aussteller)', () => {
+  const s = issuerSnapshot(ISSUER_PRESETS);
+
+  it('friert Kontakt und Bank STRUKTURIERT ein', () => {
+    expect(s.issuerContactName).toBe(ISSUER_PRESETS.contact.name);
+    expect(s.issuerContactPhone).toBe(ISSUER_PRESETS.contact.phone);
+    expect(s.issuerContactEmail).toBe(ISSUER_PRESETS.contact.email);
+    expect(s.issuerIban).toBe(ISSUER_PRESETS.bank.iban);
+    expect(s.issuerBic).toBe(ISSUER_PRESETS.bank.bic);
+    expect(s.issuerBankName).toBe(ISSUER_PRESETS.bank.institution);
+  });
+
+  it('entfernt Leerzeichen aus der IBAN', () => {
+    const spaced = issuerSnapshot({
+      ...ISSUER_PRESETS,
+      bank: { ...ISSUER_PRESETS.bank, iban: 'DE02 1203 0000 0000 2020 51' },
+    });
+    expect(spaced.issuerIban).toBe('DE02120300000000202051');
+  });
+});
+
+describe('missingMandatoryDetails je Rechtsform und Käuferart', () => {
+  const issuer = issuerSnapshot(ISSUER_PRESETS);
+  const noRegister = {
+    issuerSeat: null,
+    issuerRegisterCourt: null,
+    issuerCommercialRegisterA: null,
+    issuerGeneralPartner: null,
+    issuerGeneralPartnerSeat: null,
+    issuerGeneralPartnerRegisterCourt: null,
+    issuerGeneralPartnerCommercialRegisterB: null,
+    issuerManagingDirector: null,
+  };
+
+  it('verlangt bei einer Gesellschaft Sitz, Gericht und Registernummer (Vorgabe)', () => {
+    const base = { ...recipientSnapshot(COMPLETE), ...issuer, ...noRegister, linesCount: 1 };
+    for (const legalForm of [undefined, 'company' as const]) {
+      const missing = missingMandatoryDetails({ ...base, legalForm });
+      expect(missing).toEqual(
+        expect.arrayContaining([
+          'Sitz der KG',
+          'Registergericht der KG',
+          'Handelsregisternummer der KG',
+        ]),
+      );
+    }
+  });
+
+  it.each(['sole_proprietor', 'association'] as const)(
+    'verlangt bei %s keine Register- und Sitzangaben',
+    (legalForm) => {
+      const missing = missingMandatoryDetails({
+        ...recipientSnapshot(COMPLETE),
+        ...issuer,
+        ...noRegister,
+        linesCount: 1,
+        legalForm,
+      });
+      expect(missing).toEqual([]);
+    },
+  );
+
+  it('verlangt auch bei Einzelunternehmen USt-IdNr., Anschrift und Bank', () => {
+    const missing = missingMandatoryDetails({
+      ...recipientSnapshot(COMPLETE),
+      ...issuer,
+      ...noRegister,
+      issuerVatId: null,
+      issuerBankDetails: null,
+      linesCount: 1,
+      legalForm: 'sole_proprietor',
+    });
+    expect(missing).toEqual(
+      expect.arrayContaining(['Umsatzsteuer-Identifikationsnummer', 'Bankverbindung']),
+    );
+  });
+
+  it('verlangt den Rückfrageweg der Ausstellerin (BR-DE-2)', () => {
+    const missing = missingMandatoryDetails({
+      ...recipientSnapshot(COMPLETE),
+      ...issuer,
+      issuerContactName: null,
+      issuerContactPhone: ' ',
+      issuerContactEmail: null,
+      linesCount: 1,
+    });
+    expect(missing).toEqual(
+      expect.arrayContaining([
+        'Ansprechpartner der Ausstellerin',
+        'Telefon der Ausstellerin',
+        'E-Mail der Ausstellerin',
+      ]),
+    );
+  });
+
+  it('verlangt bei einer Behörde die Leitweg-ID, bei einem Unternehmen nicht', () => {
+    const authority = recipientSnapshot({ ...COMPLETE, buyerType: 'authority' });
+    expect(
+      missingMandatoryDetails({ ...authority, ...issuer, linesCount: 1 }),
+    ).toContain('Leitweg-ID der Behörde (Käuferreferenz)');
+    expect(
+      missingMandatoryDetails({
+        ...recipientSnapshot({ ...COMPLETE, buyerType: 'authority', buyerReference: '991-1-1' }),
+        ...issuer,
+        linesCount: 1,
+      }),
+    ).toEqual([]);
+    expect(
+      missingMandatoryDetails({
+        ...recipientSnapshot({ ...COMPLETE, buyerType: 'consumer' }),
+        ...issuer,
+        linesCount: 1,
+      }),
+    ).toEqual([]);
+  });
+});

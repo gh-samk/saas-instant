@@ -38,6 +38,11 @@ const RECIPIENT = {
   recipientName: 'Solawi Fulda e. V.',
   recipientAddress: 'Ziegelgasse 14\n36037 Fulda\nDeutschland',
   recipientEmail: 'kontakt@solawi.example.com',
+  recipientBuyerType: 'business' as const,
+  recipientVatId: null,
+  recipientBuyerReference: null,
+  recipientElectronicAddress: 'kontakt@solawi.example.com',
+  recipientElectronicAddressScheme: 'EM',
 };
 
 describe('[W3] Der Sitz steht im Schnappschuss', () => {

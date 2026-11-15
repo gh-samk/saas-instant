@@ -90,7 +90,7 @@ export interface MailBrand {
 
 /** Neutrale Vorgabe, solange nichts konfiguriert ist. */
 export const MAIL_BRAND_DEFAULT: MailBrand = {
-  name: 'saas-instant',
+  name: 'SAAS Verwaltung',
   details: [],
   url: null,
   links: [],

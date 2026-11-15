@@ -207,3 +207,26 @@ describe('Der Vorschautext verrät weder Code noch Passwort', () => {
     expect(preview).toContain('Es ist eine neue Anfrage eingegangen.');
   });
 });
+
+describe('Marke, die selbst auf „Verwaltung" endet', () => {
+  it('führt „Verwaltung" im Betreff und im Text nur einmal', async () => {
+    const mailbox: Record<string, unknown>[] = [];
+    createTransport.mockReturnValue({
+      sendMail: async (message: Record<string, unknown>) => {
+        mailbox.push(message);
+        return {};
+      },
+    });
+    const { setMailBrand, mailBrand } = await import('@saas-instant/shared');
+    const before = mailBrand();
+    setMailBrand({ ...before, name: 'SAAS Verwaltung' });
+    try {
+      await service().sendLoginCode('anna@example.com', '12345678', 10, false);
+      expect(String(mailbox[0]!['subject'])).not.toContain('Verwaltung Verwaltung');
+      expect(String(mailbox[0]!['text'])).not.toContain('Verwaltung-Verwaltung');
+      expect(String(mailbox[0]!['text'])).not.toContain('Verwaltung Verwaltung');
+    } finally {
+      setMailBrand(before);
+    }
+  });
+});

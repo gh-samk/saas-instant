@@ -9,6 +9,7 @@ import {
   LastAccountError,
 } from './user.errors';
 import { UserService } from './user.service';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 
 /**
  * ===========================================================================
@@ -87,9 +88,7 @@ afterAll(async () => {
   await prisma.emergencyEnrollment.deleteMany({
     where: { user: { username: { startsWith: PREFIX } } },
   });
-  await prisma.auditLog.deleteMany({
-    where: { user: { username: { startsWith: PREFIX } } },
-  });
+  await truncateAuditLog(prisma);
   await prisma.user.deleteMany({
     where: { username: { startsWith: PREFIX } },
   });

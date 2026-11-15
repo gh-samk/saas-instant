@@ -17,6 +17,10 @@ import { InvoiceController } from './invoice.controller';
 import { InvoiceService } from './invoice.service';
 import { InvoiceSendService } from './send.service';
 import { PaymentService } from './payment.service';
+import { GobdExportController } from './gobd-export.controller';
+import { GobdExportService } from './gobd-export.service';
+import { InvoiceHistoryService } from './invoice-history.service';
+import { IntegrityService } from './integrity.service';
 
 /**
  * Rechnungen (Etappe 4).
@@ -39,6 +43,8 @@ import { PaymentService } from './payment.service';
     // erinnern — liegt hinter dem zweiten Faktor.
     InvoiceCompletionController,
     InvoicePaymentController,
+    // GoBD-Pruefer-Export: Session + zweiter Faktor.
+    GobdExportController,
   ],
   providers: [
     PricingConfigService,
@@ -48,6 +54,10 @@ import { PaymentService } from './payment.service';
     PaymentService,
     InvoiceDocumentService,
     InvoiceSendService,
+    // GoBD: Integritaetslauf (nachts, @Cron), Verlauf, Pruefer-Export.
+    IntegrityService,
+    InvoiceHistoryService,
+    GobdExportService,
     {
       provide: INVOICE_RENDERER,
       inject: [ConfigService],

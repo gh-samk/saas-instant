@@ -1,4 +1,4 @@
-import type { Prisma, Invoice, InvoiceStatus, InvoiceLine } from '.prisma/control-client';
+import type { Prisma, Invoice, InvoiceStatus, InvoiceLine, BuyerType } from '.prisma/control-client';
 import { dateStringFromDate, today } from '@saas-instant/shared';
 import { decimalAsCent } from './invoice.amount';
 
@@ -33,6 +33,12 @@ export interface InvoiceLineResponse {
   netAmount: string;
   taxAmount: string;
   grossAmount: string;
+  /** Steuerkategorie nach UNTDID 5305 (S, Z, E, AE, K, G, O). */
+  taxCategory: string;
+  taxExemptionReason: string | null;
+  /** Preisstufe, aus der der Posten stammt (nur wenn aus dem Vorschlag übernommen). */
+  priceTierKey: string | null;
+  priceTierLabel: string | null;
 }
 
 /**
@@ -115,6 +121,25 @@ export interface InvoiceResponse {
   transferStatus: string | null;
   /** Liegt das PDF/A-3b mit eingebettetem factur-x.xml vor? */
   documentPresent: boolean;
+  /** Liegt die XRechnung (reines XML) vor? */
+  xrechnungPresent: boolean;
+  /** E-Rechnung: Art der Empfängerin und ihre Kennungen (Schnappschuss). */
+  recipientBuyerType: BuyerType | null;
+  recipientVatId: string | null;
+  recipientBuyerReference: string | null;
+  recipientElectronicAddress: string | null;
+  recipientElectronicAddressScheme: string | null;
+  currency: string;
+  /** UNTDID 4461: 58 Überweisung, 59 Lastschrift. */
+  paymentMeansCode: string;
+  /** GoBD: Prüfsummen (SHA-256, hex) der einmal erzeugten Dokumente. */
+  pdfSha256: string | null;
+  xmlSha256: string | null;
+  xrechnungSha256: string | null;
+  /** Technischer Zeitstempel (ISO) der Dokumenterzeugung. */
+  documentGeneratedAt: string | null;
+  /** Ende der Aufbewahrungsfrist (Tagesdatum). */
+  retentionUntil: string | null;
 
   lines: InvoiceLineResponse[];
 }
@@ -128,7 +153,7 @@ export interface InvoiceResponse {
  * aus jeder Auswahl heraus, und `documentPresent` wird getrennt ermittelt —
  * über `pdfContent IS NOT NULL` in SQL, nicht über den Inhalt.
  */
-export type InvoiceWithoutDocument = Omit<Invoice, 'pdfContent' | 'xmlContent'> & {
+export type InvoiceWithoutDocument = Omit<Invoice, 'pdfContent' | 'xmlContent' | 'xrechnungContent'> & {
   lines: InvoiceLine[];
   cancellationInvoice?: { id: string } | null;
   /** Optional, weil nicht jeder Leseweg die Organisation mitlädt. */
@@ -216,6 +241,7 @@ export function toInvoiceResponse(
   invoice: InvoiceWithoutDocument,
   documentPresent: boolean,
   todayDay: string = today(),
+  xrechnungPresent = false,
 ): InvoiceResponse {
   const sumNetCent = sum(invoice.lines, 'netAmount');
   const sumTaxCent = sum(invoice.lines, 'taxAmount');
@@ -261,6 +287,22 @@ export function toInvoiceResponse(
 
     transferStatus: invoice.transferStatus,
     documentPresent,
+    xrechnungPresent,
+    recipientBuyerType: invoice.recipientBuyerType,
+    recipientVatId: invoice.recipientVatId,
+    recipientBuyerReference: invoice.recipientBuyerReference,
+    recipientElectronicAddress: invoice.recipientElectronicAddress,
+    recipientElectronicAddressScheme: invoice.recipientElectronicAddressScheme,
+    currency: invoice.currency,
+    paymentMeansCode: invoice.paymentMeansCode,
+    pdfSha256: invoice.pdfSha256,
+    xmlSha256: invoice.xmlSha256,
+    xrechnungSha256: invoice.xrechnungSha256,
+    documentGeneratedAt: invoice.documentGeneratedAt?.toISOString() ?? null,
+    retentionUntil:
+      invoice.retentionUntil === null
+        ? null
+        : dateStringFromDate(invoice.retentionUntil),
 
     lines: invoice.lines.map((p) => ({
       id: p.id,
@@ -277,6 +319,10 @@ export function toInvoiceResponse(
       netAmount: p.netAmount.toFixed(2),
       taxAmount: p.taxAmount.toFixed(2),
       grossAmount: p.grossAmount.toFixed(2),
+      taxCategory: p.taxCategory,
+      taxExemptionReason: p.taxExemptionReason,
+      priceTierKey: p.priceTierKey ?? null,
+      priceTierLabel: p.priceTierLabel ?? null,
     })),
   };
 }

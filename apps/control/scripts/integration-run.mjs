@@ -187,13 +187,13 @@ if (databaseName.endsWith('_integration')) {
     {
       cwd: PACKAGE_ROOT,
       input: `DO $$
-DECLARE table text;
+DECLARE tbl text;
 BEGIN
-  FOR table IN
+  FOR tbl IN
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
   LOOP
-    EXECUTE format('TRUNCATE TABLE %I CASCADE', table);
+    EXECUTE format('TRUNCATE TABLE %I CASCADE', tbl);
   END LOOP;
 END $$;`,
       encoding: 'utf8',

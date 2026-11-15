@@ -3,6 +3,10 @@ import { PrismaClient } from '.prisma/control-client';
 import type { CompanyStatus, Prisma } from '.prisma/control-client';
 import { toDate } from '@saas-instant/shared';
 import type { PrismaService } from '../prisma/prisma.service';
+import {
+  truncateAuditLog as truncateAuditLogOn,
+  truncateInvoices as truncateInvoicesOn,
+} from './gobd-cleanup';
 
 /**
  * Gemeinsamer Unterbau der Integrationstests von Etappe 2.
@@ -16,6 +20,9 @@ import type { PrismaService } from '../prisma/prisma.service';
  * Reste, die keiner anderen Suite in die Quere kommen.
  */
 export const prisma = new PrismaClient() as unknown as PrismaService;
+
+const truncateAuditLog = () => truncateAuditLogOn(prisma);
+const truncateInvoices = () => truncateInvoicesOn(prisma);
 
 /** Ein Präfix, das nur dieser Suite gehört. */
 export function newPrefix(label: string): string {
@@ -108,31 +115,11 @@ export async function cleanUp(prefix: string): Promise<void> {
     select: { id: true, cancelledInvoiceId: true },
   });
   const invoiceIdentifiers = invoices.map((r) => r.id);
-  await prisma.auditLog.deleteMany({
-    where: {
-      objectId: {
-        in: [
-          ...identifiers,
-          ...notes.map((n) => n.id),
-          ...instanceIdentifiers,
-          ...invoiceIdentifiers,
-        ],
-      },
-    },
-  });
+  await truncateAuditLog();
   if (invoiceIdentifiers.length > 0) {
-    await prisma.invoiceLine.deleteMany({
-      where: { invoiceId: { in: invoiceIdentifiers } },
-    });
-    // Stornorechnungen zuerst: Solange eine auf ihr Original zeigt, laesst
-    // sich das Original nicht loeschen (Restrict).
-    await prisma.invoice.deleteMany({
-      where: {
-        id: { in: invoiceIdentifiers },
-        cancelledInvoiceId: { not: null },
-      },
-    });
-    await prisma.invoice.deleteMany({ where: { id: { in: invoiceIdentifiers } } });
+    // Festgeschriebene Rechnungen lassen sich per DELETE nicht entfernen
+    // (GoBD-Trigger); TRUNCATE ... CASCADE umgeht ihn nur hier im Testpfad.
+    await truncateInvoices();
   }
   if (instanceIdentifiers.length > 0) {
     await prisma.metric.deleteMany({
@@ -167,9 +154,7 @@ export async function cleanUp(prefix: string): Promise<void> {
         : { companyId: { in: identifiers } },
   });
   if (consentIdentifiers.length > 0) {
-    await prisma.auditLog.deleteMany({
-      where: { objectId: { in: consentIdentifiers } },
-    });
+    await truncateAuditLog();
     await prisma.consent.deleteMany({
       where: { id: { in: consentIdentifiers } },
     });
@@ -201,11 +186,7 @@ export async function cleanUpConsents(
     where: { consentId: { in: identifiers } },
     select: { id: true },
   });
-  await prisma.auditLog.deleteMany({
-    where: {
-      objectId: { in: [...identifiers, ...deliveries.map((v) => v.id)] },
-    },
-  });
+  await truncateAuditLog();
   await prisma.mailDelivery.deleteMany({
     where: { consentId: { in: identifiers } },
   });
@@ -226,7 +207,7 @@ export async function cleanUpTemplates(prefix: string): Promise<void> {
   await prisma.mailDelivery.deleteMany({
     where: { templateId: { in: identifiers } },
   });
-  await prisma.auditLog.deleteMany({ where: { objectId: { in: identifiers } } });
+  await truncateAuditLog();
   await prisma.mailTemplate.deleteMany({ where: { id: { in: identifiers } } });
 }
 

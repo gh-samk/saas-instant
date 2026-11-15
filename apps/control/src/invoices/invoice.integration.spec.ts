@@ -53,7 +53,41 @@ const actor = { userId: null, name: 'sam' };
 const audit = new AuditService(prisma);
 const emptyEnvironment = { get: () => undefined } as unknown as ConfigService;
 const prices = new PricingConfigService(emptyEnvironment);
-const issuer = new IssuerConfigService(emptyEnvironment);
+
+/**
+ * EINE ECHTE (NICHT-PLATZHALTER-)AUSSTELLERIN.
+ *
+ * Seit der Aussteller-Härtung verweigert das Festschreiben die neutralen
+ * Platzhalter aus `ISSUER_PRESETS` (Firma „Example Company…", Beispiel-
+ * USt-IdNr. und -IBAN). Diese Suite braucht Belege, also konfiguriert sie
+ * eine Testausstellerin über dieselben Umgebungsvariablen wie der Betrieb.
+ * Die Verweigerung selbst prüft die Suite weiter unten.
+ */
+const ISSUER_ENV: Record<string, string> = {
+  CONTROL_INVOICE_ISSUER: 'Testhaus Software GmbH & Co. KG',
+  CONTROL_INVOICE_STREET: 'Werkstattweg 7',
+  CONTROL_INVOICE_POSTAL_CODE: '36037',
+  CONTROL_INVOICE_CITY: 'Fulda',
+  CONTROL_INVOICE_SEAT: 'Fulda',
+  CONTROL_INVOICE_USTIDNR: 'DE811569869',
+  CONTROL_INVOICE_COMMERCIAL_REGISTER_A: 'HRA 12345',
+  CONTROL_INVOICE_REGISTER_COURT: 'Amtsgericht Fulda',
+  CONTROL_INVOICE_GENERAL_PARTNER: 'Testhaus Verwaltungs GmbH',
+  CONTROL_INVOICE_GENERAL_PARTNER_SEAT: 'Fulda',
+  CONTROL_INVOICE_GENERAL_PARTNER_GERICHT: 'Amtsgericht Fulda',
+  CONTROL_INVOICE_COMMERCIAL_REGISTER_B: 'HRB 54321',
+  CONTROL_INVOICE_MANAGING_DIRECTOR: 'Erika Beispiel',
+  CONTROL_INVOICE_CONTACT_NAME: 'Rechnungsstelle Testhaus',
+  CONTROL_INVOICE_PHONE: '+49 661 000000',
+  CONTROL_INVOICE_EMAIL: 'rechnung@testhaus.example.com',
+  CONTROL_INVOICE_BANK: 'Testbank Fulda',
+  CONTROL_INVOICE_IBAN: 'DE89370400440532013000',
+  CONTROL_INVOICE_BIC: 'COBADEFFXXX',
+};
+const issuerEnvironment = {
+  get: (name: string) => ISSUER_ENV[name],
+} as unknown as ConfigService;
+const issuer = new IssuerConfigService(issuerEnvironment);
 
 /**
  * [W1]: Diese Suite rechnet ABSICHTLICH in einem Jahr weit in der Zukunft

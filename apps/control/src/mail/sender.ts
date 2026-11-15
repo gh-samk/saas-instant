@@ -143,7 +143,7 @@ export function senderAddresses(config: ConfigService): SenderAddresses {
     'SMTP_FROM',
     m
       ? `${m.senderName} <${m.senderAddress}>`
-      : `saas-instant <noreply@${domain}>`,
+      : `SAAS Verwaltung <noreply@${domain}>`,
   );
   // Die NACKTE Adresse des Postausgangskontos — sie ist die Rückfallebene
   // für alles, was sonst ein eigenes Postfach bräuchte.

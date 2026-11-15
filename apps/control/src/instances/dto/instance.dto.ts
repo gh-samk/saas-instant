@@ -1,4 +1,15 @@
-import { IsInt, IsNotEmpty, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { IsCalendarDate } from '../../common/validators/is-calendar-date';
 import { IsPastDay } from '../../common/validators/is-past-day';
 import { SUBDOMAIN_MAX } from '../../coolify/subdomain';
@@ -29,10 +40,34 @@ export class SubdomainQueryDto {
  * Sicherungen liegen.
  */
 export class BackupReportDto {
+  /**
+   * Pflicht für Instanz-Sicherungen (Vorgabe, wenn `kind` fehlt). Bei
+   * `control` und `invoices` gibt es keine Instanz.
+   */
+  @ValidateIf((o: BackupReportDto) => o.kind === undefined || o.kind === 'instance')
   @IsString()
   @IsNotEmpty({ message: 'Die Subdomain fehlt.' })
   @MaxLength(SUBDOMAIN_MAX)
-  subdomain!: string;
+  subdomain?: string;
+
+  /** Art der Sicherung; fehlt sie, ist es eine Instanz-Sicherung (abwärtskompatibel). */
+  @IsOptional()
+  @IsIn(['instance', 'control', 'invoices'])
+  kind?: 'instance' | 'control' | 'invoices';
+
+  /** Schlüssel des Objekts im Sicherungsziel — kein Geheimnis. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  @Matches(/^(?!.*\.\.)[A-Za-z0-9._\-/=+]+$/, {
+    message: 'Der Objektschlüssel enthält unzulässige Zeichen.',
+  })
+  objectKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{64}$/, { message: 'Die Prüfsumme muss SHA-256 in Hex sein.' })
+  sha256?: string;
 
   /**
    * Der Tag der Sicherung. NICHT IN DER ZUKUNFT ([K3]).

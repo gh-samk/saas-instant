@@ -5,6 +5,7 @@ import { EmergencyService } from '../auth/emergency.service';
 import { prisma } from '../test-support/company-provisioning';
 import { FirstAccountService } from './first-account.service';
 import { FirstAccountNotPossibleError } from './user.errors';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 
 /**
  * Der Weg in eine LEERE Verwaltung. Ohne ihn war eine frisch ausgerollte
@@ -23,7 +24,7 @@ const service = new FirstAccountService(prisma, audit, emergency);
 /** Die Sperre haengt an der GESAMTEN Tabelle — der Test raeumt sie leer. */
 async function emptyTable() {
   await prisma.emergencyEnrollment.deleteMany({});
-  await prisma.auditLog.deleteMany({ where: { userId: { not: null } } });
+  await truncateAuditLog(prisma);
   await prisma.passkeyCredential.deleteMany({});
   await prisma.user.deleteMany({});
 }

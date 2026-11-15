@@ -6,6 +6,111 @@ import {
   type ErrorList,
 } from '../validation';
 
+/**
+ * Wo die Sicherungswerkzeuge die Daten einer Instanz finden (Abschnitt
+ * `provisioning.backup`, OPTIONAL). Ohne den Abschnitt gibt es für die
+ * Instanzen dieser Software keinen Sicherungsplan.
+ */
+export interface BackupManifest {
+  /** Compose-Dienst der Datenbank (Std "db"). */
+  dbServiceName: string;
+  dbName: string;
+  dbUser: string;
+  /** Compose-Dienst, der das Upload-Volume einhängt; null = keine Uploads. */
+  uploadsService: string | null;
+  /** Pfad des Upload-Verzeichnisses im Dienst; null = keine Uploads. */
+  uploadsPath: string | null;
+  /**
+   * Muster des Compose-Projektnamens. Platzhalter: {subdomain} und
+   * {applicationId} (Coolify-UUID der Anwendung). Std "{subdomain}".
+   */
+  composeProjectPattern: string;
+}
+
+/** Platzhalter des Compose-Projekt-Musters. */
+export const COMPOSE_PROJECT_PLACEHOLDERS = ['subdomain', 'applicationId'] as const;
+
+/** Setzt das Compose-Projekt-Muster ein; null, wenn ein Platzhalter keinen Wert hat. */
+export function composeProjectFor(
+  pattern: string,
+  values: { subdomain: string; applicationId: string | null },
+): string | null {
+  let missing = false;
+  const text = pattern.replace(/\{([A-Za-z]+)\}/g, (whole, name: string) => {
+    if (name === 'subdomain') return values.subdomain;
+    if (name === 'applicationId') {
+      if (values.applicationId === null) missing = true;
+      return values.applicationId ?? '';
+    }
+    return whole;
+  });
+  return missing ? null : text;
+}
+
+export const BACKUP_PRESET = {
+  dbServiceName: 'db',
+  composeProjectPattern: '{subdomain}',
+} as const;
+
+function checkBackup(raw: unknown, error: ErrorList): BackupManifest | null {
+  if (raw === undefined || raw === null) return null;
+  const where = 'provisioning.backup';
+  const o = sectionAsObject(raw, where, error);
+  const identifier = /^[A-Za-z_][A-Za-z0-9_.-]{0,62}$/;
+  const dbServiceName = textField(o, 'dbServiceName', where, BACKUP_PRESET.dbServiceName, error, {
+    pattern: /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/,
+    patternHint: 'nur Buchstaben, Ziffern, Punkt, Binde- und Unterstrich',
+  });
+  const dbName = textField(o, 'dbName', where, '', error, {
+    pattern: identifier,
+    patternHint: 'nur Buchstaben, Ziffern, Punkt, Binde- und Unterstrich',
+  });
+  const dbUser = textField(o, 'dbUser', where, '', error, {
+    pattern: identifier,
+    patternHint: 'nur Buchstaben, Ziffern, Punkt, Binde- und Unterstrich',
+  });
+  if (dbName === '') error.push(`${where}.dbName: ist Pflicht`);
+  if (dbUser === '') error.push(`${where}.dbUser: ist Pflicht`);
+  const uploadsService = optionalTextField(o, 'uploadsService', where, error);
+  const uploadsPath = optionalTextField(o, 'uploadsPath', where, error);
+  if ((uploadsService === null) !== (uploadsPath === null)) {
+    error.push(`${where}: uploadsService und uploadsPath gehören zusammen (beide oder keines)`);
+  }
+  if (uploadsPath !== null && (!uploadsPath.startsWith('/') || uploadsPath.includes('..'))) {
+    error.push(`${where}.uploadsPath: muss ein absoluter Pfad ohne ".." sein`);
+  }
+  if (uploadsService !== null && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(uploadsService)) {
+    error.push(`${where}.uploadsService: nur Buchstaben, Ziffern, Punkt, Binde- und Unterstrich`);
+  }
+  const composeProjectPattern = textField(
+    o,
+    'composeProjectPattern',
+    where,
+    BACKUP_PRESET.composeProjectPattern,
+    error,
+    { notEmpty: true },
+  );
+  for (const match of composeProjectPattern.matchAll(/\{([^{}]*)\}/g)) {
+    if (!(COMPOSE_PROJECT_PLACEHOLDERS as readonly string[]).includes(match[1])) {
+      error.push(
+        `${where}.composeProjectPattern: unbekannter Platzhalter {${match[1]}} ` +
+          `(erlaubt: ${COMPOSE_PROJECT_PLACEHOLDERS.map((p) => `{${p}}`).join(', ')})`,
+      );
+    }
+  }
+  if (!/\{(subdomain|applicationId)\}/.test(composeProjectPattern)) {
+    error.push(`${where}.composeProjectPattern: muss {subdomain} oder {applicationId} enthalten`);
+  }
+  return {
+    dbServiceName,
+    dbName,
+    dbUser,
+    uploadsService,
+    uploadsPath,
+    composeProjectPattern,
+  };
+}
+
 export interface ProvisioningManifest {
   /** Basisdomain der Instanzen, z. B. "example.com". */
   instanceDomainBase: string;
@@ -46,6 +151,8 @@ export interface ProvisioningManifest {
    * Abgleich nicht als verwaist melden soll; null = nichts ausschließen.
    */
   ownApplications: string[];
+  /** Optional: wo die Sicherung die Daten einer Instanz findet; null = kein Sicherungsplan. */
+  backup: BackupManifest | null;
 }
 
 export const PROVISIONING_PRESET: ProvisioningManifest = {
@@ -61,6 +168,7 @@ export const PROVISIONING_PRESET: ProvisioningManifest = {
   repository: '',
   composePath: '/docker-compose.coolify.yml',
   ownApplications: [],
+  backup: null,
 };
 
 /** Platzhalter, die eine Umgebungsvorlage kennt. */
@@ -162,5 +270,6 @@ export function checkProvisioning(raw: unknown, error: ErrorList): ProvisioningM
       notEmpty: true,
     }),
     ownApplications: own,
+    backup: checkBackup(o['backup'], error),
   };
 }

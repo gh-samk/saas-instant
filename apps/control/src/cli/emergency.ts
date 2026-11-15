@@ -45,7 +45,7 @@ function isCommand(value: string): value is Command {
 function help(): void {
   process.stdout.write(
     [
-      'Notfallkommandos der saas-instant-Verwaltung.',
+      'Notfallkommandos der Verwaltung.',
       '<kennung> ist Benutzername oder E-Mail-Adresse.',
       '',
       '  emergency first-account <email> <name>  ERSTES Konto einer leeren Verwaltung anlegen',

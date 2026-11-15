@@ -2,6 +2,10 @@
 # Umgebungsvariable MANIFEST_PATH setzen. Alle Abschnitte sind optional;
 # fehlende Werte fallen auf neutrale Vorgaben zurück.
 
+# EINE Namensquelle: product.name speist Oberfläche, Mails, Rechnungen und Portal.
+# Ohne product.name heißt die Verwaltung "SAAS Verwaltung" (nicht angebunden).
+# Ist product.name gesetzt, MUSS auch product.slug gesetzt sein; die Verwaltung wird
+# beim ersten Start an diesen Slug gebunden (spätere Abweichung bricht den Start ab).
 product:
   name: Mein Produkt
   slug: mein-produkt          # a-z, 0-9, Bindestrich
@@ -67,9 +71,18 @@ provisioning:
   composePath: /docker-compose.coolify.yml
   ownApplications: []                    # eigene Coolify-Anwendungen (z. B. instanz-control),
                                          # die der Abgleich nicht als verwaist meldet
+  # OPTIONAL: Sicherung/Wiederherstellung der Instanzen. Sagt dem Sicherungs-Agent,
+  # wo er die Daten einer Instanz findet. Ohne den Abschnitt gibt es keinen Plan.
+  backup:
+    dbServiceName: db                    # Compose-Dienst der Datenbank (Standard: db)
+    dbName: app
+    dbUser: app
+    uploadsService: app                  # optional, zusammen mit uploadsPath
+    uploadsPath: /app/uploads
+    composeProjectPattern: "{subdomain}" # Compose-Projektname; {subdomain}, {applicationId}
 
 ui:
-  productName: Mein Produkt
+  # productName: Mein Produkt   # optional: Override; sonst gilt product.name
   # logoUrl: https://example.com/logo.svg   # optional (https); ohne Angabe zeigt die Oberfläche die Initiale
   # Oberfläche: Name und Logo kommen über GET /api/public-config. Die Instanz-
   # Domain zeigt die Oberfläche nur, wenn beim Build VITE_INSTANZ_BASISDOMAIN

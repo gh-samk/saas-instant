@@ -1,4 +1,4 @@
-import { apiFetch } from './api-client';
+import { apiFetch, ApiError, fetchCsrf } from './api-client';
 import type {
   LoginOptionsJson,
   RegisterOptionsJson,
@@ -512,6 +512,9 @@ export interface CompanyShort {
   openOverdue: boolean;
 }
 
+/** Art der Rechnungsempfängerin: Unternehmen, Behörde (Leitweg-ID Pflicht) oder Privatperson. */
+export type BuyerType = 'business' | 'authority' | 'consumer';
+
 /** Das vollständige Organisationsobjekt der Detailseite. */
 export interface Company {
   id: string;
@@ -547,6 +550,15 @@ export interface Company {
   lastStatusChangeAt: string | null;
 
   priceTier: string | null;
+
+  /** E-Rechnung: Art der Empfängerin und ihre Kennungen (ZUGFeRD / XRechnung). */
+  buyerType: BuyerType;
+  vatId: string | null;
+  /** Leitweg-ID bzw. Bestellreferenz (BT-10). */
+  buyerReference: string | null;
+  electronicAddress: string | null;
+  electronicAddressScheme: string | null;
+
   paymentInterval: PaymentInterval | null;
   paymentMethod: PaymentMethod | null;
 
@@ -642,6 +654,11 @@ export interface CompanyChange {
   deputyPhone?: string | null;
   deputyRole?: string | null;
   priceTier?: string | null;
+  buyerType?: BuyerType;
+  vatId?: string | null;
+  buyerReference?: string | null;
+  electronicAddress?: string | null;
+  electronicAddressScheme?: string | null;
   paymentInterval?: PaymentInterval | null;
   paymentMethod?: PaymentMethod | null;
   pilotDecisionDate?: string | null;
@@ -717,7 +734,11 @@ export type TaskKind =
   | 'tier_check'
   // Ohne Organisationsbezug: ein gestörter Postausgang der Verwaltung oder
   // der Instanzen.
-  | 'outbox_disrupted';
+  | 'outbox_disrupted'
+  // GoBD: Beleg weicht von seiner Prüfsumme ab / Lücke im Nummernkreis.
+  | 'document_tampered'
+  // Ziel eingerichtet, aber seit 3 Tagen keine Sicherung der Verwaltung gemeldet.
+  | 'control_backup_missing';
 
 export type Urgency = 'high' | 'medium' | 'low';
 
@@ -1561,6 +1582,9 @@ export interface InvoiceLine {
   netAmount: string;
   taxAmount: string;
   grossAmount: string;
+  /** Preisstufe, aus der der Posten stammt (Preisvorschlag), sonst `null`. */
+  priceTierKey?: string | null;
+  priceTierLabel?: string | null;
 }
 
 export interface Invoice {
@@ -1613,6 +1637,10 @@ export interface Invoice {
 
   transferStatus: string | null;
   documentPresent: boolean;
+  /** Liegt die XRechnung (reines XML) vor? */
+  xrechnungPresent?: boolean;
+  /** E-Rechnung: Art der Empfängerin (Schnappschuss beim Festschreiben). */
+  recipientBuyerType?: BuyerType | null;
 
   lines: InvoiceLine[];
 }
@@ -1629,6 +1657,8 @@ export interface InvoiceLineInput {
   taxRate: number;
   /** UN/ECE Rec. 20: `C62` (Pauschale), `MON` (Monat), `ANN` (Jahr). */
   unit?: string;
+  /** Preisstufe des Postens (aus dem Vorschlag); das Etikett setzt der Server. */
+  priceTierKey?: string;
 }
 
 export interface InvoiceDraft {
@@ -2522,4 +2552,327 @@ export function startSendRun(
     method: 'POST',
     body: JSON.stringify({ ...(evidence ?? {}) }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Einstellungen → Preise
+// ---------------------------------------------------------------------------
+
+/** Eine Preisstufe der Preisliste; Beträge netto in ganzen Cent. */
+export interface PriceListTier {
+  key: string;
+  label: string;
+  /** Obere Schwelle einschließlich; `null` = nach oben offen. */
+  maxPersons: number | null;
+  monthlyCent: number;
+  halfYearlyCent: number;
+  yearlyCent: number;
+  setupCent: number;
+  archived: boolean;
+}
+
+export interface PriceList {
+  taxRatePercent: number;
+  paymentTermDays: number;
+  averageDays: number;
+  currency: string;
+  /** Alle Stufen in Schwellenreihenfolge, archivierte eingeschlossen. */
+  tiers: PriceListTier[];
+  updatedAt: string | null;
+}
+
+export function fetchPrices(): Promise<PriceList> {
+  return apiFetch<PriceList>('/api/settings/prices');
+}
+
+/**
+ * Speichert die GESAMTE Preisliste. Hinter dem zweiten Faktor: ohne Nachweis
+ * antwortet der Server (bei älterer Sitzung) mit `anmeldung_fehlgeschlagen`,
+ * woraufhin die Oberfläche den Nachweis-Dialog zeigt.
+ */
+export function savePrices(
+  list: Omit<PriceList, 'updatedAt'>,
+  evidence?: SecondFactorEvidence,
+): Promise<PriceList> {
+  return apiFetch<PriceList>('/api/settings/prices', {
+    method: 'PUT',
+    body: JSON.stringify({
+      taxRatePercent: list.taxRatePercent,
+      paymentTermDays: list.paymentTermDays,
+      averageDays: list.averageDays,
+      currency: list.currency,
+      tiers: list.tiers,
+      ...(evidence ?? {}),
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Einstellungen → Sicherung, Instanz-Sicherungen und Wiederherstellung
+// ---------------------------------------------------------------------------
+
+/** Metadaten des Sicherungsziels. Zugangsdaten sind WRITE-ONLY und kommen nie zurück. */
+export interface BackupTargetMeta {
+  type: 's3' | 'storagebox';
+  endpoint: string | null;
+  host: string | null;
+  bucket: string | null;
+  region: string | null;
+  path: string | null;
+  port: number | null;
+  username: string | null;
+  schedule: string;
+  retentionDays: number;
+  lastTestAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string | null;
+  /** Vom Agent (nie Geheimnisse); null, solange der Agent nichts liefert. */
+  prefix: string | null;
+  pathStyle: boolean | null;
+  authType: 'key' | 'password' | null;
+  hostKeyFingerprint: string | null;
+}
+
+export interface BackupSettings {
+  target: BackupTargetMeta | null;
+  agent: {
+    configured: boolean;
+    reachable: boolean;
+    version: string | null;
+    targetConfigured: boolean | null;
+    objectLock: boolean | null;
+    ageRecipient: string | null;
+  };
+  /** Nur in der Antwort auf die ERSTE Einrichtung, genau einmal. */
+  ageIdentity?: string;
+}
+
+export interface BackupSettingsInput {
+  type: 's3' | 'storagebox';
+  schedule: 'daily' | 'twice_daily';
+  retentionDays: number;
+  objectLock: boolean;
+  s3?: {
+    endpoint: string;
+    region: string;
+    bucket: string;
+    prefix: string;
+    pathStyle: boolean;
+    /** Beide weglassen = der Agent behält die gespeicherten Werte. */
+    accessKeyId?: string;
+    secretAccessKey?: string;
+  };
+  storagebox?: {
+    host: string;
+    port: number;
+    username: string;
+    path: string;
+    authType: 'key' | 'password';
+    privateKey?: string;
+    password?: string;
+  };
+}
+
+export interface BackupTestResult {
+  ok: boolean;
+  message: string;
+  testedAt: string;
+}
+
+export function fetchBackupSettings(): Promise<BackupSettings> {
+  return apiFetch<BackupSettings>('/api/settings/backup');
+}
+
+/** Speichert das Sicherungsziel. Geheimnisse gehen durch zum Agent und werden nicht abgelegt. */
+export function saveBackupSettings(
+  input: BackupSettingsInput,
+  evidence?: SecondFactorEvidence,
+): Promise<BackupSettings> {
+  return apiFetch<BackupSettings>('/api/settings/backup', {
+    method: 'PUT',
+    body: JSON.stringify({ ...input, ...(evidence ?? {}) }),
+  });
+}
+
+export function testBackupTarget(
+  evidence?: SecondFactorEvidence,
+): Promise<BackupTestResult> {
+  return apiFetch<BackupTestResult>('/api/settings/backup/test', {
+    method: 'POST',
+    body: JSON.stringify({ ...(evidence ?? {}) }),
+  });
+}
+
+export interface InstanceBackupRow {
+  id: string;
+  date: string;
+  sizeBytes: number;
+  objectKey: string | null;
+  sha256: string | null;
+  verified: boolean;
+  verifiedAt: string | null;
+  restorable: boolean;
+}
+
+export interface BackupJobView {
+  id: string;
+  kind: 'backup' | 'backup-control' | 'verify' | 'restore';
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  startedAt: string | null;
+  finishedAt: string | null;
+  message: string | null;
+  result: { objectKey?: string; sizeBytes?: number; sha256?: string } | null;
+}
+
+/** provisioning | restoring | ready | failed | adopted */
+export interface InstanceRestore {
+  id: string;
+  instanceId: string;
+  backupId: string;
+  newSubdomain: string;
+  status: string;
+  message: string | null;
+  createdAt: string;
+  adoptedAt: string | null;
+}
+
+export interface RestoreStartInput {
+  backupId: string;
+  newSubdomain: string;
+  /** Privater age-Schlüssel: nur im Speicher, geht an den Agent, nie zurück. */
+  ageIdentity: string;
+  confirmName: string;
+}
+
+export function fetchInstanceBackups(
+  instanceId: string,
+): Promise<{ backups: InstanceBackupRow[] }> {
+  return apiFetch<{ backups: InstanceBackupRow[] }>(
+    `/api/instances/${encodeURIComponent(instanceId)}/backups`,
+  );
+}
+
+export function startInstanceBackup(
+  instanceId: string,
+  evidence?: SecondFactorEvidence,
+): Promise<{ jobId: string }> {
+  return apiFetch<{ jobId: string }>(
+    `/api/instances/${encodeURIComponent(instanceId)}/backups`,
+    { method: 'POST', body: JSON.stringify({ ...(evidence ?? {}) }) },
+  );
+}
+
+export function fetchBackupJob(
+  instanceId: string,
+  jobId: string,
+): Promise<BackupJobView> {
+  return apiFetch<BackupJobView>(
+    `/api/instances/${encodeURIComponent(instanceId)}/backups/jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+export function fetchInstanceRestores(
+  instanceId: string,
+): Promise<InstanceRestore[]> {
+  return apiFetch<InstanceRestore[]>(
+    `/api/instances/${encodeURIComponent(instanceId)}/restores`,
+  );
+}
+
+export function startInstanceRestore(
+  instanceId: string,
+  input: RestoreStartInput,
+  evidence?: SecondFactorEvidence,
+): Promise<InstanceRestore> {
+  return apiFetch<InstanceRestore>(
+    `/api/instances/${encodeURIComponent(instanceId)}/restores`,
+    { method: 'POST', body: JSON.stringify({ ...input, ...(evidence ?? {}) }) },
+  );
+}
+
+/** Übernahme: die alte Instanz wird gestoppt (nie gelöscht), die Adresse zeigt dann auf die wiederhergestellte. */
+export function adoptInstanceRestore(
+  instanceId: string,
+  restoreId: string,
+  evidence?: SecondFactorEvidence,
+): Promise<InstanceRestore> {
+  return apiFetch<InstanceRestore>(
+    `/api/instances/${encodeURIComponent(instanceId)}/restores/${encodeURIComponent(restoreId)}/adopt`,
+    { method: 'POST', body: JSON.stringify({ ...(evidence ?? {}) }) },
+  );
+}
+
+// --- GoBD: Integrität, Verlauf, Export für die Betriebsprüfung ---------------
+
+/** Rechnung samt Aufbewahrungsfrist (`retentionUntil` liefert das Backend ab Teil E). */
+export type InvoiceWithRetention = Invoice & { retentionUntil?: string | null };
+
+export interface IntegrityCheckLine {
+  /** `pdf_sha256`, `xml_sha256`, `xrechnung_sha256`, `number_sequence`. */
+  check: string;
+  ok: boolean;
+  status: string;
+}
+
+export interface IntegrityResult {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  finalized: boolean;
+  ok: boolean;
+  /** UTC, ISO-8601. */
+  checkedAt: string;
+  checks: IntegrityCheckLine[];
+}
+
+export interface InvoiceHistoryEntry {
+  /** UTC, ISO-8601. */
+  at: string;
+  actor: string;
+  action: string;
+  format?: string;
+}
+
+export function fetchInvoiceIntegrity(id: string): Promise<IntegrityResult> {
+  return apiFetch<IntegrityResult>(`/api/invoices/${id}/integrity`);
+}
+
+export function fetchInvoiceHistory(id: string): Promise<InvoiceHistoryEntry[]> {
+  return apiFetch<InvoiceHistoryEntry[]>(`/api/invoices/${id}/history`);
+}
+
+/**
+ * Lädt das GoBD-Archiv (ZIP) für einen Zeitraum — IMMER als POST.
+ *
+ * Passwort/Code gehören in den Body, nie in eine URL. Ohne Nachweis gilt das
+ * Frischefenster der Sitzung; verlangt der Server den Nachweis, wirft der
+ * Aufruf den üblichen `ApiError`, und der Aufrufer wiederholt mit Nachweis.
+ */
+export async function downloadGobdExport(
+  range: { from: string; to: string },
+  evidence?: SecondFactorEvidence,
+): Promise<{ blob: Blob; fileName: string | null }> {
+  const base = (import.meta.env['VITE_API_URL'] as string | undefined) ?? '';
+  const response = await fetch(`${base}/api/invoices/export/gobd`, {
+    method: 'POST',
+    credentials: 'include',
+    referrerPolicy: 'no-referrer',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-csrf-token': await fetchCsrf(),
+    },
+    body: JSON.stringify({ ...range, ...(evidence ?? {}) }),
+  });
+  if (!response.ok) {
+    let error = { code: `HTTP_${response.status}`, message: `HTTP ${response.status}` };
+    try {
+      const body = (await response.json()) as { error?: typeof error };
+      if (body?.error) error = body.error;
+    } catch {
+      // Antwort ohne JSON-Körper: Ersatz behalten.
+    }
+    throw new ApiError(error, response.status);
+  }
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const name = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? null;
+  return { blob: await response.blob(), fileName: name };
 }

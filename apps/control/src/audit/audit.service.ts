@@ -200,6 +200,16 @@ export const AUDIT_ACTION = {
   metricsFetch: 'metrics.fetch',
   /** Meldung einer gelungenen Sicherung durch das externe Werkzeug. */
   backupReported: 'backup.reported',
+  /** Sicherungsziel geaendert (nur Metadaten, nie Zugangsdaten). */
+  backupTargetUpdated: 'backup.target_updated',
+  /** Verbindungstest des Sicherungsziels ausgeloest. */
+  backupTargetTested: 'backup.target_tested',
+  /** Sicherung (oder Pruefung) beim Sicherungs-Agent angestossen. */
+  backupJobTriggered: 'backup.job_triggered',
+  /** Wiederherstellung als NEUE Instanz begonnen. */
+  instanceRestoreStarted: 'instance.restore_started',
+  /** Wiederhergestellte Instanz uebernommen; die alte wurde GESTOPPT, nie geloescht. */
+  instanceRestoreAdopted: 'instance.restore_adopted',
   /** Taeglicher Abgleich Coolify <-> CRM. Er meldet, er korrigiert nicht. */
   coolifyReconciliation: 'coolify.reconciliation',
 
@@ -238,6 +248,11 @@ export const AUDIT_ACTION = {
    * eine festgeschriebene Rechnung ohne Dokument dasteht.
    */
   invoiceDocumentInvalid: 'invoice.document.invalid',
+  /**
+   * JEDER Abruf eines Belegs (PDF, XML, XRechnung) — GoBD: nachvollziehbar,
+   * wer wann welche Fassung bekommen hat. Das Format steht im Detail.
+   */
+  invoiceDocumentDownloaded: 'invoice.document_downloaded',
   invoiceSent: 'invoice.sent',
   invoiceSendError: 'invoice.send.failed',
   invoicePaymentReminder: 'invoice.payment_reminder',
@@ -248,6 +263,17 @@ export const AUDIT_ACTION = {
   invoicePaymentNoted: 'invoice.payment.noted',
   /** Uebertragungsvermerk an die Buchhaltung, ebenfalls von Hand. */
   invoiceTransferNoted: 'invoice.transfer.noted',
+  /**
+   * Der Integritaetslauf (naechtlich oder per Abruf) hat an einem festgeschriebenen
+   * Beleg eine Abweichung gefunden: Pruefsumme stimmt nicht, Dokument fehlt oder
+   * der Nummernkreis hat eine Luecke. Im Detail stehen nur Pruefungsname und
+   * Hashes bzw. fehlende Nummern, nie Dokumentinhalt.
+   */
+  invoiceIntegrityFailed: 'invoice.integrity_failed',
+  /**
+   * GoBD-Export (Pruefer-Zugriff) erzeugt: Zeitraum und Anzahl im Detail.
+   */
+  invoiceGobdExport: 'invoice.gobd_export',
 
   // --- Etappe 5: Einwilligung und Rundmail ---------------------------------
   //
@@ -314,6 +340,9 @@ export const AUDIT_ACTION = {
 
   /** Ein Betriebsschalter für alle Instanzen wurde umgestellt (z. B. Feedback). */
   featureFlagChanged: 'feature_flag.changed',
+
+  /** Preisliste (Stufen, Steuersatz, Zahlungsziel) von der Betreiberin geändert. */
+  priceUpdated: 'price.updated',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

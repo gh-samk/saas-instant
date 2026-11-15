@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { CiiProfile } from './document.types';
 import {
   InvoiceRendererNotConfiguredError,
   InvoiceRendererNotReachableError,
@@ -29,14 +30,17 @@ import {
 export interface InvoiceRenderer {
   /** Ist der Dienst konfiguriert? */
   isConfigured(): boolean;
-  /** HTML rein, PDF/A-3b mit eingebettetem `factur-x.xml` raus. */
-  create(html: string, xml: string): Promise<Buffer>;
+  /**
+   * HTML rein, PDF/A-3b mit eingebettetem `factur-x.xml` raus. `profile`
+   * muss zum Kennstring im XML passen; Vorgabe `EN16931`.
+   */
+  create(html: string, xml: string, profile?: CiiProfile): Promise<Buffer>;
 }
 
 export const INVOICE_RENDERER = Symbol('Rechnungsdienst');
 
 /** Vorgabe im Compose-Netz. */
-export const INVOICE_RENDERER_DEFAULT = 'http://rechnungsdienst:8080';
+export const INVOICE_RENDERER_DEFAULT = 'http://invoice-renderer:8080';
 
 /**
  * Zeitgrenze eines Aufrufs.
@@ -69,17 +73,22 @@ export class InvoiceRendererHttpClient implements InvoiceRenderer {
     return this.base() !== null;
   }
 
-  async create(html: string, xml: string): Promise<Buffer> {
+  async create(
+    html: string,
+    xml: string,
+    profile: CiiProfile = 'EN16931',
+  ): Promise<Buffer> {
     const base = this.base();
     if (base === null) throw new InvoiceRendererNotConfiguredError();
 
     const body = JSON.stringify({
       html: Buffer.from(html, 'utf8').toString('base64'),
       xml: Buffer.from(xml, 'utf8').toString('base64'),
-      // EN 16931, nicht XRECHNUNG: Empfängerinnen sind private Vereine und
-      // Genossenschaften. XRechnung verlangte zusätzlich Leitweg-ID und
-      // Geschäftsprozesskennung, die es hier nicht gibt.
-      profil: 'EN16931',
+      // Das Profil bestimmt, wie der Dienst das XML im PDF kennzeichnet
+      // (Mustang `setProfile`). Das ZUGFeRD-PDF trägt Vorgabe EN16931; wer
+      // eine Behörde beliefert, bekommt zusätzlich die reine XRechnung-XML
+      // (`GET invoices/:id/xrechnung`) — unabhängig vom PDF.
+      profil: profile,
     });
 
     const abort = new AbortController();

@@ -31,6 +31,10 @@ const TextFields = [
   'deputyPhone',
   'deputyRole',
   'priceTier',
+  'vatId',
+  'buyerReference',
+  'electronicAddress',
+  'electronicAddressScheme',
   'notes',
 ] as const;
 
@@ -76,6 +80,7 @@ export function masterDataAfterPrisma(
   // hinter dem ZweitfaktorGuard ([W4]).
   if (dto.paymentInterval !== undefined) data.paymentInterval = dto.paymentInterval;
   if (dto.paymentMethod !== undefined) data.paymentMethod = dto.paymentMethod;
+  if (dto.buyerType !== undefined) data.buyerType = dto.buyerType;
   if (dto.source !== undefined) data.source = dto.source;
   if (dto.newsletterConsentStatus !== undefined) {
     data.newsletterConsentStatus = dto.newsletterConsentStatus;

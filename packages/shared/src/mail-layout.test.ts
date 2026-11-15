@@ -31,10 +31,10 @@ function applyBrand(): void {
 afterEach(() => setMailBrand(MAIL_BRAND_DEFAULT));
 
 describe('Der gemeinsame Mailrahmen', () => {
-  it('ist ohne Konfiguration neutral: Wortmarke saas-instant, keine Anbieterzeilen', () => {
+  it('ist ohne Konfiguration neutral: Wortmarke SAAS Verwaltung, keine Anbieterzeilen', () => {
     expect(mailBrand()).toEqual(MAIL_BRAND_DEFAULT);
     const html = mailDocument(PARTS);
-    expect(html).toMatch(/>saas-instant<\/p>/);
+    expect(html).toMatch(/>SAAS Verwaltung<\/p>/);
     expect(houseFooter().text).toBe('');
     expect(mailText('Rumpf')).toBe('Rumpf');
   });

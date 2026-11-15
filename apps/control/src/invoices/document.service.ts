@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { dateStringFromDate } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
@@ -7,6 +8,7 @@ import { IssuerConfigService } from './document/issuer.config';
 import { createCii } from './document/cii-en16931';
 import { createHtml, dateAsText } from './document/layout-html';
 import type {
+  CiiProfile,
   DocumentLine,
   DocumentTaxShare,
   InvoiceDocument,
@@ -20,6 +22,7 @@ import {
   InvoiceNotFoundError,
   InvoiceStatusMismatchError,
   InvoiceDocumentInvalidError,
+  InvoiceDocumentDataError,
 } from './invoice.errors';
 import type { Actor } from './invoice.service';
 import { CreditorIdMissingError } from './invoice.errors';
@@ -84,6 +87,31 @@ export function preNotification(
   );
 }
 
+/** Die drei Ausgabeformate eines Belegs. */
+export type DocumentFormat = 'pdf' | 'xml' | 'xrechnung';
+
+export interface DeliveredDocument {
+  content: Buffer;
+  filename: string;
+  contentType: string;
+}
+
+function sha256(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+/**
+ * ===========================================================================
+ * GENAU EINMAL ERZEUGEN, DANN NUR AUSLIEFERN (GoBD)
+ * ===========================================================================
+ *
+ * Jedes der drei Dokumente (CII-XML nach EN 16931, ZUGFeRD-PDF/A-3b,
+ * XRechnung-XML) entsteht höchstens EINMAL aus dem Schnappschuss, wird mit
+ * seiner SHA-256-Prüfsumme gespeichert und danach nie wieder berührt. Das
+ * passt zu den Datenbank-Triggern: Dokumentspalten wechseln nur von NULL auf
+ * einen Wert. Das PDF bettet genau die gespeicherten XML-Bytes ein, damit
+ * `xmlContent` und der strukturierte Teil des PDF identisch sind.
+ */
 @Injectable()
 export class InvoiceDocumentService {
   private readonly logger = new Logger(InvoiceDocumentService.name);
@@ -94,6 +122,53 @@ export class InvoiceDocumentService {
     private readonly issuer: IssuerConfigService,
     @Inject(INVOICE_RENDERER) private readonly renderer: InvoiceRenderer,
   ) {}
+
+  /**
+   * Liefert ein Dokument im gewünschten Format aus — erzeugt es beim ersten
+   * Mal — und PROTOKOLLIERT DEN ABRUF (`invoice.document_downloaded`, das
+   * Format steht im Detail). Das ist der Weg der Download-Routen; der
+   * Versand per Mail nutzt `getOrCreate` und protokolliert als `invoice.sent`.
+   */
+  async download(
+    format: DocumentFormat,
+    id: string,
+    actor: Actor,
+    source: InquirySource,
+  ): Promise<DeliveredDocument> {
+    let delivered: DeliveredDocument;
+    let hash: string | null = null;
+    if (format === 'pdf') {
+      const { pdf, filename } = await this.getOrCreate(id, actor, source);
+      delivered = { content: pdf, filename, contentType: 'application/pdf' };
+      hash = sha256(pdf);
+    } else if (format === 'xml') {
+      const { xml, filename } = await this.getXml(id, actor, source);
+      delivered = {
+        content: xml,
+        filename,
+        contentType: 'application/xml; charset=utf-8',
+      };
+      hash = sha256(xml);
+    } else {
+      const { xml, filename } = await this.getXrechnung(id, actor, source);
+      delivered = {
+        content: xml,
+        filename,
+        contentType: 'application/xml; charset=utf-8',
+      };
+      hash = sha256(xml);
+    }
+    await this.audit.log({
+      userId: actor.userId,
+      actor: actor.name,
+      action: AUDIT_ACTION.invoiceDocumentDownloaded,
+      objectType: 'Invoice',
+      objectId: id,
+      afterValue: { format, sha256: hash, sizeBytes: delivered.content.byteLength },
+      ...source,
+    });
+    return delivered;
+  }
 
   /**
    * Liefert das PDF — erzeugt es beim ersten Mal.
@@ -127,7 +202,12 @@ export class InvoiceDocumentService {
     return this.create(id, actor, source);
   }
 
-  /** Erzeugt das Dokument und legt es an der Rechnung ab. */
+  /**
+   * Erzeugt das ZUGFeRD-PDF und legt es mit seiner Prüfsumme an der Rechnung ab.
+   *
+   * Das eingebettete XML ist das gespeicherte `xmlContent` (siehe
+   * `ensureXml`) — wird es hier zum ersten Mal gebraucht, entsteht es jetzt.
+   */
   async create(
     id: string,
     actor: Actor,
@@ -135,11 +215,11 @@ export class InvoiceDocumentService {
   ): Promise<{ pdf: Buffer; filename: string }> {
     const document = await this.buildDocument(id);
     const html = createHtml(document);
-    const xml = createCii(document);
+    const xmlBytes = await this.ensureXml(id, document, actor, source);
 
     let pdf: Buffer;
     try {
-      pdf = await this.renderer.create(html, xml);
+      pdf = await this.renderer.create(html, xmlBytes.toString('utf8'), 'EN16931');
     } catch (exception) {
       if (exception instanceof InvoiceDocumentInvalidError) {
         await this.audit.log({
@@ -159,29 +239,18 @@ export class InvoiceDocumentService {
     // [W2] BEDINGT SCHREIBEN — und wer verliert, gibt das GESPEICHERTE aus
     // ===================================================================
     //
-    // „Erzeugt es beim ersten Aufruf und gibt danach immer dasselbe heraus"
-    // war ein check-then-act ohne Sperre. Gemessen mit fünf gleichzeitigen
-    // `GET /invoices/:id/dokument`: vier verschiedene Bytefolgen
-    // herausgegeben, eine gespeichert. Ein Doppelklick während des Versands,
-    // und die Kundin hält eine andere Ausfertigung als das Archiv — genau der
-    // „Widerspruch, den eine Betriebsprüfung findet".
-    //
-    // WARUM KEINE SPERRE ÜBER DEN GANZEN VORGANG: Zwischen Prüfung und
-    // Speichern liegt ein HTTP-Aufruf an den Rechnungsdienst. Eine
-    // Datenbanktransaktion darüber offen zu halten hielte eine Verbindung
-    // über Sekunden.
-    //
-    // STATTDESSEN EIN BEDINGTER SCHREIBVORGANG: `updateMany` trifft nur, wenn
-    // die Spalte noch leer ist. Wer das Rennen verliert, bekommt `count: 0` —
-    // und liest dann die GESPEICHERTE Fassung und gibt DIESE aus. Sein eigenes
-    // PDF wird verworfen. Damit gilt die Invariante, auf die es ankommt:
-    // *Was ausgegeben wird, ist immer das, was im Archiv liegt.*
+    // `updateMany` trifft nur, wenn die Spalte noch leer ist (NULL → Wert,
+    // wie es der GoBD-Trigger verlangt). Wer das Rennen verliert, bekommt
+    // `count: 0`, liest die GESPEICHERTE Fassung und gibt DIESE aus. Sein
+    // eigenes PDF wird verworfen. Invariante: *Was ausgegeben wird, ist immer
+    // das, was im Archiv liegt.* Keine Transaktion über den HTTP-Aufruf.
     const { count } = await this.prisma.invoice.updateMany({
-      // NUR DIE BEIDEN DOKUMENTSPALTEN. Kein Betrag, kein Datum, kein Status —
-      // diese Methode ist kein Änderungsbefehl für eine Rechnung (R2).
+      // NUR DIE DOKUMENTSPALTEN dieses Formats. Kein Betrag, kein Datum,
+      // kein Status — diese Methode ist kein Änderungsbefehl (R2).
       where: { id, pdfContent: null },
-      data: { pdfContent: pdf, xmlContent: Buffer.from(xml, 'utf8') },
+      data: { pdfContent: pdf, pdfSha256: sha256(pdf) },
     });
+    await this.stampGenerated(id);
 
     if (count === 0) {
       // Ein anderer Aufruf war schneller. Seine Fassung ist die verbindliche.
@@ -211,7 +280,9 @@ export class InvoiceDocumentService {
       objectId: id,
       afterValue: {
         invoiceNumber: document.number,
+        format: 'pdf',
         sizeBytes: pdf.byteLength,
+        sha256: sha256(pdf),
       },
       ...source,
     });
@@ -222,25 +293,163 @@ export class InvoiceDocumentService {
     return { pdf, filename: this.filename(document.number) };
   }
 
-  /** Das eingebettete XML einzeln — für die Übergabe an die Buchhaltung. */
-  async getXml(id: string): Promise<{ xml: Buffer; filename: string }> {
+  /**
+   * Das CII-XML (Factur-X, EN 16931) einzeln — für die Übergabe an die
+   * Buchhaltung. UNABHÄNGIG VOM PDF: Fehlt es, wird es jetzt einmal
+   * erzeugt und gespeichert; das PDF bettet später genau diese Bytes ein.
+   */
+  async getXml(
+    id: string,
+    actor: Actor,
+    source: InquirySource,
+  ): Promise<{ xml: Buffer; filename: string }> {
     const row = await this.prisma.invoice.findUnique({
       where: { id },
-      select: { xmlContent: true, invoiceNumber: true },
+      select: { xmlContent: true, invoiceNumber: true, status: true },
     });
     if (!row) throw new InvoiceNotFoundError();
-    if (row.xmlContent === null) {
-      throw new InvoiceStatusMismatchError('without_document', 'with_document');
+    if (row.status === 'draft') {
+      throw new InvoiceStatusMismatchError('draft', 'finalized');
     }
+    const xml =
+      row.xmlContent !== null
+        ? Buffer.from(row.xmlContent)
+        : await this.ensureXml(id, await this.buildDocument(id), actor, source);
     return {
-      xml: Buffer.from(row.xmlContent),
-      filename: `${(row.invoiceNumber ?? 'rechnung').replace(/[^\w-]/g, '')}.xml`,
+      xml,
+      filename: `${this.core(row.invoiceNumber)}-factur-x.xml`,
     };
   }
 
+  /**
+   * Die XRechnung (CII, reines XML) — unabhängig vom PDF, einmal erzeugt.
+   * Für Behörden (Leitweg-ID als Käuferreferenz).
+   */
+  async getXrechnung(
+    id: string,
+    actor: Actor,
+    source: InquirySource,
+  ): Promise<{ xml: Buffer; filename: string }> {
+    const row = await this.prisma.invoice.findUnique({
+      where: { id },
+      select: { xrechnungContent: true, invoiceNumber: true, status: true },
+    });
+    if (!row) throw new InvoiceNotFoundError();
+    if (row.status === 'draft') {
+      throw new InvoiceStatusMismatchError('draft', 'finalized');
+    }
+    const filename = `${this.core(row.invoiceNumber)}-xrechnung.xml`;
+    if (row.xrechnungContent !== null) {
+      return { xml: Buffer.from(row.xrechnungContent), filename };
+    }
+
+    const document = await this.buildDocument(id);
+    const xml = Buffer.from(this.cii(document, 'XRECHNUNG'), 'utf8');
+    const { count } = await this.prisma.invoice.updateMany({
+      where: { id, xrechnungContent: null },
+      data: { xrechnungContent: xml, xrechnungSha256: sha256(xml) },
+    });
+    await this.stampGenerated(id);
+    if (count === 0) {
+      const stored = await this.prisma.invoice.findUnique({
+        where: { id },
+        select: { xrechnungContent: true },
+      });
+      if (stored?.xrechnungContent) {
+        return { xml: Buffer.from(stored.xrechnungContent), filename };
+      }
+      throw new InvoiceNotFoundError();
+    }
+    await this.audit.log({
+      userId: actor.userId,
+      actor: actor.name,
+      action: AUDIT_ACTION.invoiceDocumentGenerated,
+      objectType: 'Invoice',
+      objectId: id,
+      afterValue: {
+        invoiceNumber: document.number,
+        format: 'xrechnung',
+        sizeBytes: xml.byteLength,
+        sha256: sha256(xml),
+      },
+      ...source,
+    });
+    return { xml, filename };
+  }
+
+  /**
+   * Das gespeicherte EN-16931-XML — oder, falls noch keines existiert, das
+   * jetzt EINMAL erzeugte. Wer das Rennen verliert, bekommt das gespeicherte.
+   */
+  private async ensureXml(
+    id: string,
+    document: InvoiceDocument,
+    actor: Actor,
+    source: InquirySource,
+  ): Promise<Buffer> {
+    const row = await this.prisma.invoice.findUnique({
+      where: { id },
+      select: { xmlContent: true },
+    });
+    if (row?.xmlContent) return Buffer.from(row.xmlContent);
+
+    const xml = Buffer.from(this.cii(document, 'EN16931'), 'utf8');
+    const { count } = await this.prisma.invoice.updateMany({
+      where: { id, xmlContent: null },
+      data: { xmlContent: xml, xmlSha256: sha256(xml) },
+    });
+    await this.stampGenerated(id);
+    if (count === 0) {
+      const stored = await this.prisma.invoice.findUnique({
+        where: { id },
+        select: { xmlContent: true },
+      });
+      if (stored?.xmlContent) return Buffer.from(stored.xmlContent);
+      throw new InvoiceNotFoundError();
+    }
+    await this.audit.log({
+      userId: actor.userId,
+      actor: actor.name,
+      action: AUDIT_ACTION.invoiceDocumentGenerated,
+      objectType: 'Invoice',
+      objectId: id,
+      afterValue: {
+        invoiceNumber: document.number,
+        format: 'xml',
+        sizeBytes: xml.byteLength,
+        sha256: sha256(xml),
+      },
+      ...source,
+    });
+    return xml;
+  }
+
+  /** `documentGeneratedAt` einmalig setzen (NULL → Wert, trigger-konform). */
+  private async stampGenerated(id: string): Promise<void> {
+    await this.prisma.invoice.updateMany({
+      where: { id, documentGeneratedAt: null },
+      data: { documentGeneratedAt: new Date() },
+    });
+  }
+
+  /** CII erzeugen; fehlende Pflichtangaben werden zu einer fachlichen Meldung. */
+  private cii(document: InvoiceDocument, profile: CiiProfile): string {
+    try {
+      return createCii(document, profile);
+    } catch (exception) {
+      if (exception instanceof TypeError) {
+        throw new InvoiceDocumentDataError(exception.message);
+      }
+      throw exception;
+    }
+  }
+
+  private core(invoiceNumber: string | null): string {
+    return `Rechnung-${(invoiceNumber ?? 'rechnung').replace(/[^\w-]/g, '')}`;
+  }
+
   private filename(invoiceNumber: string | null): string {
-    const core = (invoiceNumber ?? 'rechnung').replace(/[^\w-]/g, '');
-    return `Rechnung-${core}.pdf`;
+    return `${this.core(invoiceNumber)}.pdf`;
   }
 
   /**
@@ -296,24 +505,27 @@ export class InvoiceDocumentService {
       unit: p.unit ?? 'C62',
       unitPriceCent: decimalAsCent(p.unitPriceNet) ?? 0,
       netCent: decimalAsCent(p.netAmount) ?? 0,
-      taxCategory: 'S',
+      taxCategory: p.taxCategory,
+      ...(p.taxExemptionReason ? { taxExemptionReason: p.taxExemptionReason } : {}),
       taxRate: Number(p.taxRate.toFixed(2)),
     }));
 
     // Die Steueraufteilung wird aus den GESPEICHERTEN Postenbeträgen neu
     // gebildet, nicht neu gerechnet: Was im Beleg steht, ist maßgeblich.
-    const byRecord = new Map<number, DocumentTaxShare>();
+    const byRecord = new Map<string, DocumentTaxShare>();
     r.lines.forEach((p) => {
       const record = Number(p.taxRate.toFixed(2));
-      const entry = byRecord.get(record) ?? {
-        category: 'S',
+      const key = `${p.taxCategory}|${record}|${p.taxExemptionReason ?? ''}`;
+      const entry = byRecord.get(key) ?? {
+        category: p.taxCategory,
         record,
+        ...(p.taxExemptionReason ? { exemptionReason: p.taxExemptionReason } : {}),
         basisCent: 0,
         taxCent: 0,
       };
       entry.basisCent += decimalAsCent(p.netAmount) ?? 0;
       entry.taxCent += decimalAsCent(p.taxAmount) ?? 0;
-      byRecord.set(record, entry);
+      byRecord.set(key, entry);
     });
     const taxBreakdown = [...byRecord.values()];
 
@@ -322,20 +534,39 @@ export class InvoiceDocumentService {
     const sumGrossCent = sumNetCent + sumTaxCent;
 
     const dueAt = dateStringFromDate(r.dueDate);
+    // Lastschrift nur, wenn der Beleg ein Mandat trägt UND als 59 ausgewiesen
+    // ist; eine Stornorechnung wird nie eingezogen.
+    const debit =
+      r.paymentMeansCode === '59' &&
+      r.directDebitMandateReference !== null &&
+      r.cancelledInvoiceId === null;
     const isCancellation = r.cancelledInvoiceId !== null;
 
     return {
       number: r.invoiceNumber,
       invoiceDate: dateStringFromDate(r.invoiceDate),
       dueAt,
-      currency: 'EUR',
+      currency: r.currency,
       servicePeriod: {
         from: dateStringFromDate(r.servicePeriodFrom),
         until: dateStringFromDate(r.servicePeriodUntil),
       },
       deliveryDate: dateStringFromDate(r.servicePeriodFrom),
       orderReference: r.invoiceNumber,
+      ...(r.recipientBuyerReference
+        ? { buyerReference: r.recipientBuyerReference }
+        : {}),
+      paymentMeansCode: debit ? '59' : '58',
+      ...(debit
+        ? {
+            directDebit: {
+              mandateReference: r.directDebitMandateReference as string,
+              creditorId: coolifyConfig.creditorId,
+            },
+          }
+        : {}),
       issuer: {
+        legalForm: coolifyConfig.legalForm,
         // SCHNAPPSCHUSS, wo er vorliegt — Firmierung, Anschrift, Register.
         name: r.issuerCompanyName,
         address: (() => {
@@ -375,9 +606,23 @@ export class InvoiceDocumentService {
             .map((name) => name.trim())
             .filter((name) => name !== ''),
         },
-        // Rückfrageweg aus der laufenden Konfiguration, siehe oben.
-        contact: coolifyConfig.contact,
-        bank: bankFrom(r.issuerBankDetails, coolifyConfig.bank),
+        // Rückfrageweg: aus dem SCHNAPPSCHUSS (BR-DE-2, unveränderlich wie
+        // jede Angabe des Belegs); nur bei älteren Zeilen ohne diese Felder
+        // gilt die laufende Konfiguration.
+        contact: {
+          name: r.issuerContactName ?? coolifyConfig.contact.name,
+          phone: r.issuerContactPhone ?? coolifyConfig.contact.phone,
+          email: r.issuerContactEmail ?? coolifyConfig.contact.email,
+        },
+        // Bank STRUKTURIERT aus dem Schnappschuss; der Freitext wird nur noch
+        // für Zeilen ohne die strukturierten Felder zerlegt.
+        bank: r.issuerIban
+          ? {
+              institution: r.issuerBankName ?? '',
+              iban: r.issuerIban,
+              bic: r.issuerBic ?? '',
+            }
+          : bankFrom(r.issuerBankDetails, coolifyConfig.bank),
         // BT-33 — der § 125a-HGB-Block als Fliesstext.
         //
         // [W3]: Der SITZ beider Gesellschaften gehört hinein. Er fehlte, und
@@ -410,6 +655,16 @@ export class InvoiceDocumentService {
           country: country.trim() || 'DE',
         },
         ...(r.recipientEmail ? { email: r.recipientEmail } : {}),
+        ...(r.recipientVatId ? { vatId: r.recipientVatId } : {}),
+        ...(r.recipientElectronicAddress
+          ? {
+              electronicAddress: {
+                id: r.recipientElectronicAddress,
+                scheme: r.recipientElectronicAddressScheme ?? 'EM',
+              },
+            }
+          : {}),
+        ...(r.recipientBuyerType ? { buyerType: r.recipientBuyerType } : {}),
       },
       lines,
       taxBreakdown,
@@ -441,7 +696,12 @@ export class InvoiceDocumentService {
             )
           : `Zahlbar ohne Abzug bis zum ${dateAsText(dueAt)}.`,
       hint:
-        'Es gilt die Regelbesteuerung. Leistungszeitraum: ' +
+        (r.lines.every((p) => p.taxCategory === 'S')
+          ? 'Es gilt die Regelbesteuerung. '
+          : [...new Set(r.lines.map((p) => p.taxExemptionReason).filter(Boolean))]
+              .map((reason) => `${reason}. `)
+              .join('')) +
+        'Leistungszeitraum: ' +
         `${dateAsText(dateStringFromDate(r.servicePeriodFrom))} bis ` +
         `${dateAsText(dateStringFromDate(r.servicePeriodUntil))}.`,
       // Die beiden Texte des Bearbeiten-Screens. Leer heisst weg — eine

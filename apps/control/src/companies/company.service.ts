@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   IntakeSendService,
   type IntakeLinkSend,
@@ -17,6 +17,8 @@ import { dayReadable } from '../common/calendar';
 import { writeSystemNote } from '../notes/system-note';
 import { PrismaService } from '../prisma/prisma.service';
 import { decimalAsCent } from '../invoices/invoice.amount';
+import { PriceTierUnknownError } from '../invoices/invoice.errors';
+import { PricingConfigService } from '../invoices/pricing.config';
 import { sum, paymentStateFrom } from '../invoices/invoice.response';
 import {
   asResponse,
@@ -157,7 +159,26 @@ export class CompanyService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly intakeSend: IntakeSendService,
+    /** Prüft `priceTier` gegen die aktiven Preisstufen; ohne ihn entfällt die Prüfung. */
+    @Optional() private readonly priceConfig?: PricingConfigService,
   ) {}
+
+  /**
+   * `priceTier` muss eine AKTIVE Stufe der Preisliste sein. TOLERANT bei
+   * Altwerten: Ein unveränderter Wert (auch ein freier Altwert oder eine
+   * inzwischen archivierte Stufe) bleibt stehen; geprüft wird nur, was neu
+   * gesetzt wird. Leer = keine Stufe.
+   */
+  private checkPriceTier(
+    next: string | null | undefined,
+    current: string | null,
+  ): void {
+    if (next === undefined || next === null || next.trim() === '') return;
+    if (next === current) return;
+    if (this.priceConfig && !this.priceConfig.isActive(next)) {
+      throw new PriceTierUnknownError(next);
+    }
+  }
 
   /**
    * Liste mit Statusfilter und Freitextsuche über Name, Ansprechpartnerin,
@@ -276,6 +297,7 @@ export class CompanyService {
     actor: Actor,
     source: InquirySource,
   ): Promise<CompanyResponse> {
+    this.checkPriceTier(dto.priceTier, null);
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.company.create({
         data: createAfterPrisma(dto),
@@ -318,6 +340,7 @@ export class CompanyService {
       await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${id} FOR UPDATE`;
       const before = await tx.company.findUnique({ where: { id } });
       if (!before) throw new CompanyNotFoundError();
+      this.checkPriceTier(dto.priceTier, before.priceTier);
 
       // GEPRÜFT WIRD GEGEN DEN ZUSTAND NACH DER ÄNDERUNG, nicht gegen den
       // Rumpf allein: Wer nur `paymentInterval` schickt, ändert die Paarung

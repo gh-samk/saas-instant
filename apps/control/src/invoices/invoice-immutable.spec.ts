@@ -121,14 +121,25 @@ const ALLOWED: Record<string, string[]> = {
   // Zahldatum, gezahlter Betrag, Status — und der Übertragungsvermerk.
   // KEINE Beträge, keine Posten, kein Schnappschuss, keine Nummer.
   'invoices/payment.service.ts': ['invoice.update', 'invoice.update'],
-  // AUSSCHLIESSLICH `pdfContent` und `xmlContent`.
+  // AUSSCHLIESSLICH die Dokumentspalten (`pdfContent`/`pdfSha256`,
+  // `xmlContent`/`xmlSha256`, `xrechnungContent`/`xrechnungSha256`,
+  // `documentGeneratedAt`), je EINMAL von NULL auf einen Wert — passend zum
+  // GoBD-Trigger `gobd_guard_invoice_update` (set-once). Vier bedingte
+  // `updateMany`: PDF (`create`), CII-XML (`ensureXml`), XRechnung
+  // (`getXrechnung`) und der Erzeugungszeitstempel (`stampGenerated`). Jeder
+  // trägt `where: { …Spalte: null }`, ist also nie ein Überschreiben.
   //
   // [W2]: Aus dem `update` wurde ein BEDINGTES `updateMany`
   // (`where: { id, pdfContent: null }`). Der Aufruf schreibt damit noch
   // weniger als vorher: nur dann, wenn noch gar kein Dokument abgelegt ist.
   // Wer das Rennen verliert, gibt die gespeicherte Fassung aus, statt sie zu
   // überschreiben — ein Beleg hat genau eine Ausfertigung.
-  'invoices/document.service.ts': ['invoice.updateMany'],
+  'invoices/document.service.ts': [
+    'invoice.updateMany',
+    'invoice.updateMany',
+    'invoice.updateMany',
+    'invoice.updateMany',
+  ],
 };
 
 describe('R2 — kein Änderungs- und kein Löschbefehl an einer Rechnung', () => {
@@ -215,10 +226,17 @@ describe('R2 — kein Änderungs- und kein Löschbefehl an einer Rechnung', () =
     ]);
     expect(methods(InvoiceDocumentService)).toEqual([
       'buildDocument',
+      'cii',
+      'core',
       'create',
+      // Abruf mit Protokoll (`invoice.document_downloaded`); liefert aus.
+      'download',
+      'ensureXml',
       'filename',
       'getOrCreate',
       'getXml',
+      'getXrechnung',
+      'stampGenerated',
     ]);
     expect(methods(InvoiceSendService)).toEqual([
       'amountReadable',

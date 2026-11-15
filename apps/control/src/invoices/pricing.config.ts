@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ManifestService } from '../manifest/manifest.service';
 import type { BillingManifest } from '../manifest/sections/billing';
+import { PrismaService } from '../prisma/prisma.service';
 import { PriceConfigurationInvalidError } from './invoice.errors';
 import type { PriceTier, PriceTable } from './pricing.types';
 
@@ -180,21 +181,62 @@ export function issues(table: PriceTable): string[] {
   return error;
 }
 
+/** Name der Singleton-Zeile in `PriceList`. */
+const PRICE_LIST_ID = 'singleton';
+
+/** Eine Stufe samt Archivstand, wie die Verwaltung sie in der DB führt. */
+export interface StoredPriceTier extends PriceTier {
+  archived: boolean;
+}
+
+/** Die Preisliste samt archivierter Stufen — die Sicht der Admin-Seite. */
+export interface StoredPriceList extends PriceTable {
+  currency: string;
+  /** Alle Stufen, auch archivierte, in Anzeigereihenfolge. */
+  allTiers: StoredPriceTier[];
+  updatedAt: string | null;
+}
+
+/**
+ * Die Preistafel.
+ *
+ * QUELLE UND VORRANG: Ist die Datenbank angebunden (`PrismaService`), gilt
+ * die Preisliste dort — sie ist die Quelle, die die Betreiberin in der
+ * Oberfläche pflegt. Eine LEERE Datenbank wird beim Start EINMAL aus
+ * Umgebung → Manifest → Vorgaben befüllt (Reihenfolge wie bisher); danach
+ * haben Manifest und Umgebung keinen Einfluss mehr, sonst überschriebe ein
+ * Neustart die Eingaben der Betreiberin.
+ *
+ * `read()` bleibt SYNCHRON: Es liefert den Zwischenspeicher, der beim Start
+ * und nach jedem Speichern aus der DB neu gelesen wird. So ändern sich weder
+ * die Aufrufer (Rechnung, Aufgaben, Vorschlag) noch deren Tests. Ohne
+ * `PrismaService` (reine Unit-Tests) gilt wie früher Umgebung/Manifest/Vorgaben.
+ */
 @Injectable()
 export class PricingConfigService implements OnModuleInit {
   private readonly logger = new Logger(PricingConfigService.name);
 
+  /** Zwischenspeicher der DB-Tafel (nur aktive Stufen); `null` = nicht geladen. */
+  private cache: PriceTable | null = null;
+  /** Archivierte Stufen, nur für Nachschlagen per Schlüssel. */
+  private archived: PriceTier[] = [];
+
   constructor(
     private readonly config: ConfigService,
     @Optional() private readonly manifest?: ManifestService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   /**
-   * Einmal beim Start lesen. Eine kaputte Preistafel bricht den Start ab —
-   * dasselbe Verhalten wie bei einem fehlenden `CONTROL_CONFIG_KEY`.
+   * Einmal beim Start lesen (und ggf. die leere DB befüllen). Eine kaputte
+   * Preistafel bricht den Start ab — dasselbe Verhalten wie bei einem
+   * fehlenden `CONTROL_CONFIG_KEY`.
    */
-  onModuleInit(): void {
-    const table = this.read();
+  onModuleInit(): void | Promise<void> {
+    // Mit Datenbank asynchron (befüllen + laden); ohne Datenbank wie bisher
+    // SYNCHRON, damit eine kaputte Tafel den Start unmittelbar abbricht.
+    if (this.prisma) return this.initFromDatabase();
+    const table = this.readFallback();
     if (table === PRICE_PRESETS) {
       this.logger.log(
         `${PRICE_TABLE_VARIABLE} ist nicht gesetzt und das Manifest nennt ` +
@@ -207,8 +249,131 @@ export class PricingConfigService implements OnModuleInit {
     }
   }
 
-  /** Die geltende Preistafel. Wirft, wenn die Umgebung Unsinn enthält. */
+  private async initFromDatabase(): Promise<void> {
+    const seeded = await this.seedIfEmpty();
+    await this.reload();
+    this.logger.log(
+      seeded
+        ? `Preisliste einmalig aus Umgebung/Manifest/Vorgaben in die Datenbank übernommen: ${this.read().tiers.length} Stufen.`
+        : `Preisliste aus der Datenbank: ${this.read().tiers.length} Stufen.`,
+    );
+  }
+
+  /** Die geltende Preistafel (aktive Stufen). Wirft, wenn die Quelle Unsinn enthält. */
   read(): PriceTable {
+    return this.cache ?? this.readFallback();
+  }
+
+  /** Die Stufe zu einem Schlüssel — auch eine archivierte — oder `null`. */
+  tier(key: string | null): PriceTier | null {
+    if (key === null) return null;
+    return (
+      this.read().tiers.find((s) => s.key === key) ??
+      this.archived.find((s) => s.key === key) ??
+      null
+    );
+  }
+
+  /** Ist der Schlüssel eine AKTIVE Stufe? */
+  isActive(key: string): boolean {
+    return this.read().tiers.some((s) => s.key === key);
+  }
+
+  /** Liest die Preisliste aus der DB in den Zwischenspeicher. */
+  async reload(): Promise<StoredPriceList | null> {
+    const stored = await this.readStored();
+    if (stored === null) {
+      this.cache = null;
+      this.archived = [];
+      return null;
+    }
+    const table: PriceTable = {
+      tiers: stored.allTiers.filter((s) => !s.archived).map(rowAsTier),
+      taxRate: stored.taxRate,
+      averageDays: stored.averageDays,
+      paymentDueDays: stored.paymentDueDays,
+    };
+    const defects = issues(table);
+    if (defects.length > 0) {
+      throw new PriceConfigurationInvalidError(
+        defects.map((m) => `Preisliste (Datenbank): ${m}`),
+      );
+    }
+    this.cache = table;
+    this.archived = stored.allTiers.filter((s) => s.archived).map(rowAsTier);
+    return stored;
+  }
+
+  /** Die gespeicherte Preisliste samt archivierter Stufen; `null` = leer. */
+  async readStored(): Promise<StoredPriceList | null> {
+    if (!this.prisma) return null;
+    const list = await this.prisma.priceList.findUnique({
+      where: { id: PRICE_LIST_ID },
+    });
+    if (!list) return null;
+    const rows = await this.prisma.priceTier.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { key: 'asc' }],
+    });
+    return {
+      taxRate: Number(list.taxRatePercent),
+      averageDays: list.averageDays,
+      paymentDueDays: list.paymentTermDays,
+      currency: list.currency,
+      updatedAt: list.updatedAt.toISOString(),
+      tiers: rows.filter((r) => r.archivedAt === null).map(rowAsTier),
+      allTiers: rows.map((r) => ({ ...rowAsTier(r), archived: r.archivedAt !== null })),
+    };
+  }
+
+  /**
+   * Befüllt eine LEERE Datenbank aus Umgebung/Manifest/Vorgaben — genau
+   * einmal. Eine zweite Instanz, die gleichzeitig startet, legt nichts doppelt
+   * an (`createMany` mit `skipDuplicates`, Singleton per Primärschlüssel).
+   */
+  async ensureSeeded(): Promise<boolean> {
+    return this.seedIfEmpty();
+  }
+
+  private async seedIfEmpty(): Promise<boolean> {
+    const prisma = this.prisma!;
+    const exists = await prisma.priceList.findUnique({
+      where: { id: PRICE_LIST_ID },
+      select: { id: true },
+    });
+    if (exists) return false;
+    const table = this.readFallback();
+    await prisma.$transaction(async (tx) => {
+      await tx.priceList.createMany({
+        data: [
+          {
+            id: PRICE_LIST_ID,
+            taxRatePercent: table.taxRate,
+            paymentTermDays: table.paymentDueDays,
+            averageDays: table.averageDays,
+            currency: 'EUR',
+          },
+        ],
+        skipDuplicates: true,
+      });
+      await tx.priceTier.createMany({
+        data: table.tiers.map((s, index) => ({
+          key: s.key,
+          label: s.label,
+          maxPersons: s.maxPersons,
+          monthlyCent: s.monthlyCent,
+          halfYearlyCent: s.halfYearlyCent,
+          yearlyCent: s.yearlyCent,
+          setupCent: s.setupCent,
+          sortOrder: index,
+        })),
+        skipDuplicates: true,
+      });
+    });
+    return true;
+  }
+
+  /** Umgebung → Manifest → Vorgaben (die Quelle VOR der Datenbank). */
+  private readFallback(): PriceTable {
     const raw = this.config.get<string>(PRICE_TABLE_VARIABLE)?.trim();
     if (!raw) {
       const fromManifest = this.manifest
@@ -253,10 +418,24 @@ export class PricingConfigService implements OnModuleInit {
     if (defects.length > 0) throw new PriceConfigurationInvalidError(defects);
     return table;
   }
+}
 
-  /** Die Stufe zu einem Schlüssel — oder `null`, wenn es sie nicht gibt. */
-  tier(key: string | null): PriceTier | null {
-    if (key === null) return null;
-    return this.read().tiers.find((s) => s.key === key) ?? null;
-  }
+function rowAsTier(r: {
+  key: string;
+  label: string;
+  maxPersons: number | null;
+  monthlyCent: number;
+  halfYearlyCent: number;
+  yearlyCent: number;
+  setupCent: number;
+}): PriceTier {
+  return {
+    key: r.key,
+    label: r.label,
+    maxPersons: r.maxPersons,
+    monthlyCent: r.monthlyCent,
+    halfYearlyCent: r.halfYearlyCent,
+    yearlyCent: r.yearlyCent,
+    setupCent: r.setupCent,
+  };
 }

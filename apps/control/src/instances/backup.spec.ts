@@ -118,3 +118,80 @@ describe('Die Folge, um die es geht', () => {
     expect(toBackup(future as never, '2026-08-31').missing).toBe(false);
   });
 });
+
+describe('BackupReportDto — kind, objectKey, sha256 (abwärtskompatibel)', () => {
+  const HASH = 'a'.repeat(64);
+
+  it('nimmt die alte Meldung ohne neue Felder an', async () => {
+    expect(await errorFields(VALID)).toEqual([]);
+  });
+
+  it('nimmt Instanz-Meldung mit objectKey und sha256 an', async () => {
+    expect(
+      await errorFields({
+        ...VALID,
+        kind: 'instance',
+        objectKey: 'p/instances/musterverein/2026-11-14T023000Z.dump.age',
+        sha256: HASH,
+      }),
+    ).toEqual([]);
+  });
+
+  it('verlangt die Subdomain nur für Instanz-Sicherungen', async () => {
+    const { subdomain: _s, ...ohne } = VALID;
+    expect(await errorFields(ohne)).toEqual(['subdomain']);
+    expect(await errorFields({ ...ohne, kind: 'instance' })).toEqual(['subdomain']);
+    expect(await errorFields({ ...ohne, kind: 'control' })).toEqual([]);
+    expect(await errorFields({ ...ohne, kind: 'invoices' })).toEqual([]);
+  });
+
+  it('lehnt unbekannte Art, unzulässigen Schlüssel und falsche Prüfsumme ab', async () => {
+    expect(await errorFields({ ...VALID, kind: 'sonst' })).toEqual(['kind']);
+    expect(await errorFields({ ...VALID, objectKey: '../etc/passwd' })).toEqual(['objectKey']);
+    expect(await errorFields({ ...VALID, objectKey: 'a b' })).toEqual(['objectKey']);
+    expect(await errorFields({ ...VALID, sha256: 'xyz' })).toEqual(['sha256']);
+  });
+});
+
+describe('BackupService — kind/objectKey/sha256', () => {
+  function build() {
+    const prisma = {
+      instance: { findUnique: jest.fn().mockResolvedValue({ id: 'i1' }) },
+      backup: { upsert: jest.fn().mockResolvedValue({}) },
+    };
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    return { service: new BackupService(prisma as never, audit as never), prisma, audit };
+  }
+
+  it('schreibt objectKey und sha256 an die Zeile und setzt die Prüfung zurück', async () => {
+    const { service, prisma } = build();
+    await service.report(
+      { ...VALID, kind: 'instance', objectKey: 'p/k.dump.age', sha256: 'A'.repeat(64) },
+      null,
+    );
+    const call = prisma.backup.upsert.mock.calls[0][0];
+    expect(call.create).toMatchObject({ objectKey: 'p/k.dump.age', sha256: 'a'.repeat(64) });
+    expect(call.update).toMatchObject({ objectKey: 'p/k.dump.age', verifiedAt: null });
+  });
+
+  it('lässt ohne neue Felder objectKey und Prüfung unangetastet (abwärtskompatibel)', async () => {
+    const { service, prisma } = build();
+    await service.report(VALID, null);
+    const call = prisma.backup.upsert.mock.calls[0][0];
+    expect(Object.keys(call.update)).toEqual(['sizeBytes']);
+  });
+
+  it('control und invoices hängen an keiner Instanz: nur Nachweis im Audit-Log', async () => {
+    const { service, prisma, audit } = build();
+    const { subdomain: _s, ...ohne } = VALID;
+    await service.report({ ...ohne, kind: 'control', objectKey: 'p/control/x.dump.age' }, '1.2.3.4');
+    expect(prisma.instance.findUnique).not.toHaveBeenCalled();
+    expect(prisma.backup.upsert).not.toHaveBeenCalled();
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'backup.reported',
+        afterValue: expect.objectContaining({ kind: 'control', objectKey: 'p/control/x.dump.age' }),
+      }),
+    );
+  });
+});

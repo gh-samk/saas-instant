@@ -37,6 +37,7 @@ import {
   updateCompany,
   fetchCompany,
   type Source,
+  type BuyerType,
   type Company,
   type CompanyChange,
   type PaymentMethod,
@@ -50,7 +51,15 @@ import { formatDate } from '../utils/date';
 import { useT } from '../i18n';
 import { safeHref } from '../common/http-url';
 
-type Blockname = 'masterData' | 'invoice' | 'contacts' | 'contract';
+const BUYER_TYPE_KEY: Record<BuyerType, string> = {
+  business: 'organisationen.buyerTypeBusiness',
+  authority: 'organisationen.buyerTypeAuthority',
+  consumer: 'organisationen.buyerTypeConsumer',
+};
+
+const ELECTRONIC_ADDRESS_SCHEMES = ['EM', '0204', '9930', '0088', '0060'] as const;
+
+type Blockname = 'masterData' | 'invoice' | 'einvoice' | 'contacts' | 'contract';
 
 /** Alle Formularwerte als Zeichenketten — so, wie Eingabefelder sie führen. */
 interface Draft {
@@ -76,6 +85,11 @@ interface Draft {
   deputyEmail: string;
   deputyPhone: string;
   priceTier: string;
+  buyerType: string;
+  vatId: string;
+  buyerReference: string;
+  electronicAddress: string;
+  electronicAddressScheme: string;
   paymentInterval: string;
   paymentMethod: string;
   pilotDecisionDate: string;
@@ -106,6 +120,11 @@ function draftFrom(o: Company): Draft {
     deputyEmail: o.deputyEmail ?? '',
     deputyPhone: o.deputyPhone ?? '',
     priceTier: o.priceTier ?? '',
+    buyerType: o.buyerType ?? 'business',
+    vatId: o.vatId ?? '',
+    buyerReference: o.buyerReference ?? '',
+    electronicAddress: o.electronicAddress ?? '',
+    electronicAddressScheme: o.electronicAddressScheme ?? 'EM',
     paymentInterval: o.paymentInterval ?? '',
     paymentMethod: o.paymentMethod ?? '',
     pilotDecisionDate: o.pilotDecisionDate ?? '',
@@ -825,6 +844,120 @@ export function CompanyDetailPage() {
                 ) : null}
               </Field>
             </dl>
+          )}
+        </DetailBlock>
+
+        {/* ----------------------------------------------------- E-Rechnung */}
+        <DetailBlock
+          title={t('organisationen.einvoice')}
+          id="e-rechnung"
+          edit={openBlock === 'einvoice'}
+          blocked={blocked('einvoice')}
+          loading={saving}
+          error={saveError}
+          onEditStart={() => editStart('einvoice', o)}
+          onCancel={cancel}
+          onSave={() => {
+            if (!e) return;
+            if (e.buyerType === 'authority' && text(e.buyerReference) === null) {
+              setSaveError(t('organisationen.leitwegRequired'));
+              return;
+            }
+            const address = text(e.electronicAddress);
+            void save({
+              buyerType: e.buyerType as BuyerType,
+              vatId: text(e.vatId)?.toUpperCase().replace(/\s+/g, '') ?? null,
+              buyerReference: e.buyerType === 'consumer' ? null : text(e.buyerReference),
+              electronicAddress: address,
+              electronicAddressScheme: address ? e.electronicAddressScheme : null,
+            });
+          }}
+          form={
+            e && (
+              <>
+                <SelectField
+                  label={t('organisationen.buyerType')}
+                  id="buyerType"
+                  value={e.buyerType}
+                  onChange={setField('buyerType')}
+                  helperText={t('organisationen.buyerTypeHint')}
+                >
+                  <option value="business">{t('organisationen.buyerTypeBusiness')}</option>
+                  <option value="authority">{t('organisationen.buyerTypeAuthority')}</option>
+                  <option value="consumer">{t('organisationen.buyerTypeConsumer')}</option>
+                </SelectField>
+                {e.buyerType !== 'consumer' && (
+                  <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+                    <InputField
+                      label={t('organisationen.vatId')}
+                      name="vatId"
+                      value={e.vatId}
+                      onChange={(ev) => setField('vatId')(ev.target.value)}
+                      helperText={t('organisationen.vatIdHint')}
+                    />
+                    <InputField
+                      label={
+                        e.buyerType === 'authority'
+                          ? t('organisationen.leitwegIdRequired')
+                          : t('organisationen.buyerReference')
+                      }
+                      name="buyerReference"
+                      required={e.buyerType === 'authority'}
+                      value={e.buyerReference}
+                      onChange={(ev) => setField('buyerReference')(ev.target.value)}
+                      helperText={
+                        e.buyerType === 'authority'
+                          ? t('organisationen.leitwegIdAuthorityHint')
+                          : t('organisationen.buyerReferenceHint')
+                      }
+                    />
+                  </div>
+                )}
+                {e.buyerType !== 'consumer' && (
+                  <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+                    <InputField
+                      label={t('organisationen.electronicAddress')}
+                      name="electronicAddress"
+                      value={e.electronicAddress}
+                      onChange={(ev) => setField('electronicAddress')(ev.target.value)}
+                      helperText={t('organisationen.electronicAddressHint')}
+                    />
+                    <SelectField
+                      label={t('organisationen.electronicAddressScheme')}
+                      id="electronicAddressScheme"
+                      value={e.electronicAddressScheme}
+                      onChange={setField('electronicAddressScheme')}
+                    >
+                      {ELECTRONIC_ADDRESS_SCHEMES.map((scheme) => (
+                        <option key={scheme} value={scheme}>
+                          {t(`organisationen.scheme_${scheme}`)}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                )}
+              </>
+            )
+          }
+        >
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label={t('organisationen.buyerType')}>
+              {t(BUYER_TYPE_KEY[o.buyerType ?? 'business'])}
+            </Field>
+            <Field label={t('organisationen.vatId')}>{o.vatId}</Field>
+            <Field label={t('organisationen.buyerReference')}>{o.buyerReference}</Field>
+            <Field label={t('organisationen.electronicAddress')}>
+              {o.electronicAddress
+                ? `${o.electronicAddress}${
+                    o.electronicAddressScheme ? ` (${o.electronicAddressScheme})` : ''
+                  }`
+                : null}
+            </Field>
+          </dl>
+          {o.buyerType === 'authority' && !o.buyerReference && (
+            <p className="mt-3 text-sm text-gefahr" role="status">
+              {t('organisationen.leitwegMissing')}
+            </p>
           )}
         </DetailBlock>
 

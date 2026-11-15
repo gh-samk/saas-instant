@@ -1,5 +1,6 @@
 import { AuditService, AUDIT_ACTION } from '../audit/audit.service';
 import { prisma, disconnect } from '../test-support/company-provisioning';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 import { FeatureFlagService } from './feature-flag.service';
 
 /**
@@ -17,7 +18,7 @@ let Actor = { id: '', username: Identifier };
 
 async function cleanUp(): Promise<void> {
   await prisma.featureFlag.deleteMany({ where: { key: 'feedback' } });
-  await prisma.auditLog.deleteMany({ where: { actor: Identifier } });
+  await truncateAuditLog(prisma);
 }
 
 describe('Funktionsschalter (Integration)', () => {

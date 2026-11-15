@@ -10,6 +10,7 @@ import {
 import { CryptoService } from '../crypto/crypto.service';
 import type { MailService } from '../mail/mail.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 import { buildConfig } from '../test-support/login-provisioning';
 import { LoginFlowService } from './login-flow.service';
 import { EmailLoginCodeService } from './email-login-code.service';
@@ -96,9 +97,8 @@ async function stateOf(id: string) {
 }
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({
-    where: { actor: { startsWith: 'totpk5-' } },
-  });
+  // AuditLog ist append-only (GoBD-Trigger): nur TRUNCATE im Testpfad.
+  await truncateAuditLog(prisma);
   await prisma.user.deleteMany({
     where: { username: { startsWith: 'totpk5-' } },
   });

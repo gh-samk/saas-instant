@@ -21,7 +21,13 @@ import {
   MetricsFetchService,
   getViaHttp,
 } from './metrics-fetch.service';
+import { BackupSettingsModule } from '../backup-settings/backup-settings.module';
 import { BackupController } from './backup.controller';
+import { BackupPlanService } from './backup-plan.service';
+import { InstanceBackupService } from './instance-backup.service';
+import { InstanceBackupsController } from './instance-backups.controller';
+import { InstanceRestoreService } from './instance-restore.service';
+import { InternalBackupPlanController } from './internal-backup-plan.controller';
 import { BackupService } from './backup.service';
 import { SETUP_STATUS_FETCH, getSetupStatusViaHttp } from './setup-status';
 
@@ -36,11 +42,13 @@ import { SETUP_STATUS_FETCH, getSetupStatusViaHttp } from './setup-status';
 @Module({
   // `MailModule` für den Versand des Einrichtungslinks. Es ist nicht global,
   // also steht es hier — an der Stelle, an der die Abhängigkeit besteht.
-  imports: [AuthModule, CoolifyModule, MailModule],
+  imports: [AuthModule, CoolifyModule, MailModule, BackupSettingsModule],
   controllers: [
     InstanceController,
     InstancesController,
     BackupController,
+    InternalBackupPlanController,
+    InstanceBackupsController,
     InstanceConfidentialController,
   ],
   providers: [
@@ -49,6 +57,9 @@ import { SETUP_STATUS_FETCH, getSetupStatusViaHttp } from './setup-status';
     MetricsFetchService,
     ReconciliationService,
     BackupService,
+    BackupPlanService,
+    InstanceBackupService,
+    InstanceRestoreService,
     SetupStatusService,
     InvitationSendService,
     // DIE DREI AUSWECHSELBAREN FUNKTIONEN, ausdrücklich verdrahtet.

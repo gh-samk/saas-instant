@@ -528,16 +528,41 @@ describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht',
     expect(screen.queryByLabelText('Bezeichnung')).toBeNull();
   });
 
+  it('empfiehlt bei einer Behörde die XRechnung', async () => {
+    setFetchReady({
+      invoice: { ...FINALIZED, recipientBuyerType: 'authority' },
+    });
+    open(FINALIZED_ID);
+
+    expect(
+      await screen.findByText(/Behörde: Bitte die XRechnung/),
+    ).toBeInTheDocument();
+  });
+
+  it('nennt bei einem Unternehmen beide Formate', async () => {
+    setFetchReady({
+      invoice: { ...FINALIZED, recipientBuyerType: 'business' },
+    });
+    open(FINALIZED_ID);
+
+    expect(
+      await screen.findByText(/Unternehmen: ZUGFeRD-PDF oder XRechnung/),
+    ).toBeInTheDocument();
+  });
+
   it('zeigt genau die erlaubten Handlungen', async () => {
     setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
     expect(
-      await screen.findByRole('link', { name: /PDF herunterladen/ }),
+      await screen.findByRole('link', { name: /PDF \(ZUGFeRD\)/ }),
     ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/document`);
     expect(
       screen.getByRole('link', { name: /XML herunterladen/ }),
     ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/xml`);
+    expect(
+      screen.getByRole('link', { name: /XRechnung \(XML\)/ }),
+    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/xrechnung`);
     expect(screen.getByRole('button', { name: /Versenden/ })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /Zahlung erfassen/ }),
@@ -547,7 +572,7 @@ describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht',
 
   it('ZEIGT DIE MELDUNG DES SERVERS, statt einen Tab mit rohem JSON zu oeffnen', async () => {
     // Am 31.08.2026 gemessen: Der Rechnungsdienst lief nicht, und wer auf
-    // „PDF herunterladen" klickte, sah
+    // „PDF (ZUGFeRD)" klickte, sah
     //   {"fehler":{"code":"rechnungsdienst_nicht_erreichbar",…}}
     // in einem neuen Tab. Die Meldung darin ist für Menschen geschrieben —
     // sie stand nur an einer Stelle, an der sie niemand lesen soll.
@@ -555,7 +580,7 @@ describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht',
     open(FINALIZED_ID);
 
     const reference = await screen.findByRole('link', {
-      name: /PDF herunterladen/,
+      name: /PDF \(ZUGFeRD\)/,
     });
 
     // Der Verweis BLEIBT ein echter href — Mittelklick und „Link kopieren"

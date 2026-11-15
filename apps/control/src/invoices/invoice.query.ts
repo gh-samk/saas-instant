@@ -56,6 +56,26 @@ export const HEADER_FIELDS = {
   issuerGeneralPartnerCommercialRegisterB: true,
   issuerManagingDirector: true,
   issuerBankDetails: true,
+  recipientBuyerType: true,
+  recipientVatId: true,
+  recipientBuyerReference: true,
+  recipientElectronicAddress: true,
+  recipientElectronicAddressScheme: true,
+  issuerContactName: true,
+  issuerContactPhone: true,
+  issuerContactEmail: true,
+  issuerIban: true,
+  issuerBic: true,
+  issuerBankName: true,
+  currency: true,
+  paymentMeansCode: true,
+  // Integrität und Aufbewahrung (GoBD): nur Prüfsummen und Fristen, nie die
+  // Dokumentbytes selbst.
+  pdfSha256: true,
+  xmlSha256: true,
+  xrechnungSha256: true,
+  documentGeneratedAt: true,
+  retentionUntil: true,
   // Der Schnappschuss der Mandatsreferenz. Steht sie da, wird eingezogen —
   // und auf dem Beleg steht die Vorabankündigung statt der gewöhnlichen
   // Zahlungsbedingung.
@@ -106,9 +126,14 @@ export async function withDocumentMarker(
     WHERE "id" IN (${Prisma.join(rows.map((z) => z.id))})
       AND "pdfContent" IS NOT NULL`;
   const present = new Set(withDocument.map((z) => z.id));
+  const withXr = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Invoice"
+    WHERE "id" IN (${Prisma.join(rows.map((z) => z.id))})
+      AND "xrechnungContent" IS NOT NULL`;
+  const presentXr = new Set(withXr.map((z) => z.id));
   const day = today();
   return rows.map((row) =>
-    toInvoiceResponse(row, present.has(row.id), day),
+    toInvoiceResponse(row, present.has(row.id), day, presentXr.has(row.id)),
   );
 }
 

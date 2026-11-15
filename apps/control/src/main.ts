@@ -15,6 +15,8 @@ import { NullAsJsonInterceptor } from './common/interceptors/null-as-json.interc
 import { ControlCharsPipe } from './common/pipes/control-chars.pipe';
 import { senderAddresses, checkSenderAlignment } from './mail/sender';
 import { checkTlsRequirement } from './mail/tls-requirement';
+import { assertEnvSlugMatches } from './installation/installation.service';
+import { ManifestService } from './manifest/manifest.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -26,6 +28,14 @@ async function bootstrap(): Promise<void> {
   // Ein schwaches oder fehlendes JWT_SECRET soll den Start verhindern, nicht
   // erst beim ersten Token auffallen.
   assertJwtSecret(config.get<string>('JWT_SECRET'));
+
+  // Eine Verwaltung gehört zu genau einer Software: Der Slug aus der Umgebung
+  // (Compose) muss zum Manifest passen. Die Prüfung gegen die Datenbank folgt
+  // im InstallationService (OnApplicationBootstrap).
+  assertEnvSlugMatches(
+    config.get<string>('SAAS_INSTANT_SLUG'),
+    app.get(ManifestService).product.slug,
+  );
 
   // Vor allem anderen: in Produktion darf die Verschlüsselung des
   // Postausgangs nicht abgeschaltet sein. Lieber gar nicht starten als den

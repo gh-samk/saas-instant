@@ -17,6 +17,7 @@ import {
   cleanUp,
   disconnect,
 } from '../test-support/company-provisioning';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 
 /**
  * Der öffentliche Anfrageweg gegen eine ECHTE Datenbank.
@@ -219,9 +220,7 @@ describe('Honeypot', () => {
       },
     });
     expect(discarded.length).toBeGreaterThanOrEqual(1);
-    await prisma.auditLog.deleteMany({
-      where: { id: { in: discarded.map((v) => v.id) } },
-    });
+    await truncateAuditLog(prisma);
   });
 });
 

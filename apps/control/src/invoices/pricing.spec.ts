@@ -264,3 +264,58 @@ describe('averageActivePersons', () => {
     });
   });
 });
+
+describe('PricingConfigService mit Datenbank (Vorrang, ohne echte DB)', () => {
+  it('liest nach reload() die DB-Tafel und lässt Umgebung/Manifest dahinter zurücktreten', async () => {
+    const rows = [
+      { key: 'x', label: 'X', maxPersons: 5, monthlyCent: 100, halfYearlyCent: 550, yearlyCent: 1100, setupCent: 0, sortOrder: 0, archivedAt: null },
+      { key: 'y', label: 'Y', maxPersons: null, monthlyCent: 200, halfYearlyCent: 1100, yearlyCent: 2200, setupCent: 0, sortOrder: 1, archivedAt: null },
+      { key: 'alt', label: 'Alt', maxPersons: 3, monthlyCent: 50, halfYearlyCent: 250, yearlyCent: 500, setupCent: 0, sortOrder: 2, archivedAt: new Date() },
+    ];
+    const prisma = {
+      priceList: {
+        findUnique: async () => ({
+          id: 'singleton',
+          taxRatePercent: 7,
+          paymentTermDays: 30,
+          averageDays: 45,
+          currency: 'EUR',
+          updatedAt: new Date('2026-11-01T00:00:00Z'),
+        }),
+      },
+      priceTier: { findMany: async () => rows },
+    };
+    const service = new PricingConfigService(
+      { get: () => JSON.stringify(PRICE_PRESETS) } as never,
+      undefined,
+      prisma as never,
+    );
+    await service.reload();
+
+    const table = service.read();
+    expect(table.tiers.map((s) => s.key)).toEqual(['x', 'y']);
+    expect(table.taxRate).toBe(7);
+    expect(table.paymentDueDays).toBe(30);
+    expect(table.averageDays).toBe(45);
+    expect(service.isActive('alt')).toBe(false);
+    expect(service.tier('alt')?.label).toBe('Alt');
+  });
+
+  it('weigert sich, eine unstimmige DB-Tafel zu übernehmen', async () => {
+    const prisma = {
+      priceList: {
+        findUnique: async () => ({
+          id: 'singleton', taxRatePercent: 19, paymentTermDays: 14, averageDays: 90,
+          currency: 'EUR', updatedAt: new Date(),
+        }),
+      },
+      priceTier: {
+        findMany: async () => [
+          { key: 'x', label: 'X', maxPersons: 5, monthlyCent: 1, halfYearlyCent: 1, yearlyCent: 1, setupCent: 0, sortOrder: 0, archivedAt: null },
+        ],
+      },
+    };
+    const service = new PricingConfigService({ get: () => undefined } as never, undefined, prisma as never);
+    await expect(service.reload()).rejects.toBeInstanceOf(PriceConfigurationInvalidError);
+  });
+});

@@ -40,8 +40,29 @@ export class BackupService {
       throw new BackupDateInFutureError(dto.date);
     }
 
+    const kind = dto.kind ?? 'instance';
+    const extra = {
+      ...(dto.objectKey !== undefined ? { objectKey: dto.objectKey } : {}),
+      ...(dto.sha256 !== undefined ? { sha256: dto.sha256.toLowerCase() } : {}),
+    };
+
+    if (kind !== 'instance') {
+      // Verwaltungs-DB und Rechnungsarchiv hängen an keiner Instanz; die
+      // Tabelle `Backup` kennt nur Instanz-Zeilen. Der Nachweis steht im Audit-Log.
+      await this.audit.log({
+        userId: null,
+        actor: 'sicherungswerkzeug',
+        action: AUDIT_ACTION.backupReported,
+        objectType: 'Backup',
+        objectId: null,
+        afterValue: { kind, date: dto.date, sizeBytes: dto.sizeBytes, ...extra },
+        ip,
+      });
+      return { ok: true };
+    }
+
     const instance = await this.prisma.instance.findUnique({
-      where: { subdomain: dto.subdomain },
+      where: { subdomain: dto.subdomain ?? '' },
       select: { id: true },
     });
     if (instance === null) {
@@ -62,7 +83,12 @@ export class BackupService {
     }
 
     const date = toDate(dto.date);
-    const data = { sizeBytes: BigInt(dto.sizeBytes) };
+    const data = {
+      sizeBytes: BigInt(dto.sizeBytes),
+      ...extra,
+      // Ein neues Objekt ist noch nicht geprüft.
+      ...(dto.objectKey !== undefined ? { verifiedAt: null } : {}),
+    };
     // Zweimal täglich gesichert, eine Zeile je Tag: der zweite Lauf
     // berichtigt die Zeile des ersten, statt die Historie zu verdoppeln.
     await this.prisma.backup.upsert({
@@ -81,6 +107,7 @@ export class BackupService {
         subdomain: dto.subdomain,
         date: dto.date,
         sizeBytes: dto.sizeBytes,
+        ...extra,
       },
       ip,
     });

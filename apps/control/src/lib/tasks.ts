@@ -3,12 +3,14 @@ import {
   Building2,
   CalendarClock,
   Clock,
+  DatabaseBackup,
   FileSearch,
   FileWarning,
   HelpCircle,
   Landmark,
   MailWarning,
   MailX,
+  ShieldAlert,
   ReceiptText,
   RefreshCw,
   Scale,
@@ -56,6 +58,10 @@ export const TASK_ICON: Record<TaskKind, LucideIcon> = {
   // Dringlichkeit steht in der Fälligkeitsspalte, nicht im Icon.
   tier_check: Scale,
   outbox_disrupted: MailX,
+  // GoBD: Beleg weicht von seiner Prüfsumme ab / Lücke im Nummernkreis.
+  document_tampered: ShieldAlert,
+  // Sicherung der Verwaltung (Datenbank, Rechnungsarchiv) überfällig.
+  control_backup_missing: DatabaseBackup,
 };
 
 /**
@@ -84,6 +90,8 @@ export const TASK_LABEL: Record<TaskKind, string> = {
   invoice_due: t('common.tasks.invoiceDue'),
   tier_check: t('common.tasks.tierCheck'),
   outbox_disrupted: t('common.tasks.outboxDisrupted'),
+  document_tampered: t('common.tasks.documentTampered'),
+  control_backup_missing: t('common.tasks.controlBackupMissing'),
 };
 
 /**

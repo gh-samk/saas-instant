@@ -74,6 +74,64 @@ export function decimalAsCent(value: Prisma.Decimal | string | null): number | n
   return negative ? -cent : cent;
 }
 
+/**
+ * Steuerkategorien nach UNTDID 5305, soweit das System sie ausstellt.
+ *
+ * S = Regelsatz, Z = Nullsatz, E = steuerbefreit, AE = Steuerschuldnerschaft
+ * des Leistungsempfängers (§ 13b UStG), K = innergemeinschaftliche Lieferung,
+ * G = Ausfuhr, O = nicht steuerbar.
+ */
+export const TAX_CATEGORIES = ['S', 'Z', 'E', 'AE', 'K', 'G', 'O'] as const;
+export type TaxCategory = (typeof TAX_CATEGORIES)[number];
+
+/** Kategorien, bei denen EN 16931 einen Befreiungsgrund (BT-120/121) verlangt. */
+const NEEDS_REASON: readonly TaxCategory[] = ['E', 'AE', 'K', 'G', 'O'];
+
+const DEFAULT_REASON: Partial<Record<TaxCategory, string>> = {
+  AE: 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge, § 13b UStG)',
+  K: 'Steuerfreie innergemeinschaftliche Lieferung (§ 4 Nr. 1b UStG)',
+  G: 'Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a UStG)',
+};
+
+/**
+ * Prüft Kategorie, Satz und Befreiungsgrund eines Postens und liefert den
+ * wirksamen Grund (bei AE/K/G mit Standardtext, wenn keiner genannt ist).
+ * Gibt Fehlermeldungen als Text zurück, wirft nicht.
+ */
+export function checkTaxCategory(
+  row: number,
+  category: string,
+  taxRate: number,
+  reason: string | undefined | null,
+): { reason: string | null; error: string[] } {
+  const error: string[] = [];
+  if (!(TAX_CATEGORIES as readonly string[]).includes(category)) {
+    return {
+      reason: null,
+      error: [`Posten ${row}: Unbekannte Steuerkategorie „${category}".`],
+    };
+  }
+  const c = category as TaxCategory;
+  if (c === 'S' && taxRate <= 0) {
+    error.push(
+      `Posten ${row}: Die Regelsteuer (S) braucht einen Satz über 0 — ` +
+        'für 0 % bitte Kategorie Z oder eine Befreiung wählen.',
+    );
+  }
+  if (c !== 'S' && taxRate !== 0) {
+    error.push(
+      `Posten ${row}: Kategorie ${c} verlangt den Steuersatz 0.`,
+    );
+  }
+  const text = reason?.trim() || DEFAULT_REASON[c] || null;
+  if (NEEDS_REASON.includes(c) && text === null) {
+    error.push(
+      `Posten ${row}: Für Kategorie ${c} fehlt der Befreiungsgrund (z. B. „§ 4 Nr. 21 UStG").`,
+    );
+  }
+  return { reason: c === 'S' || c === 'Z' ? null : text, error };
+}
+
 /** Ein Posten, wie er in die Rechnung eingeht. */
 export interface LineInput {
   label: string;
@@ -86,6 +144,10 @@ export interface LineInput {
   unit?: string;
   /** Abrechnungszeitraum des einzelnen Postens. */
   period?: { from: string; until: string };
+  /** Steuerkategorie nach UNTDID 5305; Vorgabe `S`. */
+  taxCategory?: TaxCategory;
+  /** Befreiungsgrund (BT-120) für E/AE/K/G/O. */
+  taxExemptionReason?: string;
 }
 
 /** Ein Posten mit allen abgeleiteten Beträgen. */
@@ -101,6 +163,7 @@ export interface CalculatedLine extends LineInput {
 export interface TaxShare {
   category: string;
   record: number;
+  exemptionReason?: string;
   basisCent: number;
   taxCent: number;
 }
@@ -156,11 +219,12 @@ export function calculate(inputs: LineInput[]): CalculationResult {
 
   const byRecord = new Map<string, TaxShare>();
   for (const p of lines) {
-    const category = 'S';
-    const key = `${category}|${p.taxRate}`;
+    const category = p.taxCategory ?? 'S';
+    const key = `${category}|${p.taxRate}|${p.taxExemptionReason ?? ''}`;
     const entry = byRecord.get(key) ?? {
       category,
       record: p.taxRate,
+      ...(p.taxExemptionReason ? { exemptionReason: p.taxExemptionReason } : {}),
       basisCent: 0,
       taxCent: 0,
     };

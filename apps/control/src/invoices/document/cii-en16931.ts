@@ -1,6 +1,7 @@
 import { centAsXml } from '../invoice.amount';
 import type { Issuer } from './issuer.config';
 import type {
+  CiiProfile,
   DocumentRecipient,
   DocumentLine,
   DocumentTaxShare,
@@ -8,27 +9,27 @@ import type {
 } from './document.types';
 
 /**
- * ZUGFeRD/Factur-X als CII-XML, Profil EN 16931 („Comfort").
+ * CII-XML für ZUGFeRD/Factur-X (Profil EN 16931) UND für XRechnung 3.0.
  *
- * Übernommen aus `tools/invoice-renderer/src/cii-en16931.mjs`. Die
- * Fassung dort ist gegen drei Prüfer abgenommen: veraPDF 1.30.2 (PDF/A-3b,
- * `isCompliant=true`), Mustangproject 2.17.0 (`<summary status="valid"/>` für
- * PDF und XML) und den KoSIT-Validator 1.6.3 mit XRechnung-3.0.2-Konfiguration
- * (`ACCEPTABLE`). Wörtliche Ausgaben: `tools/invoice-renderer/LIESMICH.md`,
- * Abschnitt 4.
+ * Eine Funktion, zwei Profile (`createCii(r, profile)`):
+ *
+ * - `EN16931` (Vorgabe): das eingebettete `factur-x.xml` des ZUGFeRD-PDF.
+ * - `XRECHNUNG`: dieselben Daten mit dem XRechnung-Kennstring
+ *   (`…#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0`), der
+ *   Geschäftsprozesskennung (BT-23) und den zusätzlichen deutschen Regeln
+ *   (BR-DE-*): Käuferreferenz/Leitweg-ID (BT-10), Verkäuferkontakt (BG-6),
+ *   elektronische Adressen beider Seiten (BT-34, BT-49).
+ *
+ * Die Fassung stammt aus `tools/invoice-renderer/src/cii-en16931.mjs`. Der
+ * Rechnungsdienst prüft jedes erzeugte PDF selbst nach (veraPDF PDF/A-3b,
+ * Mustangproject mit EN-16931-Schematron; siehe
+ * `tools/invoice-renderer/README.md`). Die Validierung des XRechnung-Profils
+ * gegen den KoSIT-Validator läuft im Echttest (Teil G des Plans), nicht in den
+ * Unit-Tests: Diese prüfen Struktur, Pflichtfelder und Reihenfolge.
  *
  * DIE REIHENFOLGE DER ELEMENTE IST NICHT VERHANDELBAR. Sie steht im XSD als
  * `<xs:sequence>`; ein vertauschtes Element ist kein Schönheitsfehler, sondern
- * ein Schemafehler. Wer hier etwas verschiebt, muss die Messung des
- * Erkundungsschritts wiederholen.
- *
- * PROFIL EN 16931, NICHT XRECHNUNG. Für den Versand an eine private
- * Empfängerin ist das genau richtig. Die zwei verbliebenen Meldungen des
- * Mustang-Validators (Geschäftsprozesskennung, Kennstring) sind `notice`,
- * keine `error`, und stammen aus dem XRechnung-Regelwerk — es greift nur, wenn
- * das Dokument beansprucht, XRechnung zu sein. Wer an einen öffentlichen
- * Auftraggeber liefert, braucht zusätzlich Leitweg-ID und
- * Geschäftsprozesskennung; das ist ausdrücklich nicht Teil dieser Etappe.
+ * ein Schemafehler. Wer hier etwas verschiebt, muss die Messung wiederholen.
  */
 
 /** Maskiert Text für XML-Inhalte. Attribute werden nie aus Daten gebaut. */
@@ -158,13 +159,20 @@ function seller(a: Issuer): string {
 }
 
 function buyer(e: DocumentRecipient): string {
+  // BT-49: elektronische Adresse. Eigene Angabe (Leitweg-ID 0204, E-Mail EM …)
+  // vor der Rechnungs-E-Mail.
+  const address49 =
+    e.electronicAddress ?? (e.email ? { id: e.email, scheme: 'EM' } : undefined);
   return [
     '<ram:BuyerTradeParty>',
     `<ram:Name>${x(e.name)}</ram:Name>`,
     address(e.address),
-    // BT-49: elektronische Adresse der Empfängerin.
-    e.email
-      ? `<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${x(e.email)}</ram:URIID></ram:URIUniversalCommunication>`
+    address49
+      ? `<ram:URIUniversalCommunication><ram:URIID schemeID="${x(address49.scheme)}">${x(address49.id)}</ram:URIID></ram:URIUniversalCommunication>`
+      : '',
+    // BT-48: USt-IdNr. der Empfängerin, schemeID VA.
+    e.vatId
+      ? `<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${x(e.vatId)}</ram:ID></ram:SpecifiedTaxRegistration>`
       : '',
     '</ram:BuyerTradeParty>',
   ].join('');
@@ -195,7 +203,10 @@ function lines(p: DocumentLine): string {
     '<ram:ApplicableTradeTax>',
     '<ram:TypeCode>VAT</ram:TypeCode>',
     `<ram:CategoryCode>${x(p.taxCategory)}</ram:CategoryCode>`,
-    `<ram:RateApplicablePercent>${p.taxRate.toFixed(2)}</ram:RateApplicablePercent>`,
+    // Kategorie O (nicht steuerbar): kein Satz an der Position (BR-O-05).
+    p.taxCategory === 'O'
+      ? ''
+      : `<ram:RateApplicablePercent>${p.taxRate.toFixed(2)}</ram:RateApplicablePercent>`,
     '</ram:ApplicableTradeTax>',
     p.period ? period(p.period) : '',
     `<ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>${centAsXml(p.netCent)}</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation>`,
@@ -209,9 +220,15 @@ function tax(t: DocumentTaxShare): string {
     '<ram:ApplicableTradeTax>',
     `<ram:CalculatedAmount>${centAsXml(t.taxCent)}</ram:CalculatedAmount>`,
     '<ram:TypeCode>VAT</ram:TypeCode>',
+    // BT-120: Befreiungsgrund, steht vor dem Basisbetrag.
+    t.exemptionReason
+      ? `<ram:ExemptionReason>${x(t.exemptionReason)}</ram:ExemptionReason>`
+      : '',
     `<ram:BasisAmount>${centAsXml(t.basisCent)}</ram:BasisAmount>`,
     `<ram:CategoryCode>${x(t.category)}</ram:CategoryCode>`,
-    `<ram:RateApplicablePercent>${t.record.toFixed(2)}</ram:RateApplicablePercent>`,
+    t.category === 'O'
+      ? ''
+      : `<ram:RateApplicablePercent>${t.record.toFixed(2)}</ram:RateApplicablePercent>`,
     '</ram:ApplicableTradeTax>',
   ].join('');
 }
@@ -228,6 +245,19 @@ function tax(t: DocumentTaxShare): string {
  */
 export const PROFILE_IDENTIFIER = 'urn:cen.eu:en16931:2017';
 
+/** Kennstring von XRechnung 3.0 (CII). */
+export const XRECHNUNG_IDENTIFIER =
+  'urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0';
+
+/** BT-23: Geschäftsprozesskennung (Peppol BIS Billing 3.0). */
+export const BUSINESS_PROCESS_IDENTIFIER =
+  'urn:fdc:peppol.eu:2017:poacc:billing:01:1.0';
+
+/** Der Kennstring (BT-24) des gewählten Profils. */
+export function profileIdentifier(profile: CiiProfile): string {
+  return profile === 'XRECHNUNG' ? XRECHNUNG_IDENTIFIER : PROFILE_IDENTIFIER;
+}
+
 /**
  * Rechnungsart nach UNTDID 1001.
  *
@@ -239,8 +269,18 @@ export const PROFILE_IDENTIFIER = 'urn:cen.eu:en16931:2017';
 export const TYPE_CODE_INVOICE = '380';
 
 /** Erzeugt das vollständige CII-Dokument. */
-export function createCii(r: InvoiceDocument): string {
+export function createCii(
+  r: InvoiceDocument,
+  profile: CiiProfile = 'EN16931',
+): string {
   const w = r.currency;
+  const xr = profile === 'XRECHNUNG';
+  const debit = r.paymentMeansCode === '59';
+  checkDocument(r, profile);
+  // BT-10: Leitweg-ID bzw. Käuferreferenz; ohne sie die eigene Rechnungsnummer
+  // (BR-DE-15 verlangt für XRechnung irgendeinen Wert).
+  const buyerReference =
+    r.buyerReference?.trim() || r.orderReference || r.number;
   const parts = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rsm:CrossIndustryInvoice',
@@ -250,8 +290,11 @@ export function createCii(r: InvoiceDocument): string {
     ' xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">',
 
     '<rsm:ExchangedDocumentContext>',
+    xr
+      ? `<ram:BusinessProcessSpecifiedDocumentContextParameter><ram:ID>${BUSINESS_PROCESS_IDENTIFIER}</ram:ID></ram:BusinessProcessSpecifiedDocumentContextParameter>`
+      : '',
     '<ram:GuidelineSpecifiedDocumentContextParameter>',
-    `<ram:ID>${PROFILE_IDENTIFIER}</ram:ID>`,
+    `<ram:ID>${profileIdentifier(profile)}</ram:ID>`,
     '</ram:GuidelineSpecifiedDocumentContextParameter>',
     '</rsm:ExchangedDocumentContext>',
 
@@ -279,7 +322,7 @@ export function createCii(r: InvoiceDocument): string {
     ...r.lines.map((p) => lines(p)),
 
     '<ram:ApplicableHeaderTradeAgreement>',
-    r.orderReference ? `<ram:BuyerReference>${x(r.orderReference)}</ram:BuyerReference>` : '',
+    `<ram:BuyerReference>${x(buyerReference)}</ram:BuyerReference>`,
     seller(r.issuer),
     buyer(r.recipient),
     '</ram:ApplicableHeaderTradeAgreement>',
@@ -289,22 +332,36 @@ export function createCii(r: InvoiceDocument): string {
     '</ram:ApplicableHeaderTradeDelivery>',
 
     '<ram:ApplicableHeaderTradeSettlement>',
+    // BT-90: Gläubiger-ID, nur bei Lastschrift.
+    debit && r.directDebit
+      ? `<ram:CreditorReferenceID>${x(r.directDebit.creditorId)}</ram:CreditorReferenceID>`
+      : '',
+    // BT-83: Verwendungszweck — die Rechnungsnummer.
+    `<ram:PaymentReference>${x(r.number)}</ram:PaymentReference>`,
     `<ram:InvoiceCurrencyCode>${x(w)}</ram:InvoiceCurrencyCode>`,
     '<ram:SpecifiedTradeSettlementPaymentMeans>',
-    // 58 = SEPA-Überweisung (UNTDID 4461). Kein Lastschriftcode: Es gibt in
-    // diesem System weder SEPA-XML noch Zahlungsabgleich.
-    '<ram:TypeCode>58</ram:TypeCode>',
-    '<ram:PayeePartyCreditorFinancialAccount>',
-    `<ram:IBANID>${x(r.issuer.bank.iban)}</ram:IBANID>`,
-    `<ram:AccountName>${x(r.issuer.name)}</ram:AccountName>`,
-    '</ram:PayeePartyCreditorFinancialAccount>',
-    r.issuer.bank.bic
+    // UNTDID 4461: 58 = SEPA-Überweisung, 59 = SEPA-Lastschrift.
+    `<ram:TypeCode>${debit ? '59' : '58'}</ram:TypeCode>`,
+    // BT-91: Konto der Zahlerin, nur bei Lastschrift und wenn bekannt.
+    debit && r.directDebit?.debtorIban
+      ? `<ram:PayerPartyDebtorFinancialAccount><ram:IBANID>${x(r.directDebit.debtorIban)}</ram:IBANID></ram:PayerPartyDebtorFinancialAccount>`
+      : '',
+    // BT-84: Konto der Ausstellerin bei Überweisung (Pflicht bei 58, BR-61).
+    debit
+      ? ''
+      : [
+          '<ram:PayeePartyCreditorFinancialAccount>',
+          `<ram:IBANID>${x(r.issuer.bank.iban)}</ram:IBANID>`,
+          `<ram:AccountName>${x(r.issuer.name)}</ram:AccountName>`,
+          '</ram:PayeePartyCreditorFinancialAccount>',
+        ].join(''),
+    !debit && r.issuer.bank.bic
       ? `<ram:PayeeSpecifiedCreditorFinancialInstitution><ram:BICID>${x(r.issuer.bank.bic)}</ram:BICID></ram:PayeeSpecifiedCreditorFinancialInstitution>`
       : '',
     '</ram:SpecifiedTradeSettlementPaymentMeans>',
     ...r.taxBreakdown.map(tax),
     period(r.servicePeriod),
-    `<ram:SpecifiedTradePaymentTerms><ram:Description>${x(r.paymentTerm + (r.paymentNote ? ` ${r.paymentNote}` : ''))}</ram:Description>${dateElement('DueDateDateTime', r.dueAt)}</ram:SpecifiedTradePaymentTerms>`,
+    `<ram:SpecifiedTradePaymentTerms><ram:Description>${x(r.paymentTerm + (r.paymentNote ? ` ${r.paymentNote}` : ''))}</ram:Description>${dateElement('DueDateDateTime', r.dueAt)}${debit && r.directDebit ? `<ram:DirectDebitMandateID>${x(r.directDebit.mandateReference)}</ram:DirectDebitMandateID>` : ''}</ram:SpecifiedTradePaymentTerms>`,
     '<ram:SpecifiedTradeSettlementHeaderMonetarySummation>',
     `<ram:LineTotalAmount>${centAsXml(r.sumNetCent)}</ram:LineTotalAmount>`,
     `<ram:TaxBasisTotalAmount>${centAsXml(r.sumNetCent)}</ram:TaxBasisTotalAmount>`,
@@ -319,4 +376,50 @@ export function createCii(r: InvoiceDocument): string {
     '</rsm:CrossIndustryInvoice>',
   ];
   return parts.filter(Boolean).join('\n');
+}
+
+/**
+ * Prüft die Eingabe auf alles, was das gewählte Profil verlangt und das
+ * Dokument sonst still ungültig machte. Wirft `TypeError` mit einer Meldung,
+ * die das fehlende Feld nennt — derselbe Grundsatz wie bei `countryCode`.
+ */
+function checkDocument(r: InvoiceDocument, profile: CiiProfile): void {
+  const missing: string[] = [];
+  const reasonRequired = new Set(['E', 'AE', 'K', 'G', 'O']);
+  for (const t of r.taxBreakdown) {
+    if (reasonRequired.has(t.category) && !(t.exemptionReason ?? '').trim()) {
+      missing.push(`Befreiungsgrund (BT-120) für Steuerkategorie ${t.category}`);
+    }
+    if (t.category === 'S' && t.record <= 0) {
+      missing.push('Steuersatz über 0 für Kategorie S');
+    }
+  }
+  // Steuerschuldnerschaft und innergemeinschaftliche Lieferung brauchen die
+  // USt-IdNr. der Empfängerin (BR-AE-02, BR-IC-02).
+  const needsBuyerVatId = r.taxBreakdown.some(
+    (t) => t.category === 'AE' || t.category === 'K',
+  );
+  if (needsBuyerVatId && !(r.recipient.vatId ?? '').trim()) {
+    missing.push('USt-IdNr. der Empfängerin (BT-48) für Reverse Charge / innergemeinschaftliche Lieferung');
+  }
+  if (r.paymentMeansCode === '59' && !r.directDebit) {
+    missing.push('Mandatsreferenz und Gläubiger-ID (BT-89/BT-90) für Lastschrift');
+  }
+  if (profile === 'XRECHNUNG') {
+    const c = r.issuer.contact;
+    if (!c.name?.trim()) missing.push('Ansprechpartner der Ausstellerin (BT-41, BR-DE-5)');
+    if (!c.phone?.trim()) missing.push('Telefon der Ausstellerin (BT-42, BR-DE-6)');
+    if (!c.email?.trim()) missing.push('E-Mail der Ausstellerin (BT-43, BR-DE-7)');
+    if (!r.recipient.electronicAddress && !r.recipient.email) {
+      missing.push('Elektronische Adresse der Empfängerin (BT-49)');
+    }
+    if (r.recipient.buyerType === 'authority' && !(r.buyerReference ?? '').trim()) {
+      missing.push('Leitweg-ID der Behörde (BT-10)');
+    }
+  }
+  if (missing.length > 0) {
+    throw new TypeError(
+      `Das Dokument (${profile}) ist unvollständig: ${missing.join('; ')}.`,
+    );
+  }
 }

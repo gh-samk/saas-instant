@@ -1,7 +1,12 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ManifestService } from '../../manifest/manifest.service';
-import type { IssuerManifest } from '../../manifest/sections/billing';
+import {
+  DEFAULT_RETENTION_YEARS,
+  ISSUER_LEGAL_FORMS,
+  type IssuerLegalForm,
+  type IssuerManifest,
+} from '../../manifest/sections/billing';
 
 /**
  * DIE AUSSTELLERDATEN — Pflichtangaben nach § 14 UStG und § 125a HGB.
@@ -25,6 +30,12 @@ import type { IssuerManifest } from '../../manifest/sections/billing';
  * als BT-30.
  */
 export interface Issuer {
+  /**
+   * Rechtsform für die Pflichtprüfung beim Festschreiben. `company` =
+   * Handelsgesellschaft (Sitz/Register Pflicht), `sole_proprietor` und
+   * `association` ohne Registerpflicht auf der Rechnung.
+   */
+  legalForm: IssuerLegalForm;
   name: string;
   address: { street: string; postalCode: string; city: string; country: string };
   /**
@@ -73,6 +84,7 @@ export interface Issuer {
 }
 
 export const ISSUER_PRESETS: Issuer = {
+  legalForm: 'company',
   name: 'Example Company GmbH & Co KG',
   address: {
     street: 'Example Street 1',
@@ -115,12 +127,29 @@ export const ISSUER_PRESETS: Issuer = {
 };
 
 /**
+ * Ist das noch der neutrale Platzhalter-Aussteller aus `ISSUER_PRESETS`?
+ *
+ * Eine Rechnung mit der Platzhalterfirma, der Beispiel-USt-IdNr. oder der
+ * Beispiel-IBAN ist kein Beleg, sondern ein Muster — sie darf nicht
+ * festgeschrieben werden. Geprüft wird auf die Platzhalterwerte selbst, nicht
+ * auf „Example" irgendwo im Text.
+ */
+export function isPlaceholderIssuer(issuer: Issuer): boolean {
+  return (
+    /^Example Company\b/i.test(issuer.name.trim()) ||
+    issuer.vatId.trim() === ISSUER_PRESETS.vatId ||
+    issuer.bank.iban.replace(/\s+/g, '') === ISSUER_PRESETS.bank.iban
+  );
+}
+
+/**
  * Die Manifest-Angaben als Teil-Aussteller. Strukturierte Felder haben
  * Vorrang; fehlen sie, werden Anschrift und Bankverbindung aus den
  * Freitextfeldern `address` und `bankDetails` abgeleitet, soweit sie sich
  * zerlegen lassen.
  */
 export function issuerFromManifest(m: IssuerManifest): {
+  legalForm?: IssuerLegalForm;
   name?: string;
   street?: string;
   postalCode?: string;
@@ -154,6 +183,7 @@ export function issuerFromManifest(m: IssuerManifest): {
   const withoutEmpty = (w: string | null | undefined): string | undefined =>
     w && w.trim() !== '' ? w.trim() : undefined;
   return {
+    legalForm: m.legalForm ?? undefined,
     name: withoutEmpty(m.name),
     street: withoutEmpty(m.street) ?? withoutEmpty(address?.[1]),
     postalCode: withoutEmpty(m.postalCode) ?? withoutEmpty(address?.[2]),
@@ -210,6 +240,7 @@ export class IssuerConfigService {
     // Vorgaben, die das Manifest überlagert: Umgebung > Manifest > neutral.
     const v: Issuer = {
       ...preset,
+      legalForm: m.legalForm ?? preset.legalForm,
       name: m.name ?? preset.name,
       address: {
         street: m.street ?? preset.address.street,
@@ -276,7 +307,17 @@ export class IssuerConfigService {
       .map((entry) => entry.trim())
       .filter((entry) => entry !== '');
 
+    const legalFormEnv = this.config
+      .get<string>('CONTROL_INVOICE_LEGAL_FORM')
+      ?.trim();
+    const legalForm = (ISSUER_LEGAL_FORMS as readonly string[]).includes(
+      legalFormEnv ?? '',
+    )
+      ? (legalFormEnv as IssuerLegalForm)
+      : v.legalForm;
+
     return {
+      legalForm,
       name: this.value('CONTROL_INVOICE_ISSUER', v.name),
       address: {
         street: this.value('CONTROL_INVOICE_STREET', v.address.street),
@@ -326,5 +367,13 @@ export class IssuerConfigService {
         v.legalAddition,
       ),
     };
+  }
+
+  /**
+   * Aufbewahrungsfrist in Jahren (Manifest `billing.retentionYears`,
+   * Vorgabe 8). Die Dauer klärt der Betreiber mit der Steuerberatung.
+   */
+  retentionYears(): number {
+    return this.manifest?.billing.retentionYears ?? DEFAULT_RETENTION_YEARS;
   }
 }

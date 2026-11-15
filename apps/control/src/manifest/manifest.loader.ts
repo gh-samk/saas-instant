@@ -36,6 +36,11 @@ export function checkManifest(raw: unknown, source = 'inline'): Manifest {
     ui: checkUi(root['ui'], error),
   };
   if (error.length > 0) throw new ManifestError(source, error);
+  // EINE Namensquelle: Ohne eigenen `mail.senderName` heißt der Absender wie das Produkt.
+  const rawMail = root['mail'];
+  const senderNameSet =
+    isObject(rawMail) && rawMail['senderName'] !== undefined && rawMail['senderName'] !== null;
+  if (!senderNameSet) manifest.mail.senderName = manifest.product.name;
   return manifest;
 }
 

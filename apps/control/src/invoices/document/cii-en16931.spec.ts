@@ -311,3 +311,313 @@ describe('laendercode — der Fehler, den erst der Selbstprüfer fand', () => {
     expect(xml).not.toContain('Deutschland');
   });
 });
+
+// ===========================================================================
+// ZWEI PROFILE: EN 16931 (ZUGFeRD) und XRECHNUNG 3.0
+// ===========================================================================
+
+// jsdom liefert hier keine Typen; es dient nur als XML-Parser (wohlgeformt?).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { JSDOM } = require('jsdom') as {
+  JSDOM: new (
+    xml: string,
+    options: { contentType: string },
+  ) => { window: { document: Document } };
+};
+import {
+  BUSINESS_PROCESS_IDENTIFIER,
+  XRECHNUNG_IDENTIFIER,
+  profileIdentifier,
+} from './cii-en16931';
+
+/** Parst das XML (wohlgeformt?) und liefert Abfragehilfen nach Tagnamen. */
+function parse(xml: string) {
+  const dom = new JSDOM(xml, { contentType: 'text/xml' });
+  const doc = dom.window.document;
+  return {
+    all: (tag: string) => Array.from(doc.getElementsByTagName(tag)),
+    first: (tag: string) => doc.getElementsByTagName(tag)[0] ?? null,
+    text: (tag: string) => doc.getElementsByTagName(tag)[0]?.textContent ?? null,
+  };
+}
+
+/** Reihenfolge der Kindelemente eines Elements. */
+function childNames(el: Element | null): string[] {
+  return el ? Array.from(el.children).map((c) => c.tagName) : [];
+}
+
+const AUTHORITY: InvoiceDocument = {
+  ...DOCUMENT,
+  buyerReference: '991-12345-67',
+  recipient: {
+    name: 'Stadt Weimar — Amt für Digitales',
+    address: {
+      street: 'Markt 1',
+      postalCode: '99423',
+      city: 'Weimar',
+      country: 'DE',
+    },
+    email: 'rechnung@weimar.example.org',
+    vatId: 'DE811111111',
+    buyerType: 'authority',
+    electronicAddress: { id: '991-12345-67', scheme: '0204' },
+  },
+};
+
+describe('Profil EN16931 (ZUGFeRD)', () => {
+  const xml = createCii(DOCUMENT);
+  const x = parse(xml);
+
+  it('ist wohlgeformt und trägt den EN-16931-Kennstring, KEINE Geschäftsprozesskennung', () => {
+    expect(x.text('ram:ID')).toBe(PROFILE_IDENTIFIER);
+    expect(xml).not.toContain('xrechnung');
+    expect(xml).not.toContain(BUSINESS_PROCESS_IDENTIFIER);
+    expect(createCii(DOCUMENT, 'EN16931')).toBe(xml);
+  });
+
+  it('nimmt als Käuferreferenz (BT-10) die Rechnungsnummer, wenn keine Leitweg-ID da ist', () => {
+    expect(x.text('ram:BuyerReference')).toBe('2026-001');
+  });
+
+  it('trägt den Verwendungszweck (BT-83) und die Währung aus der Rechnung', () => {
+    expect(x.text('ram:PaymentReference')).toBe('2026-001');
+    expect(x.text('ram:InvoiceCurrencyCode')).toBe('EUR');
+    const chf = createCii({ ...DOCUMENT, currency: 'CHF' });
+    expect(chf).toContain('<ram:InvoiceCurrencyCode>CHF</ram:InvoiceCurrencyCode>');
+    expect(chf).toContain('<ram:TaxTotalAmount currencyID="CHF">');
+  });
+});
+
+describe('Profil XRECHNUNG 3.0', () => {
+  const xml = createCii(AUTHORITY, 'XRECHNUNG');
+  const x = parse(xml);
+
+  it('nennt Kennstring (BT-24) und Geschäftsprozesskennung (BT-23) wörtlich', () => {
+    expect(XRECHNUNG_IDENTIFIER).toBe(
+      'urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0',
+    );
+    expect(BUSINESS_PROCESS_IDENTIFIER).toBe(
+      'urn:fdc:peppol.eu:2017:poacc:billing:01:1.0',
+    );
+    expect(profileIdentifier('XRECHNUNG')).toBe(XRECHNUNG_IDENTIFIER);
+    const context = x.first('rsm:ExchangedDocumentContext');
+    // Reihenfolge laut XSD: erst Geschäftsprozess, dann Guideline.
+    expect(childNames(context)).toEqual([
+      'ram:BusinessProcessSpecifiedDocumentContextParameter',
+      'ram:GuidelineSpecifiedDocumentContextParameter',
+    ]);
+    expect(context?.textContent).toContain(BUSINESS_PROCESS_IDENTIFIER);
+    expect(context?.textContent).toContain(XRECHNUNG_IDENTIFIER);
+  });
+
+  it('nimmt die Leitweg-ID als Käuferreferenz (BT-10)', () => {
+    expect(x.text('ram:BuyerReference')).toBe('991-12345-67');
+  });
+
+  it('nennt die elektronische Adresse der Behörde mit schemeID 0204 (BT-49)', () => {
+    const buyer = x.first('ram:BuyerTradeParty');
+    const uri = buyer?.getElementsByTagName('ram:URIID')[0];
+    expect(uri?.getAttribute('schemeID')).toBe('0204');
+    expect(uri?.textContent).toBe('991-12345-67');
+  });
+
+  it('nennt für eine E-Mail-Adresse das Schema EM', () => {
+    const business = parse(createCii(DOCUMENT, 'XRECHNUNG'));
+    const uri = business.first('ram:BuyerTradeParty')?.getElementsByTagName('ram:URIID')[0];
+    expect(uri?.getAttribute('schemeID')).toBe('EM');
+    expect(uri?.textContent).toBe('vorstand@gruenspecht-weimar.example.com');
+  });
+
+  it('trägt die USt-IdNr. der Käuferin (BT-48, schemeID VA)', () => {
+    const tax = x
+      .first('ram:BuyerTradeParty')
+      ?.getElementsByTagName('ram:SpecifiedTaxRegistration')[0];
+    expect(tax?.textContent).toBe('DE811111111');
+    expect(tax?.getElementsByTagName('ram:ID')[0]?.getAttribute('schemeID')).toBe('VA');
+  });
+
+  it('trägt den Verkäuferkontakt (BR-DE-2) aus dem Aussteller', () => {
+    const contact = x.first('ram:SellerTradeParty')?.getElementsByTagName('ram:DefinedTradeContact')[0];
+    expect(childNames(contact ?? null)).toEqual([
+      'ram:PersonName',
+      'ram:TelephoneUniversalCommunication',
+      'ram:EmailURIUniversalCommunication',
+    ]);
+  });
+
+  it('hält die Reihenfolge im Settlement-Block ein (XSD-Sequenz)', () => {
+    const settlement = x.first('ram:ApplicableHeaderTradeSettlement');
+    const names = childNames(settlement);
+    const order = [
+      'ram:PaymentReference',
+      'ram:InvoiceCurrencyCode',
+      'ram:SpecifiedTradeSettlementPaymentMeans',
+      'ram:ApplicableTradeTax',
+      'ram:BillingSpecifiedPeriod',
+      'ram:SpecifiedTradePaymentTerms',
+      'ram:SpecifiedTradeSettlementHeaderMonetarySummation',
+    ];
+    expect(order.map((n) => names.indexOf(n))).toEqual(
+      [...order.map((n) => names.indexOf(n))].sort((a, b) => a - b),
+    );
+    expect(names.every((n) => order.includes(n))).toBe(true);
+  });
+
+  it('verweigert fehlende Pflichtangaben des Profils mit einer Meldung', () => {
+    expect(() =>
+      createCii(
+        { ...AUTHORITY, buyerReference: undefined },
+        'XRECHNUNG',
+      ),
+    ).toThrow(/Leitweg-ID/);
+    expect(() =>
+      createCii(
+        { ...DOCUMENT, issuer: { ...ISSUER_PRESETS, contact: { name: '', phone: '', email: '' } } },
+        'XRECHNUNG',
+      ),
+    ).toThrow(/Ansprechpartner/);
+    expect(() =>
+      createCii(
+        { ...DOCUMENT, recipient: { ...DOCUMENT.recipient, email: undefined } },
+        'XRECHNUNG',
+      ),
+    ).toThrow(/Elektronische Adresse/);
+  });
+});
+
+describe('Steuerkategorien je Position (BT-118/BT-120)', () => {
+  const withCategory = (
+    category: string,
+    reason?: string,
+    vatId?: string,
+  ): InvoiceDocument => ({
+    ...DOCUMENT,
+    recipient: { ...DOCUMENT.recipient, ...(vatId ? { vatId } : {}) },
+    lines: [
+      {
+        ...DOCUMENT.lines[0]!,
+        taxCategory: category,
+        taxRate: 0,
+        ...(reason ? { taxExemptionReason: reason } : {}),
+      },
+    ],
+    taxBreakdown: [
+      {
+        category,
+        record: 0,
+        ...(reason ? { exemptionReason: reason } : {}),
+        basisCent: 38_500,
+        taxCent: 0,
+      },
+    ],
+    sumTaxCent: 0,
+    sumGrossCent: 38_500,
+    paymentAmountCent: 38_500,
+  });
+
+  it('schreibt S mit Satz und ohne Befreiungsgrund', () => {
+    const x = parse(createCii(DOCUMENT));
+    expect(x.all('ram:CategoryCode').map((e) => e.textContent)).toEqual(['S', 'S']);
+    expect(x.all('ram:ExemptionReason')).toHaveLength(0);
+    expect(x.text('ram:RateApplicablePercent')).toBe('19.00');
+  });
+
+  it('schreibt E mit Befreiungsgrund VOR dem Basisbetrag', () => {
+    const xml = createCii(withCategory('E', 'Steuerfrei nach § 4 Nr. 21 UStG'));
+    const breakdown = parse(xml).all('ram:ApplicableTradeTax').find((e) =>
+      e.getElementsByTagName('ram:CalculatedAmount').length > 0,
+    ) ?? null;
+    expect(childNames(breakdown)).toEqual([
+      'ram:CalculatedAmount',
+      'ram:TypeCode',
+      'ram:ExemptionReason',
+      'ram:BasisAmount',
+      'ram:CategoryCode',
+      'ram:RateApplicablePercent',
+    ]);
+    expect(breakdown?.textContent).toContain('§ 4 Nr. 21 UStG');
+  });
+
+  it('schreibt Z (Nullsatz) ohne Befreiungsgrund', () => {
+    const x = parse(createCii(withCategory('Z')));
+    expect(x.all('ram:CategoryCode').map((e) => e.textContent)).toEqual(['Z', 'Z']);
+    expect(x.all('ram:ExemptionReason')).toHaveLength(0);
+  });
+
+  it('verlangt für AE und K die USt-IdNr. der Käuferin', () => {
+    expect(() => createCii(withCategory('AE', 'Reverse Charge'))).toThrow(/BT-48/);
+    expect(() => createCii(withCategory('K', 'Innergemeinschaftlich'))).toThrow(/BT-48/);
+    const ae = parse(createCii(withCategory('AE', 'Reverse Charge', 'DE811111111')));
+    expect(ae.all('ram:CategoryCode').map((e) => e.textContent)).toEqual(['AE', 'AE']);
+  });
+
+  it('verlangt für E, AE, K den Befreiungsgrund und für S einen Satz über 0', () => {
+    expect(() => createCii(withCategory('E'))).toThrow(/Befreiungsgrund/);
+    expect(() =>
+      createCii({
+        ...DOCUMENT,
+        taxBreakdown: [{ category: 'S', record: 0, basisCent: 38_500, taxCent: 0 }],
+      }),
+    ).toThrow(/Steuersatz/);
+  });
+
+  it('lässt bei Kategorie O den Satz weg (BR-O-05)', () => {
+    const x = parse(createCii(withCategory('O', 'Nicht steuerbar')));
+    expect(x.all('ram:RateApplicablePercent')).toHaveLength(0);
+  });
+});
+
+describe('Zahlungsart und Lastschriftmandat (BT-81, BT-89, BT-90)', () => {
+  const debit: InvoiceDocument = {
+    ...DOCUMENT,
+    paymentMeansCode: '59',
+    directDebit: {
+      mandateReference: 'MANDAT-0042',
+      creditorId: 'DE09ZZZ00000000001',
+    },
+  };
+
+  it('nimmt ohne Angabe 58 und die Bank des Ausstellers (BT-84)', () => {
+    const x = parse(createCii(DOCUMENT));
+    expect(x.text('ram:TypeCode')).toBeDefined();
+    const means = x.first('ram:SpecifiedTradeSettlementPaymentMeans');
+    expect(means?.getElementsByTagName('ram:TypeCode')[0]?.textContent).toBe('58');
+    expect(means?.getElementsByTagName('ram:IBANID')[0]?.textContent).toBe(
+      ISSUER_PRESETS.bank.iban,
+    );
+    expect(x.all('ram:DirectDebitMandateID')).toHaveLength(0);
+    expect(x.all('ram:CreditorReferenceID')).toHaveLength(0);
+  });
+
+  it('schreibt bei 59 Mandat (BT-89) und Gläubiger-ID (BT-90) an die richtigen Stellen', () => {
+    const x = parse(createCii(debit));
+    const means = x.first('ram:SpecifiedTradeSettlementPaymentMeans');
+    expect(means?.getElementsByTagName('ram:TypeCode')[0]?.textContent).toBe('59');
+    // Bei Lastschrift kein Überweisungskonto der Ausstellerin.
+    expect(means?.getElementsByTagName('ram:PayeePartyCreditorFinancialAccount')).toHaveLength(0);
+    expect(x.text('ram:CreditorReferenceID')).toBe('DE09ZZZ00000000001');
+    const terms = x.first('ram:SpecifiedTradePaymentTerms');
+    expect(childNames(terms)).toEqual([
+      'ram:Description',
+      'ram:DueDateDateTime',
+      'ram:DirectDebitMandateID',
+    ]);
+    expect(terms?.getElementsByTagName('ram:DirectDebitMandateID')[0]?.textContent).toBe('MANDAT-0042');
+  });
+
+  it('schreibt BT-91, wenn das Konto der Zahlerin bekannt ist', () => {
+    const x = parse(
+      createCii({
+        ...debit,
+        directDebit: { ...debit.directDebit!, debtorIban: 'DE89370400440532013000' },
+      }),
+    );
+    expect(x.first('ram:PayerPartyDebtorFinancialAccount')?.textContent).toBe(
+      'DE89370400440532013000',
+    );
+  });
+
+  it('weigert Lastschrift ohne Mandat', () => {
+    expect(() => createCii({ ...DOCUMENT, paymentMeansCode: '59' })).toThrow(/Mandat/);
+  });
+});

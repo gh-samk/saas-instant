@@ -107,6 +107,16 @@ public final class InvoiceService {
       throw new IllegalArgumentException(
           "Unbekanntes Profil: " + profil + ". Erlaubt: " + PROFILE);
     }
+    // Profil und Kennstring im XML muessen zusammenpassen: Ein PDF, das sich
+    // als EN16931 ausgibt, aber ein XRechnung-XML traegt (oder umgekehrt),
+    // wuerde vom Empfaenger nach dem falschen Regelwerk geprueft.
+    boolean xmlIstXrechnung =
+        new String(xml, StandardCharsets.UTF_8).contains("urn:xeinkauf.de:kosit:xrechnung");
+    if ("XRECHNUNG".equals(profil) != xmlIstXrechnung) {
+      throw new IllegalArgumentException(
+          "Profil " + profil + " passt nicht zum Kennstring im XML"
+              + (xmlIstXrechnung ? " (XRechnung)." : " (kein XRechnung)."));
+    }
 
     ZUGFeRDExporterFromA1 ausgeber =
         new ZUGFeRDExporterFromA1()

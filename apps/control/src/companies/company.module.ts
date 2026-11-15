@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { CompanyConfidentialController } from './company-confidential.controller';
 import { CompanyController } from './company.controller';
 import { IntakeModule } from '../intake/intake.module';
+import { InvoiceModule } from '../invoices/invoice.module';
 import { CompanyService } from './company.service';
 
 /**
@@ -16,7 +17,7 @@ import { CompanyService } from './company.service';
   // Statuswechsel auf `pilot_approved`. Die Richtung ist bewusst so herum:
   // Die Aufnahme kennt die Organisation nicht, die Organisation loest den
   // Versand aus.
-  imports: [AuthModule, IntakeModule],
+  imports: [AuthModule, IntakeModule, InvoiceModule],
   controllers: [CompanyController, CompanyConfidentialController],
   providers: [CompanyService],
   exports: [CompanyService],

@@ -11,7 +11,7 @@ import { dayReadable } from '../common/calendar';
 import { writeSystemNote } from '../notes/system-note';
 import { CompanyNotFoundError } from '../companies/company.errors';
 import { PrismaService } from '../prisma/prisma.service';
-import { IssuerConfigService } from './document/issuer.config';
+import { IssuerConfigService, isPlaceholderIssuer } from './document/issuer.config';
 import {
   type DateWindow,
   windowFrom,
@@ -22,8 +22,10 @@ import { assignNextNumber } from './number-sequence';
 import {
   calculate,
   centAsDecimal,
+  checkTaxCategory,
   decimalAsCent,
   type LineInput,
+  type TaxCategory,
 } from './invoice.amount';
 import {
   InvoiceAlreadyCancelledError,
@@ -31,6 +33,8 @@ import {
   InvoiceNotFoundError,
   InvoiceStatusMismatchError,
   InvoiceIncompleteError,
+  PriceTierUnknownError,
+  InvoiceIssuerPlaceholderError,
   CancellationNotCancellableError,
 } from './invoice.errors';
 import {
@@ -532,12 +536,23 @@ export class InvoiceService {
             billingCountry: true,
             billingEmail: true,
             contactEmail: true,
+            buyerType: true,
+            vatId: true,
+            buyerReference: true,
+            electronicAddress: true,
+            electronicAddressScheme: true,
           },
         });
         if (!company) throw new CompanyNotFoundError();
 
         const recipient = recipientSnapshot(company);
-        const issuerData = issuerSnapshot(this.issuer.read());
+        const issuerConfig = this.issuer.read();
+        // PLATZHALTER-AUSSTELLER: kein Beleg. Geprüft VOR der Nummernvergabe,
+        // damit keine Nummer für ein Muster verbraucht wird.
+        if (isPlaceholderIssuer(issuerConfig)) {
+          throw new InvoiceIssuerPlaceholderError();
+        }
+        const issuerData = issuerSnapshot(issuerConfig);
         const linesCount = await tx.invoiceLine.count({
           where: { invoiceId: id },
         });
@@ -546,6 +561,7 @@ export class InvoiceService {
           ...recipient,
           ...issuerData,
           linesCount,
+          legalForm: issuerConfig.legalForm,
         });
         if (missing.length > 0) throw new InvoiceIncompleteError(missing);
 
@@ -570,12 +586,16 @@ export class InvoiceService {
         const year = Number(dateStringFromDate(draft.invoiceDate).slice(0, 4));
         const invoiceNumber = await assignNextNumber(tx, year);
 
+        const finalizedAt = new Date();
         await tx.invoice.update({
           where: { id },
           data: {
             invoiceNumber,
             status: 'finalized',
-            finalizedAt: new Date(),
+            finalizedAt,
+            // AUFBEWAHRUNG: Ende des Festschreibungsjahres + n Jahre
+            // (Manifest `billing.retentionYears`, Vorgabe 8).
+            retentionUntil: retentionEnd(finalizedAt, this.issuer.retentionYears()),
             ...recipient,
             ...issuerData,
           },
@@ -699,6 +719,22 @@ export class InvoiceService {
             recipientName: original.recipientName,
             recipientAddress: original.recipientAddress,
             recipientEmail: original.recipientEmail,
+            recipientBuyerType: original.recipientBuyerType,
+            recipientVatId: original.recipientVatId,
+            recipientBuyerReference: original.recipientBuyerReference,
+            recipientElectronicAddress: original.recipientElectronicAddress,
+            recipientElectronicAddressScheme:
+              original.recipientElectronicAddressScheme,
+            currency: original.currency,
+            // Eine Stornorechnung wird nie eingezogen: immer 58.
+            paymentMeansCode: '58',
+            retentionUntil: retentionEnd(new Date(), this.issuer.retentionYears()),
+            issuerContactName: original.issuerContactName,
+            issuerContactPhone: original.issuerContactPhone,
+            issuerContactEmail: original.issuerContactEmail,
+            issuerIban: original.issuerIban,
+            issuerBic: original.issuerBic,
+            issuerBankName: original.issuerBankName,
             issuerCompanyName: original.issuerCompanyName,
             issuerAddress: original.issuerAddress,
             issuerVatId: original.issuerVatId,
@@ -742,6 +778,8 @@ export class InvoiceService {
               quantity: p.quantity.negated(),
               unitPriceNet: p.unitPriceNet,
               taxRate: p.taxRate,
+              taxCategory: p.taxCategory,
+              taxExemptionReason: p.taxExemptionReason,
               netAmount: centAsDecimal(netCent),
               taxAmount: centAsDecimal(taxCent),
               grossAmount: centAsDecimal(netCent + taxCent),
@@ -874,6 +912,11 @@ export class InvoiceService {
         billingCountry: true,
         billingEmail: true,
         contactEmail: true,
+        buyerType: true,
+        vatId: true,
+        buyerReference: true,
+        electronicAddress: true,
+        electronicAddressScheme: true,
         // Für die Vorabankündigung auf dem Beleg.
         paymentMethod: true,
         sepaMandateReference: true,
@@ -918,18 +961,43 @@ export class InvoiceService {
       throw new InvoiceIncompleteError(periodError);
     }
 
-    const inputs: LineInput[] = dto.lines.map((p) => ({
+    // STEUERKATEGORIE JE POSTEN: S/Z/E/AE/K/G/O mit Befreiungsgrund.
+    const taxCheck = dto.lines.map((p, i) => {
+      const category = p.taxCategory ?? 'S';
+      const result = checkTaxCategory(
+        i + 1,
+        category,
+        p.taxRate,
+        p.taxExemptionReason,
+      );
+      return { category: category as TaxCategory, ...result };
+    });
+    const taxError = taxCheck.flatMap((c) => c.error);
+    if (taxError.length > 0) throw new InvoiceIncompleteError(taxError);
+
+    const inputs: LineInput[] = dto.lines.map((p, i) => ({
       label: p.label.trim(),
       ...(p.description ? { description: p.description.trim() } : {}),
       quantity: p.quantity,
       unitPriceNetCent: p.unitPriceNetCent,
       taxRate: p.taxRate,
       ...(p.unit ? { unit: p.unit } : {}),
+      ...(taxCheck[i]?.category !== 'S' ? { taxCategory: taxCheck[i]!.category } : {}),
+      ...(taxCheck[i]?.reason ? { taxExemptionReason: taxCheck[i]!.reason! } : {}),
       ...(p.periodFrom && p.periodUntil
         ? { period: { from: p.periodFrom, until: p.periodUntil } }
         : {}),
     }));
     const calculated = calculate(inputs);
+    // Preisstufe je Posten: der Schlüssel muss in der Preisliste stehen (auch
+    // archiviert — ein Entwurf darf eine ältere Stufe weiterführen); das
+    // Etikett kommt aus der Preisliste, nicht vom Client.
+    const tierOfLine = dto.lines.map((p) => {
+      if (!p.priceTierKey) return { key: null, label: null };
+      const tier = this.prices.tier(p.priceTierKey);
+      if (tier === null) throw new PriceTierUnknownError(p.priceTierKey);
+      return { key: tier.key, label: tier.label };
+    });
 
     const due =
       dto.dueDate ??
@@ -955,6 +1023,14 @@ export class InvoiceService {
             ? (company.sepaMandateReference?.trim() || null)
             : null,
         ...issuerSnapshot(this.issuer.read()),
+        // Zahlungsart nach UNTDID 4461: 59 = SEPA-Lastschrift (nur mit
+        // Mandat), sonst 58 = SEPA-Überweisung. Währung: die der Preisliste
+        // (Spaltenvorgabe EUR).
+        paymentMeansCode:
+          company.paymentMethod === 'direct_debit' &&
+          (company.sepaMandateReference?.trim() || null) !== null
+            ? '59'
+            : '58',
         // Die drei Texte des Bearbeiten-Screens. `null` statt `undefined`,
         // damit ein geleertes Feld auch wirklich geleert wird — bei einem
         // Entwurf ist Loeschen eine gueltige Aenderung.
@@ -962,8 +1038,10 @@ export class InvoiceService {
         paymentNote: dto.paymentNote?.trim() || null,
         internalNote: dto.internalNote?.trim() || null,
       },
-      lines: calculated.lines.map((p) => ({
+      lines: calculated.lines.map((p, index) => ({
         label: p.label,
+        priceTierKey: tierOfLine[index]?.key ?? null,
+        priceTierLabel: tierOfLine[index]?.label ?? null,
         // [H2]: WIRD JETZT GESPEICHERT. Vorher endete die Angabe hier und im
         // XML stand fest `C62` — auf einem unveränderlichen Beleg.
         unit: p.unit ?? null,
@@ -979,8 +1057,18 @@ export class InvoiceService {
         netAmount: centAsDecimal(p.netCent),
         taxAmount: centAsDecimal(p.taxCent),
         grossAmount: centAsDecimal(p.grossCent),
+        taxCategory: p.taxCategory ?? 'S',
+        taxExemptionReason: p.taxExemptionReason ?? null,
       })),
       sumGrossCent: calculated.sumGrossCent,
     };
   }
+}
+
+/**
+ * Ende der Aufbewahrungsfrist: 31.12. des Jahres der Festschreibung plus
+ * `years` Jahre (Fachdatum, UTC-Mitternacht wie `@db.Date`).
+ */
+export function retentionEnd(finalizedAt: Date, years: number): Date {
+  return new Date(Date.UTC(finalizedAt.getUTCFullYear() + years, 11, 31));
 }

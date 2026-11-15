@@ -20,6 +20,8 @@ export interface AdoptionLines {
   unitPriceNetCent: number;
   /** UN/ECE Rec. 20 — Pauschale, Monat oder Jahr. */
   unit: 'C62' | 'MON' | 'ANN';
+  /** Stufe, aus der der Posten stammt; das Etikett setzt der Server aus der Preisliste. */
+  priceTierKey: string;
 }
 
 /**
@@ -115,6 +117,7 @@ export function InvoicePriceSuggestion({
                       label: suggestion.tier?.label ?? '',
                       unitPriceNetCent: suggestion.tier?.monthlyCent ?? 0,
                       unit: 'MON',
+                      priceTierKey: suggestion.tier?.key ?? '',
                     })
                   }
                 >
@@ -135,6 +138,7 @@ export function InvoicePriceSuggestion({
                       unitPriceNetCent:
                         suggestion.tier?.halfYearlyCent ?? 0,
                       unit: 'C62',
+                      priceTierKey: suggestion.tier?.key ?? '',
                     })
                   }
                 >
@@ -147,6 +151,7 @@ export function InvoicePriceSuggestion({
                       label: suggestion.tier?.label ?? '',
                       unitPriceNetCent: suggestion.tier?.yearlyCent ?? 0,
                       unit: 'ANN',
+                      priceTierKey: suggestion.tier?.key ?? '',
                     })
                   }
                 >
@@ -162,6 +167,7 @@ export function InvoicePriceSuggestion({
                     label: t('components.invoicePriceSuggestion.label3', { value: suggestion.tier?.label ?? '' }),
                     unitPriceNetCent: suggestion.tier?.setupCent ?? 0,
                     unit: 'C62',
+                    priceTierKey: suggestion.tier?.key ?? '',
                   })
                 }
               >

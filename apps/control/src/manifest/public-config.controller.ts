@@ -4,6 +4,8 @@ import { ManifestService } from './manifest.service';
 export interface PublicConfiguration {
   productName: string;
   logoUrl: string | null;
+  /** True, sobald die Verwaltung an eine Software angebunden ist (Name + Slug im Manifest). */
+  bound: boolean;
 }
 
 /**
@@ -18,7 +20,10 @@ export class PublicConfigController {
 
   @Get()
   read(): PublicConfiguration {
-    const { productName, logoUrl } = this.manifest.ui;
-    return { productName, logoUrl };
+    return {
+      productName: this.manifest.displayName,
+      logoUrl: this.manifest.ui.logoUrl,
+      bound: this.manifest.bound,
+    };
   }
 }

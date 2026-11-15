@@ -8,10 +8,17 @@ returning it (veraPDF + EN 16931 Schematron via Mustangproject, Apache 2.0).
 Chromium (headless) lays out the HTML; `src/java/InvoiceService.java` ties
 Chromium and Mustangproject together using only the JDK HTTP server.
 
-- **Contract** (called by `apps/control/src/invoices/document/invoice-renderer.client.ts`):
+- **Contract** (called by `apps/control/src/invoices/document/invoice-renderer.client.ts`,
+  default URL `http://invoice-renderer:8080`, overridable via `RECHNUNGSDIENST_URL`):
   `POST /erzeuge` with JSON `{"html": <base64>, "xml": <base64>, "profil": "EN16931"}`
   returns the PDF (`200`), or `422` with the validation report if the result is
   not valid, or `400` for malformed input. `GET /gesundheit` is the health check.
+  `profil` is `EN16931` (default; the ZUGFeRD PDF) or `XRECHNUNG` (also `BASIC`,
+  `BASICWL`, `MINIMUM`, `CIUS`, `EXTENDED`); it must match the guideline string
+  inside the XML (`...#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0` only with
+  `XRECHNUNG`), otherwise the service answers `400`. The pure XRechnung XML is
+  produced by the API itself (`GET /api/invoices/:id/xrechnung`) and needs no
+  renderer call.
   The German path and field names are part of this contract; change them on both
   sides at once.
 - **No authentication.** Expose it only inside the Compose network (no `ports:`).
@@ -54,8 +61,13 @@ HTTP-Dienst: macht aus Rechnungs-HTML und ZUGFeRD-XML (EN 16931) ein
 nach, bevor er es herausgibt (`422` mit Prüfbericht, wenn es nicht besteht).
 
 - **Aufruf:** `POST /erzeuge`, JSON `{"html": <base64>, "xml": <base64>, "profil": "EN16931"}`;
-  Gesundheitsprüfung `GET /gesundheit`. Die deutschen Pfad- und Feldnamen sind
-  Teil des Vertrags mit der API; nur gemeinsam ändern.
+  Gesundheitsprüfung `GET /gesundheit`. Standardadresse für die API:
+  `http://invoice-renderer:8080` (`RECHNUNGSDIENST_URL`). Die deutschen Pfad- und
+  Feldnamen sind Teil des Vertrags mit der API; nur gemeinsam ändern.
+- **Profil:** `EN16931` (Vorgabe, ZUGFeRD-PDF) oder `XRECHNUNG`; das Profil muss
+  zum Kennstring im XML passen (XRechnung-Kennstring nur mit `XRECHNUNG`),
+  sonst `400`. Die reine XRechnung-XML erzeugt die API selbst
+  (`GET /api/invoices/:id/xrechnung`), dafür ist kein Dienstaufruf nötig.
 - **Keine Anmeldung:** nur im Compose-Netz erreichbar machen, nie veröffentlichen.
 - **Kein Netzzugang nötig:** Der Dienst baut keine ausgehenden Verbindungen auf,
   der Browser löst keine Namen auf. Wo möglich in einem internen Netz ohne

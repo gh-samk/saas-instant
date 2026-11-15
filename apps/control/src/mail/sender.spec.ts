@@ -111,7 +111,7 @@ describe('Absenderadressen', () => {
   it('fällt ohne Umgebung und Manifest auf die Beispiel-Domäne zurück', () => {
     const a = senderAddresses(config());
     expect(a.domain).toBe('example.com');
-    expect(a.admin).toBe('saas-instant <noreply@example.com>');
+    expect(a.admin).toBe('SAAS Verwaltung <noreply@example.com>');
   });
 
   /**

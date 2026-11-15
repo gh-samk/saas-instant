@@ -14,6 +14,7 @@ import { Card, Button, EmptyState, Skeleton, useToast } from '@saas-instant/ui';
 import { Field } from './DetailBlock';
 import { InstanceCreateDialog } from './InstanceCreateDialog';
 import { InstanceArchiveDialog } from './InstanceArchiveDialog';
+import { InstanceBackups } from './InstanceBackups';
 import { InstanceStatusBadge } from './InstanceStatusBadge';
 import { errorText } from '../lib/api-client';
 import {
@@ -371,6 +372,7 @@ export function InstanceCard({
           />
         </>
       ) : (
+        <>
         <InstanceContent
           instance={instance}
           companyName={companyName}
@@ -391,6 +393,17 @@ export function InstanceCard({
           onDiscard={() => void discard()}
           onAgainCheck={() => void checkAgain()}
         />
+        {/* Sicherungen und Wiederherstellung als NEUE Instanz. Nur für eine
+            laufende Instanz sinnvoll; nichts davon löscht (R1). */}
+        {instance.status === 'active' && (
+          <InstanceBackups
+            instanceId={instance.id}
+            subdomain={instance.subdomain}
+            totpPossible={totpPossible}
+            onAdopted={() => void load(false)}
+          />
+        )}
+        </>
       )}
 
       <InstanceCreateDialog
@@ -950,7 +963,8 @@ function Active({
 
       {/* Zuständigkeitsklärung, keine Statusmeldung — deshalb steht sie immer
           und fällt nicht unter „kein Dauerhäkchen". Es gibt hier bewusst
-          keinen Wiederherstellungsknopf (E3-15). */}
+          keinen Knopf zum Zurückspielen in die bestehende Instanz (E3-15);
+          eine NEUE Instanz lässt sich im Bereich „Sicherungen" herstellen. */}
       <p className="mt-2 text-xs text-leise">
         {t('components.instanceCard.text47')}</p>
     </>

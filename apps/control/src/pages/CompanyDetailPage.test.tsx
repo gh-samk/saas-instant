@@ -60,6 +60,11 @@ const COMPANY = {
   status: 'pilot_running',
   lastStatusChangeAt: '2026-05-01',
   priceTier: 'Standard',
+  buyerType: 'business',
+  vatId: null,
+  buyerReference: null,
+  electronicAddress: null,
+  electronicAddressScheme: null,
   paymentInterval: 'yearly',
   paymentMethod: 'bank_transfer',
   paymentDetailsStored: true,
@@ -465,6 +470,58 @@ describe('Organisations-Detailseite', () => {
         (c) => (c[1] as RequestInit | undefined)?.method === 'PATCH',
       ),
     ).toBe(false);
+  });
+
+  it('verlangt bei einer Behörde die Leitweg-ID und speichert sonst die E-Rechnungsdaten', async () => {
+    const called = setFetchReady();
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'E-Rechnung bearbeiten' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Art der Empfängerin'), {
+      target: { value: 'authority' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    expect(
+      await screen.findByText(/ist die Leitweg-ID Pflicht/),
+    ).toBeInTheDocument();
+    const patchCalls = () =>
+      called.mock.calls.filter(
+        (c) => (c[1] as RequestInit | undefined)?.method === 'PATCH',
+      );
+    expect(patchCalls()).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText(/Leitweg-ID \(Pflicht\)/), {
+      target: { value: '04011000-1234512345-06' },
+    });
+    fireEvent.change(screen.getByLabelText('USt-IdNr.'), {
+      target: { value: 'de 123456789' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() => expect(patchCalls()).toHaveLength(1));
+    const body = JSON.parse(String((patchCalls()[0][1] as RequestInit).body));
+    expect(body).toMatchObject({
+      buyerType: 'authority',
+      buyerReference: '04011000-1234512345-06',
+      vatId: 'DE123456789',
+      electronicAddress: null,
+      electronicAddressScheme: null,
+    });
+  });
+
+  it('zeigt die E-Rechnungsdaten in der Übersicht', async () => {
+    setFetchReady();
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    expect(
+      screen.getByRole('heading', { name: 'E-Rechnung' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Unternehmen')).toBeInTheDocument();
   });
 
   it('zeigt bei 404 einen benannten Weg zurück, keinen leeren Bildschirm', async () => {

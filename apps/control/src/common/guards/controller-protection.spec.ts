@@ -72,6 +72,12 @@ const WITHOUT_SESSION: Record<string, string> = {
     '(SicherungSchluesselGuard), zeitkonstant verglichen, ohne den die Route ' +
     'gar nicht existiert (404). Die Route legt nur an und berichtigt; sie ' +
     'kann nichts löschen und nichts zurückspielen.',
+  InternalBackupPlanController:
+    'Die Instanzliste für den Sicherungs-Agent (GET /api/internal/backup-plan) — ' +
+    'ein Dienst im Compose-Netz, kein Mensch mit Sitzung. An die Stelle der ' +
+    'Sitzung tritt derselbe Schlüssel im Header wie beim Meldeweg ' +
+    '(BackupKeyGuard, zeitkonstant verglichen, ohne gesetzten Schlüssel gibt ' +
+    'es die Route nicht: 404). Sie liest nur und liefert Namen, keine Geheimnisse.',
   FlagPublicController:
     'Der Stand der Funktionsschalter für die Kundeninstanzen, anonym und rein ' +
     'lesend: einzelne Wahrheitswerte ohne Personenbezug und ohne Kennung. ' +
@@ -184,6 +190,10 @@ const WITHOUT_SECOND_FACTOR_CONTROLLER: Record<string, string> = {
     'während eines laufenden Versands alle paar Sekunden das Passwort zu ' +
     'verlangen ([W6]). Das VERSCHICKEN liegt ausdrücklich NICHT hier, ' +
     'sondern am RundmailVersandController.',
+  InternalBackupPlanController:
+    'Kein Benutzer, kein Faktor. An seine Stelle tritt der Schlüssel im ' +
+    'Header und das Rate-Limit — dieselbe Abwägung wie beim BackupController; ' +
+    'die Route ist rein lesend.',
   FlagPublicController:
     'Kein Benutzer, kein Faktor — der Aufrufer ist eine Instanz. Die Antwort ' +
     'sind Wahrheitswerte ohne Personenbezug; die Route schreibt nichts.',

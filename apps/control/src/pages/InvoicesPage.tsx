@@ -6,6 +6,7 @@ import {
   Eye,
   Landmark,
   Mail,
+  FileArchive,
   Pencil,
   ReceiptEuro,
   Wallet,
@@ -20,6 +21,8 @@ import {
   Table,
 } from '@saas-instant/ui';
 import { InvoiceStatusBadge } from '../components/InvoiceStatusBadge';
+import { GobdExportDialog } from '../components/GobdExportDialog';
+import { useAuth } from '../context/AuthContext';
 import { errorText } from '../lib/api-client';
 import {
   fetchAllInvoices,
@@ -67,6 +70,11 @@ export function InvoicesPage() {
   const t = useT();
   const [parameter, setParameter] = useSearchParams();
   const navigate = useNavigate();
+  const { state } = useAuth();
+  const [exportOpen, setExportOpen] = useState(false);
+  // Der Export ist Inhabern und Administratoren vorbehalten (wie im Backend).
+  const mayExport =
+    state?.user.role === 'owner' || state?.user.role === 'administrator';
 
   const chipValue = parameter.get('state') ?? '';
   const activeChip =
@@ -132,10 +140,18 @@ export function InvoicesPage() {
         {/* Es gibt keinen globalen „+ Neu": Eine Rechnung braucht eine
             Organisation, und die wählt man dort, wo sie steht. Der Knopf
             führt deshalb in die Liste, nicht in ein leeres Formular. */}
-        <Button variant="secondary" onClick={() => navigate('/companies')}>
-          <ReceiptEuro className="h-4 w-4" aria-hidden="true" />
-          {t('rechnungen.createAtCompany')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          {mayExport && (
+            <Button variant="secondary" onClick={() => setExportOpen(true)}>
+              <FileArchive className="h-4 w-4" aria-hidden="true" />
+              {t('gobd.exportButton')}
+            </Button>
+          )}
+          <Button variant="secondary" onClick={() => navigate('/companies')}>
+            <ReceiptEuro className="h-4 w-4" aria-hidden="true" />
+            {t('rechnungen.createAtCompany')}
+          </Button>
+        </div>
       </div>
 
       {/* DREI KACHELN, in der Reihenfolge des Entwurfs. Keine Entwurfskachel —
@@ -328,6 +344,12 @@ export function InvoicesPage() {
           )}
         </>
       )}
+
+      <GobdExportDialog
+        open={exportOpen}
+        totpPossible={state?.totpSetUp ?? false}
+        onClose={() => setExportOpen(false)}
+      />
     </section>
   );
 }

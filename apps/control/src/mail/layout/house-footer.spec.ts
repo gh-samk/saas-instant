@@ -35,8 +35,8 @@ afterEach(() => {
 });
 
 describe('Ohne Eintrag im Manifest', () => {
-  it('ist die Marke neutral: Produktname saas-instant, keine Zeilen, keine Verweise', () => {
-    expect(mailBrand().name).toBe('saas-instant');
+  it('ist die Marke neutral: Produktname SAAS Verwaltung, keine Zeilen, keine Verweise', () => {
+    expect(mailBrand().name).toBe('SAAS Verwaltung');
     expect(houseDetails()).toEqual([]);
     expect(houseLinks()).toEqual([]);
     expect(houseUrl()).toBeNull();

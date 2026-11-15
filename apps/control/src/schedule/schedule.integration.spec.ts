@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 import { datePlusDays, today } from '@saas-instant/shared';
 import { AuditService, AUDIT_ACTION } from '../audit/audit.service';
 import { datePlusMonths } from '../common/calendar';
@@ -66,7 +67,7 @@ async function ripeReview(status: 'pilot_running' | 'paying') {
 }
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { actor: Trigger.actor } });
+  await truncateAuditLog(prisma);
   await cleanUp(Prefix);
   await disconnect();
 });
@@ -354,7 +355,7 @@ describe('Ein Fehler reißt die übrigen nicht mit', () => {
 
 describe('Nachweis des Laufs', () => {
   it('schreibt zu jedem Lauf einen Audit-Eintrag mit Zählwerk', async () => {
-    await prisma.auditLog.deleteMany({ where: { actor: Trigger.actor } });
+    await truncateAuditLog(prisma);
     const result = await service.runFrom(Trigger);
 
     const runs = await prisma.auditLog.findMany({

@@ -5,6 +5,7 @@ import { CODE_MAX_FAILED_ATTEMPTS } from '../auth/email-login-code.service';
 import { BusinessError } from '../common/errors/business-error';
 import { mailBrand } from '@saas-instant/shared';
 import { senderAddresses } from './sender';
+import { displayName } from './mail-brand';
 import { htmlFromText, transactionalLayout } from './layout';
 import { buildTransport, transportEnvironment } from './transport';
 
@@ -442,11 +443,11 @@ export class MailService {
   ): Promise<void> {
     const name = mailBrand().name;
     const subject = forSetup
-      ? `${name} Verwaltung – Adresse für Anmeldecodes bestätigen`
-      : `${name} Verwaltung – Anmeldecode`;
+      ? `${displayName(name)} – Adresse für Anmeldecodes bestätigen`
+      : `${displayName(name)} – Anmeldecode`;
     const introduction = forSetup
       ? 'du möchtest künftig Anmeldecodes an diese Adresse bekommen. Bestätige das mit diesem Code:'
-      : `für die Anmeldung in der ${name}-Verwaltung wurde ein Code angefordert:`;
+      : `für die Anmeldung in der ${displayName(name, '-')} wurde ein Code angefordert:`;
     const text =
       `Hallo,\n\n${introduction}\n\n` +
       `    ${code}\n\n` +
@@ -501,7 +502,7 @@ export class MailService {
   ): Promise<void> {
     const text =
       `Hallo,\n\n` +
-      `für dein Konto in der ${mailBrand().name}-Verwaltung wurde beantragt, Anmeldecodes ` +
+      `für dein Konto in der ${displayName(mailBrand().name, '-')} wurde beantragt, Anmeldecodes ` +
       `künftig an eine ANDERE Adresse zu schicken:\n\n` +
       `    bisher: ${previous}\n` +
       `    neu:    ${newAddress}\n\n` +
@@ -512,7 +513,7 @@ export class MailService {
       `deine angemeldete Sitzung.\n`;
     await this.send(
       previous,
-      `${mailBrand().name} Verwaltung – Achtung: Adresse für Anmeldecodes soll geändert werden`,
+      `${displayName(mailBrand().name)} – Achtung: Adresse für Anmeldecodes soll geändert werden`,
       text,
       'Adresswechsel-Hinweis',
     );

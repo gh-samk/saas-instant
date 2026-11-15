@@ -6,6 +6,7 @@ import { loadManifest, manifestPresets, checkManifest } from './manifest.loader'
 import { ManifestError } from './manifest.types';
 import { ManifestService } from './manifest.service';
 import { PublicConfigController } from './public-config.controller';
+import { isBound, PRODUCT_PRESET } from './sections/product';
 
 const EXAMPLE = join(__dirname, '..', '..', '..', '..', 'saas-instant.manifest.example.yaml');
 
@@ -20,7 +21,8 @@ describe('Manifest laden', () => {
   it('liefert neutrale Vorgaben, wenn die Datei fehlt', () => {
     const e = loadManifest('/nicht/vorhanden.yaml');
     expect(e.loadedFrom).toBeNull();
-    expect(e.manifest.product.name).toBe('saas-instant');
+    expect(e.manifest.product.name).toBe('SAAS Verwaltung');
+    expect(e.manifest.mail.senderName).toBe('SAAS Verwaltung');
     expect(e.manifest.provisioning.instanceDomainBase).toBe('example.com');
     expect(e.manifest.ui.logoUrl).toBeNull();
   });
@@ -39,11 +41,27 @@ describe('Manifest laden', () => {
   });
 
   it('ergänzt fehlende Abschnitte mit Vorgaben', () => {
-    const p = tempFile('m.yaml', 'product:\n  name: Nur Name\n');
+    // Geändert: Ein Name ohne Slug ist seit der Bindung ein Manifestfehler (eigener Test unten).
+    const p = tempFile('m.yaml', 'product:\n  name: Nur Name\n  slug: nur-name\n');
     const m = loadManifest(p).manifest;
     expect(m.product.name).toBe('Nur Name');
-    expect(m.product.slug).toBe('saas-instant');
+    expect(m.product.slug).toBe('nur-name');
     expect(m.billing.tiers).toEqual([]);
+    // Eine Namensquelle: Mail-Absender folgt dem Produktnamen, solange er nicht überschrieben ist.
+    expect(m.mail.senderName).toBe('Nur Name');
+  });
+
+  it('product.name ohne product.slug ist ein Manifestfehler', () => {
+    const p = tempFile('m.yaml', 'product:\n  name: Nur Name\n');
+    expect(() => loadManifest(p)).toThrow(/product\.slug/);
+  });
+
+  it('mail.senderName überschreibt den Produktnamen', () => {
+    const m = checkManifest({
+      product: { name: 'X', slug: 'x' },
+      mail: { senderName: 'Eigener' },
+    });
+    expect(m.mail.senderName).toBe('Eigener');
   });
 
   it('meldet kaputtes YAML mit Dateiname', () => {
@@ -129,14 +147,59 @@ describe('ManifestService + GET /api/public-config', () => {
     process.env['MANIFEST_PATH'] = '/nicht/da.yaml';
     const { s } = await build();
     expect(s.loadedFrom).toBeNull();
-    expect(s.ui.productName).toBe('saas-instant');
+    expect(s.ui.productName).toBeNull();
+    expect(s.displayName).toBe('SAAS Verwaltung');
+    expect(s.bound).toBe(false);
+  });
+
+  it('public-config ohne Anbindung: Preset-Name, bound=false', async () => {
+    process.env['MANIFEST_PATH'] = '/nicht/da.yaml';
+    const { c } = await build();
+    expect(c.read()).toEqual({
+      productName: 'SAAS Verwaltung',
+      logoUrl: null,
+      bound: false,
+    });
+  });
+
+  it('public-config mit Anbindung: Softwarename, bound=true', async () => {
+    const p = tempFile('m.yaml', 'product:\n  name: Beispielprodukt\n  slug: beispielprodukt\n');
+    process.env['MANIFEST_PATH'] = p;
+    const { c } = await build();
+    expect(c.read()).toMatchObject({ productName: 'Beispielprodukt', bound: true });
+  });
+
+  it.each(['Mein Produkt', 'SAAS Verwaltung', '   '])(
+    'Platzhaltername %j gilt nicht als angebunden',
+    (name) => {
+      expect(isBound({ ...PRODUCT_PRESET, name, slug: 'x' })).toBe(false);
+    },
+  );
+
+  it('Beispielmanifest mit dem Platzhalter „Mein Produkt": bound=false', async () => {
+    const p = tempFile('m.yaml', 'product:\n  name: Mein Produkt\n  slug: mein-produkt\n');
+    process.env['MANIFEST_PATH'] = p;
+    const { c } = await build();
+    expect(c.read()).toMatchObject({ productName: 'SAAS Verwaltung', bound: false });
+  });
+
+  it('ui.productName ist nur ein Override und wirkt erst nach der Anbindung', async () => {
+    const unbound = tempFile('a.yaml', 'ui:\n  productName: Override\n');
+    process.env['MANIFEST_PATH'] = unbound;
+    expect((await build()).c.read().productName).toBe('SAAS Verwaltung');
+    const bound = tempFile(
+      'b.yaml',
+      'product:\n  name: Beispielprodukt\n  slug: beispielprodukt\nui:\n  productName: Override\n',
+    );
+    process.env['MANIFEST_PATH'] = bound;
+    expect((await build()).c.read().productName).toBe('Override');
   });
 
   it('öffentlicher Endpunkt liefert nur den UI-Teil', async () => {
     process.env['MANIFEST_PATH'] = EXAMPLE;
     const { c } = await build();
     const response = c.read();
-    expect(Object.keys(response).sort()).toEqual(['logoUrl', 'productName']);
+    expect(Object.keys(response).sort()).toEqual(['bound', 'logoUrl', 'productName']);
     expect(JSON.stringify(response)).not.toContain('billing@example.com');
   });
 

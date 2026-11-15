@@ -9,12 +9,14 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { IsHttpUrl } from '../../common/validators/is-http-url';
 import type {
+  BuyerType,
   ConsentStatus,
   Source,
   CompanyStatus,
@@ -59,6 +61,19 @@ export const Sources: readonly Source[] = [
   'referral',
   'event',
 ];
+
+/** Art der Rechnungsempfängerin (E-Rechnung): Unternehmen, Behörde, Privatperson. */
+export const BuyerTypes: readonly BuyerType[] = [
+  'business',
+  'authority',
+  'consumer',
+];
+
+/**
+ * Schemata der elektronischen Adresse (BT-49, ISO 6523 bzw. EAS-Liste).
+ * `EM` = E-Mail, `0204` = Leitweg-ID, `9930` = deutsche USt-IdNr.
+ */
+export const ElectronicAddressSchemes = ['EM', '0204', '9930', '0088', '0060'];
 
 export const CONSENT_STATUS: readonly ConsentStatus[] = [
   'unconfirmed',
@@ -114,6 +129,26 @@ export class CompanyMasterDataDto {
   @IsOptional() @IsString() @MaxLength(120) deputyRole?: string;
 
   @IsOptional() @IsString() @MaxLength(60) priceTier?: string;
+
+  // --- E-Rechnung (ZUGFeRD / XRechnung) -----------------------------------
+  /** Unternehmen (Vorgabe), Behörde (Leitweg-ID Pflicht) oder Privatperson. */
+  @IsOptional() @IsIn(BuyerTypes as string[]) buyerType?: BuyerType;
+  /** Umsatzsteuer-Identifikationsnummer der Empfängerin (BT-48). */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{2}[0-9A-Za-z+*.]{2,12}$/, {
+    message: 'Bitte eine gültige USt-IdNr. angeben (z. B. DE123456789).',
+  })
+  vatId?: string;
+  /** Leitweg-ID bzw. Käuferreferenz (BT-10). */
+  @IsOptional() @IsString() @MaxLength(46) buyerReference?: string;
+  /** Elektronische Adresse der Empfängerin (BT-49). */
+  @IsOptional() @IsString() @MaxLength(200) electronicAddress?: string;
+  @IsOptional()
+  @IsIn(ElectronicAddressSchemes, {
+    message: 'Unbekanntes Schema der elektronischen Adresse.',
+  })
+  electronicAddressScheme?: string;
   @IsOptional() @IsIn(PaymentIntervals as string[]) paymentInterval?: PaymentInterval;
 
   /**

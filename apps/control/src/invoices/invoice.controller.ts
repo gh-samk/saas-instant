@@ -18,8 +18,11 @@ import type { SessionUser } from '../auth/session.service';
 import { sourceFrom } from '../common/inquiry-source';
 import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { SessionGuard } from '../common/guards/session.guard';
-import { InvoiceDocumentService } from './document.service';
+import { InvoiceDocumentService, type DocumentFormat } from './document.service';
 import { PricingService } from './pricing.service';
+import { IntegrityService } from './integrity.service';
+import type { IntegrityResult } from './integrity';
+import { InvoiceHistoryService, type HistoryEntry } from './invoice-history.service';
 import type { PriceSuggestion } from './pricing.types';
 import {
   InvoiceService,
@@ -75,6 +78,8 @@ export class InvoiceController {
     private readonly invoices: InvoiceService,
     private readonly prices: PricingService,
     private readonly documents: InvoiceDocumentService,
+    private readonly integrity: IntegrityService,
+    private readonly history: InvoiceHistoryService,
   ) {}
 
   // ------------------------------------------------------------ Preislogik
@@ -147,6 +152,27 @@ export class InvoiceController {
   }
 
   /**
+   * INTEGRITAETSPRUEFUNG (GoBD): SHA-256 der gespeicherten Dokumente gegen die
+   * beim Erzeugen festgehaltenen Pruefsummen, dazu der Nummernkreis des Jahres.
+   * Rein lesend; eine Abweichung steht zusaetzlich im Audit-Log.
+   */
+  @Get('invoices/:id/integrity')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async integrityCheck(
+    @LoggedInUser() user: SessionUser,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ): Promise<IntegrityResult> {
+    return this.integrity.check(id, asActor(user), sourceFrom(req));
+  }
+
+  /** Der Verlauf der Rechnung aus dem Audit-Log: Benutzer, Zeit (UTC), Aktion. */
+  @Get('invoices/:id/history')
+  async historyOf(@Param('id') id: string): Promise<HistoryEntry[]> {
+    return this.history.history(id);
+  }
+
+  /**
    * Ändert einen ENTWURF.
    *
    * Der Pfad sagt es und der Dienst prüft es. Wer die Kennung einer
@@ -187,12 +213,12 @@ export class InvoiceController {
   // ------------------------------------------------------ Dokument, Versand
 
   /**
-   * Das PDF/A-3b mit eingebettetem `factur-x.xml`.
+   * Das ZUGFeRD-PDF (PDF/A-3b mit eingebettetem `factur-x.xml`).
    *
    * Erzeugt es beim ersten Aufruf und gibt danach immer dasselbe heraus.
    * `GET`, obwohl beim ersten Mal etwas geschrieben wird: Das Geschriebene ist
-   * das Dokument zu einem bereits bestehenden Beleg, kein neuer Vorgang — und
-   * jeder weitere Aufruf ist folgenlos.
+   * das Dokument zu einem bereits bestehenden Beleg, kein neuer Vorgang.
+   * JEDER Abruf wird protokolliert (`invoice.document_downloaded`).
    */
   @Get('invoices/:id/document')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -202,28 +228,52 @@ export class InvoiceController {
     @Req() req: Request,
     @Res() response: Response,
   ): Promise<void> {
-    const { pdf, filename } = await this.documents.getOrCreate(
+    await this.send('pdf', id, user, req, response);
+  }
+
+  /** Dieselbe Rechnung als reines Factur-X-CII-XML (EN 16931) für die Buchhaltung. */
+  @Get('invoices/:id/xml')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async xml(
+    @LoggedInUser() user: SessionUser,
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    await this.send('xml', id, user, req, response);
+  }
+
+  /**
+   * Die XRechnung (CII 3.0) als reines XML — für Behörden. Unabhängig vom PDF.
+   */
+  @Get('invoices/:id/xrechnung')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async xrechnung(
+    @LoggedInUser() user: SessionUser,
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    await this.send('xrechnung', id, user, req, response);
+  }
+
+  private async send(
+    format: DocumentFormat,
+    id: string,
+    user: SessionUser,
+    req: Request,
+    response: Response,
+  ): Promise<void> {
+    const { content, filename, contentType } = await this.documents.download(
+      format,
       id,
       asActor(user),
       sourceFrom(req),
     );
     response
       .status(200)
-      .setHeader('Content-Type', 'application/pdf')
+      .setHeader('Content-Type', contentType)
       .setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-      .send(pdf);
+      .send(content);
   }
-
-  /** Dieselbe Rechnung als reines CII-XML für die Buchhaltung. */
-  @Get('invoices/:id/xml')
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  async xml(@Param('id') id: string, @Res() response: Response): Promise<void> {
-    const { xml, filename } = await this.documents.getXml(id);
-    response
-      .status(200)
-      .setHeader('Content-Type', 'application/xml; charset=utf-8')
-      .setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-      .send(xml);
-  }
-
 }

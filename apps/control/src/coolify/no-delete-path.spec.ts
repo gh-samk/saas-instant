@@ -325,11 +325,42 @@ describe('R4/R6 — nichts wird automatisch gelöscht', () => {
 });
 
 describe('Kein Wiederherstellungsknopf (E3-15)', () => {
+  /**
+   * BEWUSST GEÄNDERTER PRÜFGEGENSTAND (Teil F, Sicherung/Wiederherstellung).
+   *
+   * E3-15 verbot jeden Wiederherstellungs-Code in den Instanz-Dateien: Die
+   * Verwaltung durfte nichts zurückspielen. Mit Teil F gibt es genau EINEN
+   * erlaubten Weg — die Wiederherstellung als NEUE Instanz, ausgeführt vom
+   * Sicherungs-Agent, angestoßen von der Verwaltung hinter Sitzung, zweitem
+   * Faktor und Eintippen des Instanznamens. Weiterhin verboten bleibt jede
+   * Wiederherstellung IN eine bestehende Instanz und jede in `coolify/` und
+   * `provisioning/`.
+   *
+   * Die Ausnahme ist eine Datei-Liste, kein Freibrief: Für diese Dateien
+   * prüft `backup-settings/no-delete-backup.spec.ts` zusätzlich, dass sie
+   * gegenüber dem Provisioner nur create/status/stop kennen und nirgends ein
+   * Löschaufruf steht.
+   */
+  const RESTORE_FILES = [
+    'instances/instance-restore.service.ts',
+    'instances/instance-restore.errors.ts',
+    'instances/instance-backups.controller.ts',
+    'instances/dto/instance-backup.dto.ts',
+  ];
+
   it('kennt keinen Endpunkt und keinen Client-Aufruf zum Zurückspielen', () => {
     // Nur die Instanz-/Coolify-Dateien: „Wiederherstellungscode" ist im
     // Zugangsbereich ein ganz anderer, legitimer Begriff.
     const pattern = /\b(wiederherstell|restore|einspiel|zurueckspiel)[A-Za-z]*\s*\(/i;
-    const hits = codeLines().filter(({ row }) => pattern.test(row));
+    const hits = codeLines()
+      .filter(({ path }) => !RESTORE_FILES.includes(path))
+      .filter(({ row }) => pattern.test(row));
     expect(hits.map(asLocation)).toEqual([]);
+  });
+
+  it('hält die Ausnahme aus coolify/ und provisioning/ heraus', () => {
+    expect(RESTORE_FILES.every((path) => path.startsWith('instances/'))).toBe(true);
+    const present = new Set(sourceFiles().map((d) => d.path));
+    for (const path of RESTORE_FILES) expect(present.has(path)).toBe(true);
   });
 });

@@ -25,6 +25,8 @@ import { invoiceOverdue } from './sources/invoice-overdue.source';
 import { statusChangeAutomatic } from './sources/status-change-automatic.source';
 import { tierCheck } from './sources/tier-check.source';
 import { reviewDate } from './sources/review-date.source';
+import { documentTampered } from './sources/document-tampered.source';
+import { controlBackupMissing } from './sources/control-backup-missing.source';
 
 /**
  * Alle Quellen. Eine neue Aufgabenart wird HIER eingetragen — und sonst
@@ -68,6 +70,10 @@ export const Sources: readonly TaskSource[] = [
   invoiceDue,
   tierCheck,
   outboxDisrupted,
+  // GoBD-Integritaet (Pruefsumme / Nummernkreis), live gerechnet.
+  documentTampered,
+  // Sicherung der Verwaltung (Datenbank/Rechnungsarchiv) ueberfaellig.
+  controlBackupMissing,
 ];
 
 /** Voreinstellung für „seit dem letzten Blick", wenn niemand etwas sagt. */

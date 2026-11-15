@@ -132,3 +132,40 @@ describe('berechne', () => {
     ).toThrow(/ganze Cent/);
   });
 });
+
+import { checkTaxCategory } from './invoice.amount';
+
+describe('Steuerkategorien je Posten', () => {
+  it('bildet je Kategorie, Satz und Grund eine eigene Steueraufteilung', () => {
+    const result = calculate([
+      { label: 'a', quantity: 1, unitPriceNetCent: 10_000, taxRate: 19 },
+      { label: 'b', quantity: 1, unitPriceNetCent: 5_000, taxRate: 0, taxCategory: 'E', taxExemptionReason: '§ 4 Nr. 21 UStG' },
+      { label: 'c', quantity: 1, unitPriceNetCent: 2_000, taxRate: 0, taxCategory: 'Z' },
+      { label: 'd', quantity: 1, unitPriceNetCent: 1_000, taxRate: 0, taxCategory: 'E', taxExemptionReason: '§ 4 Nr. 22 UStG' },
+    ]);
+    expect(result.taxBreakdown.map((t) => [t.category, t.record, t.basisCent, t.taxCent])).toEqual([
+      ['S', 19, 10_000, 1_900],
+      ['E', 0, 5_000, 0],
+      ['Z', 0, 2_000, 0],
+      ['E', 0, 1_000, 0],
+    ]);
+    expect(result.sumTaxCent).toBe(1_900);
+    expect(result.sumGrossCent).toBe(19_900);
+  });
+
+  it('prüft Kategorie, Satz und Befreiungsgrund', () => {
+    expect(checkTaxCategory(1, 'S', 19, undefined)).toEqual({ reason: null, error: [] });
+    expect(checkTaxCategory(1, 'Z', 0, undefined)).toEqual({ reason: null, error: [] });
+    expect(checkTaxCategory(1, 'E', 0, ' § 4 Nr. 21 ')).toEqual({ reason: '§ 4 Nr. 21', error: [] });
+    expect(checkTaxCategory(1, 'S', 0, undefined).error[0]).toMatch(/Regelsteuer/);
+    expect(checkTaxCategory(2, 'E', 0, undefined).error[0]).toMatch(/Posten 2.*Befreiungsgrund/);
+    expect(checkTaxCategory(1, 'Z', 7, undefined).error[0]).toMatch(/Steuersatz 0/);
+    expect(checkTaxCategory(1, 'X', 0, undefined).error[0]).toMatch(/Unbekannte/);
+  });
+
+  it('setzt für AE, K und G einen Standardgrund, wenn keiner genannt ist', () => {
+    expect(checkTaxCategory(1, 'AE', 0, undefined).reason).toMatch(/§ 13b/);
+    expect(checkTaxCategory(1, 'K', 0, undefined).reason).toMatch(/innergemeinschaftlich/i);
+    expect(checkTaxCategory(1, 'G', 0, undefined).reason).toMatch(/Ausfuhr/);
+  });
+});

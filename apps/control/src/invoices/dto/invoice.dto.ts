@@ -18,6 +18,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { TAX_CATEGORIES } from '../invoice.amount';
 import { IsCalendarDate } from '../../common/validators/is-calendar-date';
 
 /**
@@ -80,6 +81,30 @@ export class InvoiceLineDto {
   @IsString()
   @MaxLength(3)
   unit?: string;
+
+  /**
+   * Preisstufe, aus der der Posten stammt (Preisvorschlag). Nur im ENTWURF
+   * schreibbar; mit dem Festschreiben friert der Bezug ein. Das Etikett setzt
+   * der Dienst aus der Preisliste, nicht der Client.
+   */
+  @IsOptional() @IsString() @MaxLength(60) priceTierKey?: string;
+  @IsOptional() @IsString() @MaxLength(120) priceTierLabel?: string;
+
+  /**
+   * Steuerkategorie nach UNTDID 5305. Vorgabe `S` (Regelsatz). Alle anderen
+   * verlangen den Satz 0; E, AE, K, G und O zusätzlich einen Befreiungsgrund.
+   */
+  @IsOptional()
+  @IsIn(TAX_CATEGORIES as readonly string[], {
+    message: 'Unbekannte Steuerkategorie (erlaubt: S, Z, E, AE, K, G, O).',
+  })
+  taxCategory?: string;
+
+  /** Befreiungsgrund (BT-120), z. B. „§ 4 Nr. 21 UStG". */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  taxExemptionReason?: string;
 }
 
 /** Ein neuer Rechnungsentwurf. */
@@ -266,4 +291,21 @@ export class InvoiceMetricsDto {
   @Min(2000)
   @Max(2200)
   year?: number;
+}
+
+/**
+ * Zeitraum des GoBD-Exports (Pruefer-Zugriff), nach Rechnungsdatum, beide
+ * Grenzen einschliesslich. Als GET-Query und als POST-Body benutzt; im Body
+ * traegt er zusaetzlich den Nachweis fuer den `SecondFactorGuard`.
+ */
+export class GobdExportDto {
+  @IsCalendarDate()
+  from!: string;
+
+  @IsCalendarDate()
+  to!: string;
+
+  @IsOptional() @IsString() currentPassword?: string;
+
+  @IsOptional() @IsString() totpCode?: string;
 }

@@ -23,6 +23,12 @@ CREATE TYPE "InstanceStatus" AS ENUM ('provisioning', 'active', 'stopped', 'arch
 CREATE TYPE "InvoiceStatus" AS ENUM ('draft', 'finalized', 'sent', 'paid', 'partially_paid', 'overdue', 'cancelled');
 
 -- CreateEnum
+CREATE TYPE "BuyerType" AS ENUM ('business', 'authority', 'consumer');
+
+-- CreateEnum
+CREATE TYPE "BackupKind" AS ENUM ('instance', 'control', 'invoices');
+
+-- CreateEnum
 CREATE TYPE "MailChannel" AS ENUM ('transactional', 'marketing');
 
 -- CreateEnum
@@ -178,6 +184,11 @@ CREATE TABLE "Company" (
     "newsletterConsentStatus" "ConsentStatus",
     "source" "Source",
     "notes" TEXT,
+    "buyerType" "BuyerType" NOT NULL DEFAULT 'business',
+    "vatId" TEXT,
+    "buyerReference" TEXT,
+    "electronicAddress" TEXT,
+    "electronicAddressScheme" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -211,6 +222,11 @@ CREATE TABLE "Backup" (
     "date" DATE NOT NULL,
     "sizeBytes" BIGINT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "kind" "BackupKind" NOT NULL DEFAULT 'instance',
+    "objectKey" TEXT,
+    "sha256" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'ok',
+    "verifiedAt" TIMESTAMP(3),
 
     CONSTRAINT "Backup_pkey" PRIMARY KEY ("id")
 );
@@ -307,10 +323,21 @@ CREATE TABLE "Invoice" (
     "xmlPath" TEXT,
     "pdfContent" BYTEA,
     "xmlContent" BYTEA,
+    "xrechnungContent" BYTEA,
+    "pdfSha256" TEXT,
+    "xmlSha256" TEXT,
+    "xrechnungSha256" TEXT,
+    "documentGeneratedAt" TIMESTAMP(3),
+    "retentionUntil" DATE,
     "transferStatus" TEXT,
     "recipientName" TEXT NOT NULL,
     "recipientAddress" TEXT NOT NULL,
     "recipientEmail" TEXT,
+    "recipientBuyerType" "BuyerType",
+    "recipientVatId" TEXT,
+    "recipientBuyerReference" TEXT,
+    "recipientElectronicAddress" TEXT,
+    "recipientElectronicAddressScheme" TEXT,
     "issuerCompanyName" TEXT NOT NULL,
     "issuerAddress" TEXT NOT NULL,
     "issuerSeat" TEXT,
@@ -324,6 +351,14 @@ CREATE TABLE "Invoice" (
     "issuerManagingDirector" TEXT,
     "directDebitMandateReference" TEXT,
     "issuerBankDetails" TEXT,
+    "issuerContactName" TEXT,
+    "issuerContactPhone" TEXT,
+    "issuerContactEmail" TEXT,
+    "issuerIban" TEXT,
+    "issuerBic" TEXT,
+    "issuerBankName" TEXT,
+    "currency" TEXT NOT NULL DEFAULT 'EUR',
+    "paymentMeansCode" TEXT NOT NULL DEFAULT '58',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
@@ -344,6 +379,10 @@ CREATE TABLE "InvoiceLine" (
     "netAmount" DECIMAL(10,2) NOT NULL,
     "taxAmount" DECIMAL(10,2) NOT NULL,
     "grossAmount" DECIMAL(10,2) NOT NULL,
+    "priceTierKey" TEXT,
+    "priceTierLabel" TEXT,
+    "taxCategory" TEXT NOT NULL DEFAULT 'S',
+    "taxExemptionReason" TEXT,
 
     CONSTRAINT "InvoiceLine_pkey" PRIMARY KEY ("id")
 );
@@ -449,6 +488,80 @@ CREATE TABLE "FeatureFlag" (
     "changedById" TEXT,
 
     CONSTRAINT "FeatureFlag_pkey" PRIMARY KEY ("key")
+);
+
+-- CreateTable
+CREATE TABLE "Installation" (
+    "id" TEXT NOT NULL DEFAULT 'singleton',
+    "slug" TEXT NOT NULL,
+    "productName" TEXT NOT NULL,
+    "boundAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Installation_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PriceList" (
+    "id" TEXT NOT NULL DEFAULT 'singleton',
+    "taxRatePercent" DECIMAL(5,2) NOT NULL,
+    "paymentTermDays" INTEGER NOT NULL,
+    "averageDays" INTEGER NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'EUR',
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedBy" TEXT,
+
+    CONSTRAINT "PriceList_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PriceTier" (
+    "id" TEXT NOT NULL,
+    "key" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "maxPersons" INTEGER,
+    "monthlyCent" INTEGER NOT NULL,
+    "halfYearlyCent" INTEGER NOT NULL,
+    "yearlyCent" INTEGER NOT NULL,
+    "setupCent" INTEGER NOT NULL,
+    "sortOrder" INTEGER NOT NULL,
+    "archivedAt" TIMESTAMP(3),
+
+    CONSTRAINT "PriceTier_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "BackupTarget" (
+    "id" TEXT NOT NULL DEFAULT 'singleton',
+    "type" TEXT NOT NULL,
+    "endpoint" TEXT,
+    "host" TEXT,
+    "bucket" TEXT,
+    "region" TEXT,
+    "path" TEXT,
+    "port" INTEGER,
+    "username" TEXT,
+    "schedule" TEXT NOT NULL,
+    "retentionDays" INTEGER NOT NULL,
+    "lastTestAt" TIMESTAMP(3),
+    "lastTestOk" BOOLEAN,
+    "lastTestMessage" TEXT,
+
+    CONSTRAINT "BackupTarget_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InstanceRestore" (
+    "id" TEXT NOT NULL,
+    "instanceId" TEXT NOT NULL,
+    "backupId" TEXT NOT NULL,
+    "newSubdomain" TEXT NOT NULL,
+    "coolifyApplicationId" TEXT,
+    "status" TEXT NOT NULL,
+    "message" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "adoptedAt" TIMESTAMP(3),
+
+    CONSTRAINT "InstanceRestore_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -580,6 +693,18 @@ CREATE INDEX "AuditLog_action_idx" ON "AuditLog"("action");
 -- CreateIndex
 CREATE INDEX "Inquiry_companyId_kind_idx" ON "Inquiry"("companyId", "kind");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "PriceTier_key_key" ON "PriceTier"("key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "InstanceRestore_newSubdomain_key" ON "InstanceRestore"("newSubdomain");
+
+-- CreateIndex
+CREATE INDEX "InstanceRestore_instanceId_idx" ON "InstanceRestore"("instanceId");
+
+-- CreateIndex
+CREATE INDEX "InstanceRestore_backupId_idx" ON "InstanceRestore"("backupId");
+
 -- AddForeignKey
 ALTER TABLE "PasskeyCredential" ADD CONSTRAINT "PasskeyCredential_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -640,3 +765,145 @@ ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userI
 -- AddForeignKey
 ALTER TABLE "Inquiry" ADD CONSTRAINT "Inquiry_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- AddForeignKey
+ALTER TABLE "InstanceRestore" ADD CONSTRAINT "InstanceRestore_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InstanceRestore" ADD CONSTRAINT "InstanceRestore_backupId_fkey" FOREIGN KEY ("backupId") REFERENCES "Backup"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+
+-- ---------------------------------------------------------------------------
+-- HAND GESCHRIEBENER TEIL (nicht von Prisma erzeugt; bei jeder Neuerzeugung der
+-- Baseline unveraendert anhaengen).
+-- ---------------------------------------------------------------------------
+
+-- Singletons: je Tabelle genau eine Zeile.
+ALTER TABLE "Installation" ADD CONSTRAINT "Installation_singleton_check" CHECK ("id" = 'singleton');
+ALTER TABLE "PriceList" ADD CONSTRAINT "PriceList_singleton_check" CHECK ("id" = 'singleton');
+ALTER TABLE "BackupTarget" ADD CONSTRAINT "BackupTarget_singleton_check" CHECK ("id" = 'singleton');
+
+-- GoBD-SCHUTZ AUF DATENBANKEBENE.
+--
+-- Festgeschriebene Rechnungen (finalizedAt IS NOT NULL) sind unveraenderlich,
+-- das AuditLog ist append-only. Das gilt unabhaengig vom Anwendungscode.
+--
+-- TRUNCATE wird von Triggern dieser Art NICHT erfasst und hier bewusst nicht
+-- blockiert: Die DB-Rolle der Anwendung sollte TRUNCATE gar nicht besitzen
+-- (REVOKE TRUNCATE ON ALL TABLES ...). Das steht in der Betriebsdoku; die
+-- Testaufraeumpfade nutzen TRUNCATE ... CASCADE.
+
+-- (a) Festgeschriebene Rechnungen und ihre Posten nicht loeschen.
+CREATE FUNCTION gobd_block_invoice_delete() RETURNS trigger AS $$
+BEGIN
+  IF OLD."finalizedAt" IS NOT NULL THEN
+    RAISE EXCEPTION 'GoBD: festgeschriebene Rechnung ist unveraenderlich und kann nicht geloescht werden (Rechnung %)', OLD."id"
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "Invoice_gobd_no_delete"
+  BEFORE DELETE ON "Invoice"
+  FOR EACH ROW EXECUTE FUNCTION gobd_block_invoice_delete();
+
+CREATE FUNCTION gobd_block_invoice_line_change() RETURNS trigger AS $$
+DECLARE
+  finalized timestamp(3);
+  parent_id text;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    parent_id := OLD."invoiceId";
+  ELSE
+    -- UPDATE: ohne tatsaechliche Aenderung ist nichts zu schuetzen.
+    IF NEW IS NOT DISTINCT FROM OLD THEN
+      RETURN NEW;
+    END IF;
+    parent_id := OLD."invoiceId";
+  END IF;
+
+  SELECT "finalizedAt" INTO finalized FROM "Invoice" WHERE "id" = parent_id;
+  IF finalized IS NOT NULL THEN
+    RAISE EXCEPTION 'GoBD: festgeschriebene Rechnung ist unveraenderlich (Posten % der Rechnung %)', OLD."id", parent_id
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "InvoiceLine_gobd_no_delete"
+  BEFORE DELETE ON "InvoiceLine"
+  FOR EACH ROW EXECUTE FUNCTION gobd_block_invoice_line_change();
+
+-- (c) Posten einer festgeschriebenen Rechnung nicht aendern.
+CREATE TRIGGER "InvoiceLine_gobd_no_update"
+  BEFORE UPDATE ON "InvoiceLine"
+  FOR EACH ROW EXECUTE FUNCTION gobd_block_invoice_line_change();
+
+-- (b) Rechnung nach dem Festschreiben: nur Status-, Zahlungs- und
+-- Uebertragungsfelder duerfen sich aendern; die Dokumentspalten nur
+-- einmalig von NULL auf einen Wert (set-once).
+CREATE FUNCTION gobd_guard_invoice_update() RETURNS trigger AS $$
+DECLARE
+  mutable_columns text[] := ARRAY['status', 'paymentDate', 'paidAmount', 'transferStatus'];
+  document_columns text[] := ARRAY[
+    'pdfContent', 'xmlContent', 'xrechnungContent',
+    'pdfSha256', 'xmlSha256', 'xrechnungSha256', 'documentGeneratedAt'
+  ];
+  old_json jsonb;
+  new_json jsonb;
+  col text;
+BEGIN
+  IF OLD."finalizedAt" IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  old_json := to_jsonb(OLD);
+  new_json := to_jsonb(NEW);
+
+  -- Alles ausser den veraenderlichen Feldern und den Dokumentspalten muss gleich bleiben.
+  IF (old_json - mutable_columns - document_columns) IS DISTINCT FROM (new_json - mutable_columns - document_columns) THEN
+    RAISE EXCEPTION 'GoBD: festgeschriebene Rechnung ist unveraenderlich (Rechnung %)', OLD."id"
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+
+  -- Dokumentspalten: set-once.
+  FOREACH col IN ARRAY document_columns LOOP
+    IF old_json -> col IS DISTINCT FROM 'null'::jsonb
+       AND old_json -> col IS DISTINCT FROM new_json -> col THEN
+      RAISE EXCEPTION 'GoBD: festgeschriebene Rechnung ist unveraenderlich (Dokumentspalte % ist bereits gesetzt, Rechnung %)', col, OLD."id"
+        USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "Invoice_gobd_guard_update"
+  BEFORE UPDATE ON "Invoice"
+  FOR EACH ROW EXECUTE FUNCTION gobd_guard_invoice_update();
+
+-- (d) AuditLog ist append-only. EINZIGE Ausnahme: Das Loeschen eines Kontos
+-- setzt ueber den Fremdschluessel (ON DELETE SET NULL) "userId" auf NULL;
+-- das ist die vom Schema gewollte Entkopplung und aendert keine Nachweisdaten
+-- ("actor" bleibt im Klartext stehen).
+CREATE FUNCTION gobd_audit_log_append_only() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND OLD."userId" IS NOT NULL AND NEW."userId" IS NULL
+     AND (to_jsonb(OLD) - 'userId') = (to_jsonb(NEW) - 'userId') THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'GoBD: AuditLog ist append-only (% nicht erlaubt)', TG_OP
+    USING ERRCODE = 'integrity_constraint_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "AuditLog_append_only"
+  BEFORE UPDATE OR DELETE ON "AuditLog"
+  FOR EACH ROW EXECUTE FUNCTION gobd_audit_log_append_only();

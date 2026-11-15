@@ -6,6 +6,7 @@ import { LastFactorError } from '../common/errors/business-error';
 import { CryptoService } from '../crypto/crypto.service';
 import type { MailService } from '../mail/mail.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 import { buildConfig } from '../test-support/login-provisioning';
 import { LoginFlowService } from './login-flow.service';
 import { EmailLoginCodeService } from './email-login-code.service';
@@ -131,7 +132,8 @@ async function concurrent(
 }
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { actor: { startsWith: 'faktor-' } } });
+  // AuditLog ist append-only (GoBD-Trigger): nur TRUNCATE im Testpfad.
+  await truncateAuditLog(prisma);
   await prisma.user.deleteMany({
     where: { username: { startsWith: 'faktor-' } },
   });

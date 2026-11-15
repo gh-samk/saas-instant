@@ -5,6 +5,12 @@ import { ToastProvider } from '@saas-instant/ui';
 import { InstanceCard } from './InstanceCard';
 import type { InstanceDetail } from '../lib/api';
 
+// Die Sicherungsansicht (InstanceBackups) fragt den zweiten Faktor über
+// `useAuth` ab; die Karte selbst braucht keinen AuthProvider.
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ reload: vi.fn().mockResolvedValue(undefined), state: { totpSetUp: false } }),
+}));
+
 /**
  * Die Instanz-Karte — geprüft an dem, was fachlich trägt.
  *
@@ -288,7 +294,7 @@ describe('Instanz-Karte — laufender Betrieb', () => {
     // Kein Dauerhäkchen im gesunden Fall.
     expect(screen.queryByText(/Sicherung überfällig/)).not.toBeInTheDocument();
     expect(
-      screen.getByText('Wiederherstellung erfolgt bewusst von Hand in Coolify.'),
+      screen.getByText('Eine Wiederherstellung in eine neue Instanz ist im Bereich „Sicherungen" möglich; das Zurückspielen in die bestehende Instanz gibt es bewusst nicht.'),
     ).toBeInTheDocument();
   });
 
@@ -543,8 +549,13 @@ describe('Instanz-Karte — Abwesenheit (R1)', () => {
     for (const button of screen.getAllByRole('button')) {
       const text = button.textContent ?? '';
       expect(text).not.toMatch(/löschen/i);
-      expect(text).not.toMatch(/wiederherstell/i);
       expect(text).not.toMatch(/zurückspielen/i);
+      // Wiederherstellen gibt es seit der Sicherungsfunktion — aber nur als
+      // NEUE Instanz, nie über die bestehende (Prüfgegenstand bewusst
+      // enger gefasst: Löschen bleibt ausgeschlossen, R1).
+      if (/wiederherstell/i.test(text)) {
+        expect(text).toMatch(/als neue instanz/i);
+      }
     }
   });
 });

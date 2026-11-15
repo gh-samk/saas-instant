@@ -35,7 +35,10 @@ import { InvoiceModule } from './invoices/invoice.module';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { FeatureFlagModule } from './feature-flags/feature-flag.module';
+import { SettingsModule } from './settings/settings.module';
+import { BackupSettingsModule } from './backup-settings/backup-settings.module';
 import { ManifestModule } from './manifest/manifest.module';
+import { InstallationModule } from './installation/installation.module';
 
 @Module({
   imports: [
@@ -43,6 +46,8 @@ import { ManifestModule } from './manifest/manifest.module';
     // Produkt-Manifest (global): Name, Mail, Abrechnung, Provisionierung, UI;
     // liefert außerdem GET /api/public-config.
     ManifestModule,
+    // Bindung an genau eine Software (Slug in der DB, Abweichung = Startabbruch).
+    InstallationModule,
     // Globales Basis-Rate-Limit. Die Anmelderouten haben zusätzlich ein
     // strengeres Limit von 5 Versuchen je Minute (@Throttle an der Route).
     //
@@ -110,6 +115,9 @@ import { ManifestModule } from './manifest/manifest.module';
     // Betriebsschalter für alle Instanzen (Feedback). Die Instanzen lesen ihn
     // über GET /api/schalter.
     FeatureFlagModule,
+    SettingsModule,
+    // Sicherungsziel + Anbindung an den Sicherungs-Agent (Teil F).
+    BackupSettingsModule,
   ],
   controllers: [AppController, RobotsController],
   providers: [

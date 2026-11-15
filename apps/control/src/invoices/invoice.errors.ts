@@ -66,9 +66,29 @@ export class InvoiceIncompleteError extends BusinessError {
     super(
       'invoice_incomplete',
       'Der Rechnung fehlen Pflichtangaben. Sie lässt sich deshalb nicht ' +
-        'finalize.',
+        'festschreiben.',
       HttpStatus.UNPROCESSABLE_ENTITY,
       { missingDetails },
+    );
+  }
+}
+
+/**
+ * Der Aussteller ist noch der neutrale Platzhalter aus dem Quelltext.
+ *
+ * Ein festgeschriebener Beleg mit „Example Company" oder der Beispiel-IBAN
+ * wäre unveränderlich falsch. Die Meldung sagt, wo die echten Angaben
+ * hingehören.
+ */
+export class InvoiceIssuerPlaceholderError extends BusinessError {
+  constructor() {
+    super(
+      'invoice_issuer_placeholder',
+      'Die Angaben der Ausstellerin sind noch Platzhalter (Firmenname, ' +
+        'USt-IdNr. oder IBAN). Bitte zuerst im Manifest unter billing.issuer ' +
+        '(oder über die CONTROL_INVOICE_*-Variablen) die echten Angaben ' +
+        'eintragen — eine festgeschriebene Rechnung lässt sich nicht mehr ändern.',
+      HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }
 }
@@ -136,6 +156,21 @@ export class InvoiceRendererNotReachableError extends BusinessError {
       // bei `Kennzahl.fehlerart`: eine rohe Fehlermeldung könnte die interne
       // URL enthalten.
       { reason },
+    );
+  }
+}
+
+/**
+ * Aus den gespeicherten Angaben lässt sich das (XML-)Dokument nicht bilden —
+ * etwa weil die Anschrift ein unbekanntes Land nennt oder dem gewählten
+ * Profil eine Pflichtangabe fehlt. Die Meldung nennt das Feld.
+ */
+export class InvoiceDocumentDataError extends BusinessError {
+  constructor(detail: string) {
+    super(
+      'invoice_document_data_invalid',
+      detail,
+      HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }
 }
@@ -213,6 +248,19 @@ export class CreditorIdMissingError extends BusinessError {
         'CONTROL_INVOICE_CREDITOR_ID setzen (Beantragung bei der ' +
         'Deutschen Bundesbank).',
       HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+}
+
+/** Die Preisstufe der Organisation gibt es nicht (mehr) als aktive Stufe. */
+export class PriceTierUnknownError extends BusinessError {
+  constructor(key: string) {
+    super(
+      'price_tier_unknown',
+      `Die Preisstufe „${key}" gibt es nicht oder sie ist archiviert. ` +
+        'Bitte eine aktive Stufe aus Einstellungen → Preise wählen.',
+      HttpStatus.BAD_REQUEST,
+      { key },
     );
   }
 }

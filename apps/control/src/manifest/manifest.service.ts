@@ -3,7 +3,7 @@ import { loadManifest, MANIFEST_PATH_PRESET } from './manifest.loader';
 import type { Manifest } from './manifest.types';
 import type { BillingManifest } from './sections/billing';
 import type { MailManifest } from './sections/mail';
-import type { ProductManifest } from './sections/product';
+import { isBound, PRODUCT_PRESET, type ProductManifest } from './sections/product';
 import type { ProvisioningManifest } from './sections/provisioning';
 import type { UiManifest } from './sections/ui';
 
@@ -50,5 +50,18 @@ export class ManifestService {
   }
   get ui(): UiManifest {
     return this.manifest.ui;
+  }
+
+  /** True, sobald das Manifest eine Software benennt (Name weicht vom Preset ab, Slug gesetzt). */
+  get bound(): boolean {
+    return isBound(this.manifest.product);
+  }
+  /**
+   * Anzeigename der Oberfläche: bis zur Anbindung der Preset-Name, danach
+   * `ui.productName` (Override) oder `product.name`.
+   */
+  get displayName(): string {
+    if (!this.bound) return PRODUCT_PRESET.name;
+    return this.manifest.ui.productName ?? this.manifest.product.name;
   }
 }

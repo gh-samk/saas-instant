@@ -1,4 +1,5 @@
 import type {
+  BuyerType,
   ConsentStatus,
   Source,
   InstanceStatus,
@@ -55,6 +56,11 @@ export interface CompanyResponse {
   lastStatusChangeAt: string | null;
 
   priceTier: string | null;
+  buyerType: BuyerType;
+  vatId: string | null;
+  buyerReference: string | null;
+  electronicAddress: string | null;
+  electronicAddressScheme: string | null;
   paymentInterval: PaymentInterval | null;
   /** Lastschrift oder Ueberweisung. Bei `monatlich` nur `directDebit`. */
   paymentMethod: PaymentMethod | null;
@@ -145,6 +151,11 @@ export interface CompanyRow {
   status: CompanyStatus;
   lastStatusChangeAt: Date | null;
   priceTier: string | null;
+  buyerType: BuyerType;
+  vatId: string | null;
+  buyerReference: string | null;
+  electronicAddress: string | null;
+  electronicAddressScheme: string | null;
   customAmount: Prisma.Decimal | null;
   paymentInterval: PaymentInterval | null;
   /** Lastschrift oder Ueberweisung. Bei `monatlich` nur `directDebit`. */
@@ -197,6 +208,11 @@ export function asResponse(row: CompanyRow): CompanyResponse {
     status: row.status,
     lastStatusChangeAt: dayOrNull(row.lastStatusChangeAt),
     priceTier: row.priceTier,
+    buyerType: row.buyerType,
+    vatId: row.vatId,
+    buyerReference: row.buyerReference,
+    electronicAddress: row.electronicAddress,
+    electronicAddressScheme: row.electronicAddressScheme,
     paymentInterval: row.paymentInterval,
     paymentMethod: row.paymentMethod,
     paymentDetailsStored:

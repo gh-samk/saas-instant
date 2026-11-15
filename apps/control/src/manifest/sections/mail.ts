@@ -37,7 +37,7 @@ export interface MailManifest {
 }
 
 export const MAIL_PRESET: MailManifest = {
-  senderName: 'saas-instant',
+  senderName: 'SAAS Verwaltung',
   senderAddress: 'noreply@example.com',
   footer: '',
   imprint: null,

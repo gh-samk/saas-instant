@@ -16,6 +16,7 @@ import {
   disconnect,
   sendDouble,
 } from '../test-support/company-provisioning';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 
 /**
  * Organisationen gegen eine ECHTE Postgres-Datenbank.
@@ -107,6 +108,48 @@ describe('Anlegen und Bearbeiten', () => {
     expect(entries[0].beforeValue).toEqual({ city: REMOVED });
     expect(entries[0].afterValue).toEqual({ city: REMOVED });
     expect(entries[0].ip).toBe(Source.ip);
+  });
+
+  it('speichert und liefert die Angaben für die E-Rechnung (Käuferart, USt-IdNr., Leitweg-ID, Adresse)', async () => {
+    const created = await service.create(
+      { name: `${Prefix} E-Rechnung` },
+      actor,
+      Source,
+    );
+    // Vorgabe: Unternehmen, ohne Kennungen.
+    expect(created.buyerType).toBe('business');
+    expect(created.vatId).toBeNull();
+
+    const updated = await service.update(
+      created.id,
+      {
+        buyerType: 'authority',
+        vatId: 'DE811111111',
+        buyerReference: '991-12345-67',
+        electronicAddress: '991-12345-67',
+        electronicAddressScheme: '0204',
+      },
+      actor,
+      Source,
+    );
+    expect(updated).toMatchObject({
+      buyerType: 'authority',
+      vatId: 'DE811111111',
+      buyerReference: '991-12345-67',
+      electronicAddress: '991-12345-67',
+      electronicAddressScheme: '0204',
+    });
+
+    // Leeren geht (null), Weglassen lässt unangetastet.
+    const cleared = await service.update(
+      created.id,
+      { buyerReference: null as unknown as undefined },
+      actor,
+      Source,
+    );
+    expect(cleared.buyerReference).toBeNull();
+    expect(cleared.vatId).toBe('DE811111111');
+    expect(cleared.buyerType).toBe('authority');
   });
 
   it('gibt Geldbeträge als Zeichenkette heraus, nicht als Gleitkommazahl', async () => {
@@ -642,9 +685,9 @@ describe('Organisation vollständig löschen', () => {
 
   afterAll(async () => {
     if (createdIds.length === 0) return;
-    await prisma.auditLog.deleteMany({
-      where: { objectId: { in: createdIds } },
-    });
+    // Das AuditLog ist append-only (GoBD-Trigger): `deleteMany` ist dort
+    // verboten, nur der Testpfad darf es per TRUNCATE leeren.
+    await truncateAuditLog(prisma);
     await prisma.consent.deleteMany({
       where: { companyId: null, email: { contains: '@loeschprobe.test' } },
     });

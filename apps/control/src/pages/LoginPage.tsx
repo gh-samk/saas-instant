@@ -71,7 +71,7 @@ function asSecondFactors(factors: FactorKind[]): SecondFactor[] {
 export function LoginPage() {
   const t = useT();
   const TEXT = useTexts();
-  const { productName } = useProduct();
+  const { productName, showBrand } = useProduct();
   const navigate = useNavigate();
   const { reload } = useAuth();
 
@@ -496,7 +496,7 @@ export function LoginPage() {
 
   if (blocked) {
     return (
-      <AuthCard title={productName} brand={t('auth.brand')} subtitle={t('auth.loginSubtitle')}>
+      <AuthCard title={productName} brand={showBrand ? t('auth.brand') : undefined} subtitle={t('auth.loginSubtitle')}>
         <div className="rounded-lg border border-rahmen bg-flaeche-2 p-4 text-left">
           <div className="mb-2 flex items-center gap-2">
             <Lock className="h-5 w-5 text-gefahr" aria-hidden="true" />
@@ -513,7 +513,7 @@ export function LoginPage() {
 
   if (step === 'secondFactor') {
     return (
-      <AuthCard title={productName} brand={t('auth.brand')} subtitle={t('auth.confirmationSubtitle')}>
+      <AuthCard title={productName} brand={showBrand ? t('auth.brand') : undefined} subtitle={t('auth.confirmationSubtitle')}>
         {view === 'recovery' ? (
           <>
             <div className="mb-4 flex items-start gap-3 rounded-lg border border-rahmen bg-flaeche-2 p-3 text-left">
@@ -577,7 +577,7 @@ export function LoginPage() {
   }
 
   return (
-    <AuthCard title={productName} brand={t('auth.brand')} subtitle={t('auth.loginSubtitle')}>
+    <AuthCard title={productName} brand={showBrand ? t('auth.brand') : undefined} subtitle={t('auth.loginSubtitle')}>
       {passkeyAvailable && (
         <>
           <PasskeyButton

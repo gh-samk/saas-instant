@@ -47,6 +47,8 @@ interface LinesDraft {
   unitPriceNet: string;
   taxRate: string;
   unit: string;
+  /** Preisstufe aus dem Vorschlag; leer = kein Stufenbezug. */
+  priceTierKey: string;
 }
 
 let keyCounter = 0;
@@ -68,6 +70,7 @@ function emptyLines(): LinesDraft {
     // `PREIS_VORGABEN.steuersatz` und bleibt frei editierbar.
     taxRate: String(TAX_RATE_DEFAULT),
     unit: 'C62',
+    priceTierKey: '',
   };
 }
 
@@ -87,6 +90,7 @@ function linesFrom(invoice: Invoice): LinesDraft[] {
     unitPriceNet: p.unitPriceNet,
     taxRate: decimalFieldValue(p.taxRate),
     unit: p.unit ?? 'C62',
+    priceTierKey: p.priceTierKey ?? '',
   }));
 }
 
@@ -228,6 +232,7 @@ export function InvoiceDraftForm({
       label: template.label,
       unitPriceNet: centAsFieldValue(template.unitPriceNetCent),
       unit: template.unit,
+      priceTierKey: template.priceTierKey,
     };
     setLines((alt) => {
       const onlyEmptyStartRow =
@@ -294,6 +299,7 @@ export function InvoiceDraftForm({
           unitPriceNetCent: unitPriceCent,
           taxRate,
           unit: p.unit,
+          ...(p.priceTierKey === '' ? {} : { priceTierKey: p.priceTierKey }),
         });
       }
     }

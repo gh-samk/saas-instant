@@ -132,6 +132,21 @@ enum InvoiceStatus {
   cancelled
 }
 
+/// Art des Rechnungsempfaengers (E-Rechnung: Unternehmen, Behoerde, Verbraucher).
+enum BuyerType {
+  business
+  authority
+  consumer
+}
+
+/// Was eine Sicherung enthaelt: eine Kundeninstanz, die Verwaltung selbst
+/// oder die Rechnungsdokumente.
+enum BackupKind {
+  instance
+  control
+  invoices
+}
+
 enum MailChannel {
   transactional
   marketing
@@ -462,6 +477,13 @@ model Company {
   source                  Source?
   notes                   String?
 
+  // Angaben fuer die E-Rechnung (XRechnung / ZUGFeRD)
+  buyerType               BuyerType @default(business)
+  vatId                   String?
+  buyerReference          String?
+  electronicAddress       String?
+  electronicAddressScheme String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -548,8 +570,9 @@ model Instance {
   /// Geheimnisse; die Texte sind fest im Code formuliert.
   message String?
 
-  metrics Metric[]
-  backups Backup[]
+  metrics  Metric[]
+  backups  Backup[]
+  restores InstanceRestore[]
 }
 
 /// EINE gelungene Sicherung einer Kundeninstanz — Zeitpunkt und Groesse.
@@ -573,6 +596,15 @@ model Backup {
   date      DateTime @db.Date
   sizeBytes BigInt
   createdAt DateTime @default(now())
+
+  kind       BackupKind @default(instance)
+  /// Schluessel des Objekts im Sicherungsziel (nie ein Geheimnis).
+  objectKey  String?
+  sha256     String?
+  status     String     @default("ok")
+  verifiedAt DateTime?
+
+  restores InstanceRestore[]
 
   /// Hoechstens EINE Zeile je Instanz und Tag. Zwei Laeufe am selben Tag
   /// (der Betrieb sichert zweimal taeglich) schreiben dieselbe Zeile um,
@@ -843,11 +875,19 @@ model Invoice {
   /// Rechnungsdienst. Bleibt `null`, solange die Rechnung Entwurf ist oder
   /// der Dienst nicht erreichbar war — das Dokument laesst sich jederzeit
   /// aus dem Schnappschuss nachziehen, weil dort alle Werte stehen.
-  pdfContent Bytes?
+  pdfContent          Bytes?
   /// Dieselbe Rechnung als reines CII-XML. Liegt getrennt vor, damit sie sich
   /// ohne PDF-Werkzeug pruefen und an ein Buchhaltungsprogramm uebergeben
   /// laesst.
-  xmlContent Bytes?
+  xmlContent          Bytes?
+  /// XRechnung (CII oder UBL) als reine XML-Datei.
+  xrechnungContent    Bytes?
+  pdfSha256           String?
+  xmlSha256           String?
+  xrechnungSha256     String?
+  documentGeneratedAt DateTime?
+  /// Ende der Aufbewahrungsfrist (Fachdatum, ohne Uhrzeit).
+  retentionUntil      DateTime? @db.Date
 
   /// Uebertragung an die Buchhaltung (lexoffice, sevDesk o. a.).
   ///
@@ -857,9 +897,14 @@ model Invoice {
   transferStatus String?
 
   // --- Schnappschuss Empfänger (Kopien, KEINE Relationen) ---
-  recipientName    String
-  recipientAddress String
-  recipientEmail   String?
+  recipientName                    String
+  recipientAddress                 String
+  recipientEmail                   String?
+  recipientBuyerType               BuyerType?
+  recipientVatId                   String?
+  recipientBuyerReference          String?
+  recipientElectronicAddress       String?
+  recipientElectronicAddressScheme String?
 
   // --- Schnappschuss Aussteller (Kopien, KEINE Relationen) ---
   issuerCompanyName                       String
@@ -889,7 +934,17 @@ model Invoice {
   /// Beleg die gewoehnliche Zahlungsbedingung.
   directDebitMandateReference             String?
 
-  issuerBankDetails String?
+  issuerBankDetails  String?
+  issuerContactName  String?
+  issuerContactPhone String?
+  issuerContactEmail String?
+  issuerIban         String?
+  issuerBic          String?
+  issuerBankName     String?
+
+  currency         String @default("EUR")
+  /// Zahlungsart nach UNTDID 4461 (58 = SEPA-Ueberweisung).
+  paymentMeansCode String @default("58")
 
   createdAt DateTime @default(now())
 
@@ -938,6 +993,12 @@ model InvoiceLine {
   netAmount    Decimal   @db.Decimal(10, 2)
   taxAmount    Decimal   @db.Decimal(10, 2)
   grossAmount  Decimal   @db.Decimal(10, 2)
+
+  priceTierKey       String?
+  priceTierLabel     String?
+  /// Steuerkategorie nach UNTDID 5305 (S = Regelsatz).
+  taxCategory        String  @default("S")
+  taxExemptionReason String?
 
   @@index([invoiceId])
 }
@@ -1239,4 +1300,83 @@ model FeatureFlag {
   /// TECHNISCHER Zeitstempel der letzten Änderung.
   changedAt   DateTime @updatedAt
   changedById String?
+}
+
+// ---------------------------------------------------------------------------
+// Einzelinstallation, Preisliste, Sicherungsziel, Wiederherstellung
+// ---------------------------------------------------------------------------
+
+/// EINE Zeile je Verwaltung (Singleton). Das CHECK auf `id = 'singleton'`
+/// steht im Migrations-SQL.
+model Installation {
+  id          String   @id @default("singleton")
+  slug        String
+  productName String
+  /// Technischer Zeitstempel (kein Fachdatum).
+  boundAt     DateTime @default(now())
+}
+
+/// Preisliste der Verwaltung (Singleton, CHECK im Migrations-SQL).
+/// Betraege der Stufen stehen in ganzen Cent in `PriceTier`.
+model PriceList {
+  id              String   @id @default("singleton")
+  /// Umsatzsteuersatz in Prozent (Form wie `PriceTable.taxRate`, z. B. 19).
+  taxRatePercent  Decimal  @db.Decimal(5, 2)
+  paymentTermDays Int
+  averageDays     Int
+  currency        String   @default("EUR")
+  updatedAt       DateTime @updatedAt
+  updatedBy       String?
+}
+
+model PriceTier {
+  id             String    @id @default(uuid())
+  key            String    @unique
+  label          String
+  maxPersons     Int?
+  monthlyCent    Int
+  halfYearlyCent Int
+  yearlyCent     Int
+  setupCent      Int
+  sortOrder      Int
+  archivedAt     DateTime?
+}
+
+/// Ziel der Sicherungen (Singleton, CHECK im Migrations-SQL).
+/// KEINE Zugangsdaten in der Datenbank: Schluessel kommen aus der Umgebung.
+model BackupTarget {
+  id              String    @id @default("singleton")
+  /// s3 | storagebox
+  type            String
+  endpoint        String?
+  host            String?
+  bucket          String?
+  region          String?
+  path            String?
+  port            Int?
+  username        String?
+  schedule        String
+  retentionDays   Int
+  lastTestAt      DateTime?
+  lastTestOk      Boolean?
+  lastTestMessage String?
+}
+
+/// Wiederherstellung einer Sicherung als NEUE Instanz unter neuer Subdomain.
+model InstanceRestore {
+  id                   String    @id @default(uuid())
+  instanceId           String
+  instance             Instance  @relation(fields: [instanceId], references: [id], onDelete: Restrict)
+  backupId             String
+  backup               Backup    @relation(fields: [backupId], references: [id], onDelete: Restrict)
+  newSubdomain         String    @unique
+  coolifyApplicationId String?
+  /// provisioning | restoring | ready | failed | adopted
+  status               String
+  message              String?
+  createdAt            DateTime  @default(now())
+  adoptedAt            DateTime?
+
+  @@index([instanceId])
+  @@index([backupId])
 }

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { PrismaClient } from '.prisma/control-client';
 import { AuditService } from '../audit/audit.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import { truncateAuditLog } from '../test-support/gobd-cleanup';
 import { MAX_FAILED_ATTEMPTS, LOCKOUT_DURATION_MS, LockoutService } from './lockout.service';
 import type { LockoutState } from './lockout.service';
 
@@ -52,7 +53,8 @@ async function stateOf(id: string) {
 }
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { actor: { startsWith: 'renn-' } } });
+  // AuditLog ist append-only (GoBD-Trigger): nur TRUNCATE im Testpfad.
+  await truncateAuditLog(prisma);
   await prisma.user.deleteMany({ where: { username: { startsWith: 'renn-' } } });
   await (prisma as unknown as PrismaClient).$disconnect();
 });

@@ -53,6 +53,12 @@ export const TASKS_KINDS = [
   'tier_check',
   // Ohne Organisationsbezug. Der Stand kommt aus dem PostausgangService.
   'outbox_disrupted',
+  // --- GoBD: Dokument weicht von seiner Pruefsumme ab / Luecke im Nummernkreis.
+  // Live aus der Datenbank gerechnet, nie gespeichert. Voraussetzung in der
+  // Oberflaeche: Eintrag in `src/lib/aufgaben.ts` (Rueckfallwert existiert).
+  'document_tampered',
+  // Ziel eingerichtet, aber keine Meldung der Verwaltungs-/Rechnungsarchiv-Sicherung seit 3 Tagen.
+  'control_backup_missing',
 ] as const;
 
 export type TasksKind = (typeof TASKS_KINDS)[number];
