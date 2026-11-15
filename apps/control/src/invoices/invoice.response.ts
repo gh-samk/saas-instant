@@ -153,7 +153,7 @@ export interface InvoiceResponse {
  * aus jeder Auswahl heraus, und `documentPresent` wird getrennt ermittelt —
  * über `pdfContent IS NOT NULL` in SQL, nicht über den Inhalt.
  */
-export type InvoiceWithoutDocument = Omit<Invoice, 'pdfContent' | 'xmlContent' | 'xrechnungContent'> & {
+export type InvoiceWithoutDocument = Omit<Invoice, 'pdfContent' | 'xmlContent' | 'xrechnungContent' | 'issuerLayout'> & {
   lines: InvoiceLine[];
   cancellationInvoice?: { id: string } | null;
   /** Optional, weil nicht jeder Leseweg die Organisation mitlädt. */

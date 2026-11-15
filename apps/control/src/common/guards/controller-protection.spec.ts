@@ -84,6 +84,11 @@ const WITHOUT_SESSION: Record<string, string> = {
     'Die Instanzen haben kein Konto in der Verwaltung und sollen keines ' +
     'bekommen; so muss für einen Schalter nichts auf eine Instanz geschrieben ' +
     'werden (R1). Schreiben lässt sich hier nichts.',
+  PublicLogoController:
+    'Das Firmenlogo für die Anmeldeseite, anonym und rein lesend (PNG/JPEG ' +
+    'mit nosniff und ETag). Das Logo steht ohnehin auf jeder Rechnung; ' +
+    'hochgeladen wird es am IssuerSettingsController hinter Sitzung und ' +
+    'zweitem Faktor.',
   PublicConfigController:
     'Produktname und Logo für die Anmeldeseite, anonym und rein lesend. ' +
     'Davor gibt es keine Sitzung, und die Seite braucht beides schon ' +
@@ -118,6 +123,9 @@ const WITHOUT_SECOND_FACTOR_CONTROLLER: Record<string, string> = {
     'Zwei Zahlen fuer die Seitenleiste, ohne Personenbezug. Sie stammen aus ' +
     'Listen, die hinter derselben Sitzung stehen — ein zweiter Faktor davor ' +
     'schuetzte nichts, was nicht schon geschuetzt ist.',
+  PublicLogoController:
+    'Kein Benutzer, kein Faktor: anonym, rein lesend, ein Bild ohne ' +
+    'Personenbezug.',
   PublicConfigController:
     'Kein Benutzer, kein Faktor: anonym, rein lesend, nur Produktname und ' +
     'Logo aus dem UI-Teil des Manifests, nichts mit Personenbezug.',

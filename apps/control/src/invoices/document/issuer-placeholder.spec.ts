@@ -58,9 +58,11 @@ describe('Platzhalter-Aussteller', () => {
 describe('Rechtsform und Aufbewahrung aus Manifest/Umgebung', () => {
   it('Standard: Gesellschaft und acht Jahre', () => {
     const service = new IssuerConfigService(env());
-    expect(service.read().legalForm).toBe('company');
+    // Ohne Manifest gilt der Platzhalter mit Komplementärin: GmbH & Co. KG.
+    expect(service.read().legalForm).toBe('gmbh_co_kg');
     expect(service.retentionYears()).toBe(8);
-    expect(withManifest({}).read().legalForm).toBe('company');
+    // „company" ohne Komplementärin im Manifest: GmbH.
+    expect(withManifest({}).read().legalForm).toBe('gmbh');
     expect(withManifest({}).retentionYears()).toBe(8);
   });
 
@@ -69,7 +71,7 @@ describe('Rechtsform und Aufbewahrung aus Manifest/Umgebung', () => {
       issuer: { name: 'Max Muster', legalForm: 'sole_proprietor' },
       retentionYears: 10,
     });
-    expect(service.read().legalForm).toBe('sole_proprietor');
+    expect(service.read().legalForm).toBe('einzelunternehmen');
     expect(service.retentionYears()).toBe(10);
   });
 
@@ -77,9 +79,9 @@ describe('Rechtsform und Aufbewahrung aus Manifest/Umgebung', () => {
     const manifest = { issuer: { name: 'X', legalForm: 'sole_proprietor' } };
     expect(
       withManifest(manifest, { CONTROL_INVOICE_LEGAL_FORM: 'association' }).read().legalForm,
-    ).toBe('association');
+    ).toBe('ev');
     expect(
       withManifest(manifest, { CONTROL_INVOICE_LEGAL_FORM: 'gmbh' }).read().legalForm,
-    ).toBe('sole_proprietor');
+    ).toBe('einzelunternehmen');
   });
 });

@@ -1,4 +1,5 @@
 import { ISSUER_PRESETS } from './issuer.config';
+import { documentIssuerFrom } from './issuer-mapping';
 import { createCii } from './cii-en16931';
 import { createHtml } from './layout-html';
 import type { InvoiceDocument } from './document.types';
@@ -28,7 +29,7 @@ const REASON: InvoiceDocument = {
   servicePeriod: { from: '2026-09-01', until: '2027-08-31' },
   deliveryDate: '2026-09-01',
   orderReference: '2026-004',
-  issuer: ISSUER_PRESETS,
+  issuer: documentIssuerFrom(ISSUER_PRESETS),
   recipient: {
     name: 'Kollektiv Grünspecht e. V.',
     address: { street: 'Ziegelgasse 14', postalCode: '99423', city: 'Weimar', country: 'DE' },
@@ -64,10 +65,8 @@ describe('Einleitung und Zahlungshinweis stehen auf dem Beleg', () => {
     paymentNote: 'Bitte im Verwendungszweck die Rechnungsnummer angeben.',
   };
 
-  it('druckt die Einleitung in das PDF', () => {
-    expect(createHtml(withTexts)).toContain(
-      'wie im Mai besprochen, hier die Rechnung für das kommende Jahr.',
-    );
+  it('druckt keinen Einleitungssatz in das PDF (Entwurf B)', () => {
+    expect(createHtml(withTexts)).not.toContain('wie im Mai besprochen');
   });
 
   it('druckt den Zahlungshinweis in das PDF', () => {
@@ -105,7 +104,7 @@ describe('Einleitung und Zahlungshinweis stehen auf dem Beleg', () => {
       ...REASON,
       introduction: 'Rabatt <b>5 %</b> & mehr',
     };
-    expect(createHtml(boes)).toContain('Rabatt &lt;b&gt;5 %&lt;/b&gt; &amp; mehr');
+    expect(createHtml(boes)).not.toContain('Rabatt');
     expect(createCii(boes)).toContain('Rabatt &lt;b&gt;5 %&lt;/b&gt; &amp; mehr');
   });
 });
@@ -122,8 +121,13 @@ describe('Der Zeitraum je Posten', () => {
     ],
   };
 
-  it('steht in der Postenzeile des PDF', () => {
-    expect(createHtml(withPeriod)).toContain('01.09.2026 – 31.08.2027');
+  it('steht nicht als Unterzeile im PDF (Entwurf B: nur Leistung fett)', () => {
+    expect(
+      createHtml({
+        ...withPeriod,
+        lines: [{ ...withPeriod.lines[0]!, period: { from: '2026-10-05', until: '2026-10-20' } }],
+      }),
+    ).not.toContain('05.10.2026');
   });
 
   it('steht als BillingSpecifiedPeriod an der XML-Zeile', () => {
@@ -134,8 +138,8 @@ describe('Der Zeitraum je Posten', () => {
     expect(hits).toHaveLength(2);
   });
 
-  it('druckt auch die Beschreibung — sie ging denselben Weg verloren', () => {
-    expect(createHtml(withPeriod)).toContain('Zugang für bis zu 60 Teilhabende');
+  it('trägt die Beschreibung ins XML, aber nicht als Unterzeile ins PDF', () => {
+    expect(createHtml(withPeriod)).not.toContain('Zugang für bis zu 60 Teilhabende');
     expect(createCii(withPeriod)).toContain(
       '<ram:Description>Zugang für bis zu 60 Teilhabende</ram:Description>',
     );

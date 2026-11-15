@@ -1,4 +1,5 @@
 import { ISSUER_PRESETS } from './issuer.config';
+import { documentIssuerFrom } from './issuer-mapping';
 import {
   PROFILE_IDENTIFIER,
   TYPE_CODE_INVOICE,
@@ -17,7 +18,7 @@ const DOCUMENT: InvoiceDocument = {
   servicePeriod: { from: '2026-09-01', until: '2027-08-31' },
   deliveryDate: '2026-09-01',
   orderReference: '2026-001',
-  issuer: ISSUER_PRESETS,
+  issuer: documentIssuerFrom(ISSUER_PRESETS),
   recipient: {
     name: 'Kollektiv Grünspecht e. V.',
     address: {
@@ -113,6 +114,25 @@ describe('createCii', () => {
     );
   });
 
+  /** BR-CO-26: BT-29, BT-30 oder BT-31 muss vorhanden sein. */
+  it('nennt die Steuernummer als Verkäuferkennung, wenn weder USt-IdNr. noch Register existieren', () => {
+    const sole = createCii({
+      ...DOCUMENT,
+      issuer: documentIssuerFrom({
+        ...ISSUER_PRESETS,
+        legalForm: 'einzelunternehmen',
+        vatId: '',
+        taxNumber: '12/345/67890',
+        registerIdentifier: '',
+      }),
+    });
+    expect(sole).toContain('<ram:SellerTradeParty><ram:ID>12/345/67890</ram:ID><ram:Name>');
+    expect(sole).toContain('<ram:ID schemeID="FC">12/345/67890</ram:ID>');
+    expect(sole).not.toContain('schemeID="VA">DE');
+    // Mit USt-IdNr. entfällt die zusätzliche Kennung.
+    expect(xml).not.toContain('<ram:SellerTradeParty><ram:ID>');
+  });
+
   it('trennt Netto, Steuer und Brutto (§ 14 Abs. 4 Nr. 8 UStG)', () => {
     expect(xml).toContain('<ram:LineTotalAmount>385.00</ram:LineTotalAmount>');
     expect(xml).toContain('<ram:TaxBasisTotalAmount>385.00</ram:TaxBasisTotalAmount>');
@@ -190,6 +210,31 @@ describe('createCii', () => {
 describe('createHtml', () => {
   const html = createHtml(DOCUMENT);
 
+  it('hält den Zahlungssatz, den ZUGFeRD-Hinweis nur bei EN16931 und keine Unterzeile', () => {
+    expect(html).toContain('ZUGFeRD (EN 16931)');
+    expect(createHtml(DOCUMENT, 'XRECHNUNG')).not.toContain('ZUGFeRD');
+    expect(html).not.toContain('Vielen Dank');
+    expect(html).not.toContain('class="s">Monatliche');
+  });
+
+  it('rückt die Fußzeile bei vielen Zeilen nach oben, statt abzuschneiden', () => {
+    const many = createHtml({
+      ...DOCUMENT,
+      issuer: {
+        ...DOCUMENT.issuer,
+        blocks: {
+          ...DOCUMENT.issuer.blocks,
+          legalLines: Array.from({ length: 10 }, (_, i) => `Zeile ${i}`),
+        },
+      },
+    });
+    const top = (h: string): number =>
+      Number(/class="abs g ft" style="top:([\d.]+)mm"/.exec(h)?.[1]);
+    expect(top(many)).toBeCloseTo(279 - 10 * 4.5, 5);
+    expect(top(many)).toBeLessThan(top(html));
+    expect(top(html)).toBeLessThanOrEqual(247.5);
+  });
+
   /**
    * KEINE EXTERNEN RESSOURCEN.
    *
@@ -199,9 +244,10 @@ describe('createHtml', () => {
   it('druckt ohne Komplementärin keinen Block und kein erfundenes Land', () => {
     const bare = createHtml({
       ...DOCUMENT,
-      issuer: {
-        ...DOCUMENT.issuer,
-        address: { ...DOCUMENT.issuer.address, country: '' },
+      issuer: documentIssuerFrom({
+        ...ISSUER_PRESETS,
+        legalForm: 'gmbh',
+        address: { ...ISSUER_PRESETS.address, country: '' },
         generalPartner: {
           name: '',
           seat: '',
@@ -209,15 +255,45 @@ describe('createHtml', () => {
           registerIdentifier: '',
           managingDirector: [],
         },
-      },
+      }),
     });
     expect(bare).not.toContain('Persönlich haftende Gesellschafterin');
     expect(bare).not.toContain('Geschäftsführer:');
     expect(bare).not.toContain('Deutschland');
   });
 
-  it('nennt das Land aus dem Code der Ausstellerin', () => {
-    expect(html).toContain(`${ISSUER_PRESETS.address.city}, Deutschland`);
+  it('nennt ein Land außerhalb Deutschlands im Briefkopf, Deutschland nicht', () => {
+    expect(html).not.toContain('Deutschland');
+    const abroad = createHtml({
+      ...DOCUMENT,
+      issuer: documentIssuerFrom({
+        ...ISSUER_PRESETS,
+        address: { ...ISSUER_PRESETS.address, country: 'Österreich' },
+      }),
+    });
+    expect(abroad).toContain('Österreich');
+  });
+
+  it('übernimmt Logo und Akzentfarbe des Firmenprofils, nur gültige Farben', () => {
+    const withLogo = createHtml({
+      ...DOCUMENT,
+      issuer: documentIssuerFrom(ISSUER_PRESETS, {
+        logoDataUri: 'data:image/png;base64,AAAA',
+        accentColor: '#0f5132',
+      }),
+    });
+    expect(withLogo).toContain('src="data:image/png;base64,AAAA"');
+    expect(withLogo).toContain('--acc:#0f5132');
+    // Mit Logo gibt es keine Initialmarke: die Akzentfarbe haengt am Titel.
+    expect(withLogo).toMatch(/h1\{[^}]*color:var\(--acc\)/);
+    const injected = createHtml({
+      ...DOCUMENT,
+      issuer: documentIssuerFrom(ISSUER_PRESETS, {
+        accentColor: 'red;}</style><script>',
+      }),
+    });
+    expect(injected).toContain('--acc:#0369A1');
+    expect(injected).not.toContain('<script>');
   });
 
   it('lädt nichts von außen', () => {
@@ -233,11 +309,11 @@ describe('createHtml', () => {
    * eine nicht einbettbare Schrift wählt — PDF/A verlangt, dass jede
    * verwendete Schrift eingebettet ist.
    */
-  it('nennt genau eine Schrift ohne Rückfallkette', () => {
+  it('nennt genau eine Schrift ohne Rückfallkette (Familienname der Datei: „Inter Variable“)', () => {
     const hits = [...html.matchAll(/font-family:\s*([^;]+);/g)].map((t) =>
       (t[1] ?? '').trim(),
     );
-    expect(hits).toEqual(['"DejaVu Sans"']);
+    expect(hits).toEqual(['"Inter Variable"']);
   });
 
   it('trägt alle Pflichtangaben sichtbar im Dokument', () => {
@@ -248,7 +324,7 @@ describe('createHtml', () => {
     expect(html).toContain(ISSUER_PRESETS.generalPartner.registerIdentifier);
     // Netto, Steuer und Brutto stehen getrennt.
     expect(html).toContain('Summe netto');
-    expect(html).toContain('19 % USt.');
+    expect(html).toContain('19 % USt');
     expect(html).toContain('Rechnungsbetrag');
   });
 
@@ -261,7 +337,7 @@ describe('createHtml', () => {
   });
 
   it('weist auf die maschinenlesbare Anlage hin', () => {
-    expect(html).toContain('factur-x.xml');
+    expect(html).toContain('ZUGFeRD (EN 16931)');
   });
 });
 
@@ -472,7 +548,7 @@ describe('Profil XRECHNUNG 3.0', () => {
     ).toThrow(/Leitweg-ID/);
     expect(() =>
       createCii(
-        { ...DOCUMENT, issuer: { ...ISSUER_PRESETS, contact: { name: '', phone: '', email: '' } } },
+        { ...DOCUMENT, issuer: documentIssuerFrom({ ...ISSUER_PRESETS, contact: { name: '', phone: '', email: '' } }) },
         'XRECHNUNG',
       ),
     ).toThrow(/Ansprechpartner/);

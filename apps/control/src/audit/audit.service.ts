@@ -343,6 +343,13 @@ export const AUDIT_ACTION = {
 
   /** Preisliste (Stufen, Steuersatz, Zahlungsziel) von der Betreiberin geändert. */
   priceUpdated: 'price.updated',
+
+  /**
+   * Firmendaten (Rechnungsaussteller), Akzentfarbe oder Logo geändert. Im
+   * Eintrag stehen nur Rechtsform, Feldliste und Prüfsumme — keine Inhalte
+   * großer Felder (Logo-Bytes).
+   */
+  issuerUpdated: 'issuer.updated',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

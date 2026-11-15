@@ -155,10 +155,13 @@ describe('ManifestService + GET /api/public-config', () => {
   it('public-config ohne Anbindung: Preset-Name, bound=false', async () => {
     process.env['MANIFEST_PATH'] = '/nicht/da.yaml';
     const { c } = await build();
-    expect(c.read()).toEqual({
+    expect(await c.read()).toEqual({
       productName: 'SAAS Verwaltung',
       logoUrl: null,
       bound: false,
+      accentColor: null,
+      accentOnDark: null,
+      hasLogo: false,
     });
   });
 
@@ -166,7 +169,7 @@ describe('ManifestService + GET /api/public-config', () => {
     const p = tempFile('m.yaml', 'product:\n  name: Beispielprodukt\n  slug: beispielprodukt\n');
     process.env['MANIFEST_PATH'] = p;
     const { c } = await build();
-    expect(c.read()).toMatchObject({ productName: 'Beispielprodukt', bound: true });
+    expect(await c.read()).toMatchObject({ productName: 'Beispielprodukt', bound: true });
   });
 
   it.each(['Mein Produkt', 'SAAS Verwaltung', '   '])(
@@ -180,26 +183,26 @@ describe('ManifestService + GET /api/public-config', () => {
     const p = tempFile('m.yaml', 'product:\n  name: Mein Produkt\n  slug: mein-produkt\n');
     process.env['MANIFEST_PATH'] = p;
     const { c } = await build();
-    expect(c.read()).toMatchObject({ productName: 'SAAS Verwaltung', bound: false });
+    expect(await c.read()).toMatchObject({ productName: 'SAAS Verwaltung', bound: false });
   });
 
   it('ui.productName ist nur ein Override und wirkt erst nach der Anbindung', async () => {
     const unbound = tempFile('a.yaml', 'ui:\n  productName: Override\n');
     process.env['MANIFEST_PATH'] = unbound;
-    expect((await build()).c.read().productName).toBe('SAAS Verwaltung');
+    expect((await (await build()).c.read()).productName).toBe('SAAS Verwaltung');
     const bound = tempFile(
       'b.yaml',
       'product:\n  name: Beispielprodukt\n  slug: beispielprodukt\nui:\n  productName: Override\n',
     );
     process.env['MANIFEST_PATH'] = bound;
-    expect((await build()).c.read().productName).toBe('Override');
+    expect((await (await build()).c.read()).productName).toBe('Override');
   });
 
   it('öffentlicher Endpunkt liefert nur den UI-Teil', async () => {
     process.env['MANIFEST_PATH'] = EXAMPLE;
     const { c } = await build();
-    const response = c.read();
-    expect(Object.keys(response).sort()).toEqual(['bound', 'logoUrl', 'productName']);
+    const response = await c.read();
+    expect(Object.keys(response).sort()).toEqual(['accentColor', 'accentOnDark', 'bound', 'hasLogo', 'logoUrl', 'productName']);
     expect(JSON.stringify(response)).not.toContain('billing@example.com');
   });
 

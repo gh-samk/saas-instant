@@ -1,6 +1,5 @@
 import type { BuyerType } from '.prisma/control-client';
 import type { Issuer } from './document/issuer.config';
-import type { IssuerLegalForm } from '../manifest/sections/billing';
 
 /**
  * DER SCHNAPPSCHUSS — R2, wörtlich: „Eine festgeschriebene Rechnung ist ein
@@ -172,8 +171,10 @@ export function issuerSnapshot(
     issuerBankDetails: [
       issuer.bank.institution,
       `IBAN ${issuer.bank.iban}`,
-      `BIC ${issuer.bank.bic}`,
-    ].join(', '),
+      issuer.bank.bic ? `BIC ${issuer.bank.bic}` : '',
+    ]
+      .filter((part) => part !== '')
+      .join(', '),
     issuerContactName: issuer.contact.name,
     issuerContactPhone: issuer.contact.phone,
     issuerContactEmail: issuer.contact.email,
@@ -184,7 +185,12 @@ export function issuerSnapshot(
 }
 
 /**
- * Was einer Rechnung noch fehlt, um ein Beleg zu sein.
+ * Was einer Rechnung noch fehlt, um ein Beleg zu sein — Empfängerseite und
+ * Posten.
+ *
+ * DIE ANGABEN DER AUSSTELLERIN prüft nicht diese Funktion, sondern
+ * `validateIssuerProfile` aus `@saas-instant/shared` je Rechtsform (Fehler
+ * `issuer_incomplete`, Einstellungen → Firmendaten).
  *
  * GEPRÜFT WIRD BEIM FESTSCHREIBEN, nicht beim Entwurf. Ein Entwurf darf
  * unvollständig sein — man legt ihn an, während man die Adresse noch sucht.
@@ -196,59 +202,16 @@ export function issuerSnapshot(
  * vergibt erst das Festschreiben selbst, das Datum ist eine Pflichtspalte.
  */
 export function missingMandatoryDetails(
-  invoice: RecipientSnapshot &
-    IssuerSnapshot & {
-      linesCount: number;
-      /** Fehlt sie, gilt `company` (strengste Prüfung). */
-      legalForm?: IssuerLegalForm;
-    },
+  invoice: RecipientSnapshot & { linesCount: number },
 ): string[] {
-  const legalForm = invoice.legalForm ?? 'company';
   const missing: string[] = [];
   const required = (label: string, value: string | null): void => {
     if ((value ?? '').trim() === '') missing.push(label);
   };
 
-  // § 14 Abs. 4 Nr. 1 UStG: vollständiger Name und Anschrift beider Seiten.
+  // § 14 Abs. 4 Nr. 1 UStG: vollständiger Name und Anschrift der Empfängerin.
   required('Name der Rechnungsempfängerin', invoice.recipientName);
   required('Anschrift der Rechnungsempfängerin', invoice.recipientAddress);
-  required('Firmierung der Ausstellerin', invoice.issuerCompanyName);
-  required('Anschrift der Ausstellerin', invoice.issuerAddress);
-  // § 14 Abs. 4 Nr. 2 UStG: Steuernummer oder USt-IdNr. der Ausstellerin.
-  required('Umsatzsteuer-Identifikationsnummer', invoice.issuerVatId);
-  // § 125a HGB: Registerangaben der Gesellschaft. Einzelunternehmen und
-  // Vereine ohne Handelsregistereintrag müssen sie nicht nennen.
-  // [W3]: Der SITZ ist eine eigene Pflichtangabe und nicht durch die
-  // Geschäftsanschrift gedeckt.
-  if (legalForm === 'company') {
-    required('Sitz der KG', invoice.issuerSeat);
-    required('Registergericht der KG', invoice.issuerRegisterCourt);
-    required('Handelsregisternummer der KG', invoice.issuerCommercialRegisterA);
-  }
-  // Die Komplementärin ist OPTIONAL (nicht jede Ausstellerin ist eine
-  // GmbH & Co KG). Ist sie genannt, gehören ihre Angaben vollständig dazu.
-  if (legalForm === 'company' && (invoice.issuerGeneralPartner ?? '').trim() !== '') {
-    required('Sitz der Komplementärin', invoice.issuerGeneralPartnerSeat);
-    required(
-      'Registergericht der Komplementärin',
-      invoice.issuerGeneralPartnerRegisterCourt,
-    );
-    required(
-      'Handelsregisternummer der Komplementärin',
-      invoice.issuerGeneralPartnerCommercialRegisterB,
-    );
-    required('Geschäftsführung der Komplementärin', invoice.issuerManagingDirector);
-  }
-  // Ohne Bankverbindung weiß niemand, wohin gezahlt werden soll. Keine
-  // gesetzliche Pflicht, aber eine Rechnung ohne sie ist unbrauchbar.
-  required('Bankverbindung', invoice.issuerBankDetails);
-
-  // XRechnung (BR-DE-2): Ansprechpartner der Ausstellerin mit Telefon und
-  // E-Mail. Kommt aus der Konfiguration; fehlt es, scheitert die Validierung
-  // beim Empfänger, nicht erst bei uns.
-  required('Ansprechpartner der Ausstellerin', invoice.issuerContactName ?? null);
-  required('Telefon der Ausstellerin', invoice.issuerContactPhone ?? null);
-  required('E-Mail der Ausstellerin', invoice.issuerContactEmail ?? null);
 
   // Eine Behörde erwartet ihre Leitweg-ID (BT-10). Ohne sie kann die
   // Rechnung dort nicht zugeordnet werden und wird abgewiesen.

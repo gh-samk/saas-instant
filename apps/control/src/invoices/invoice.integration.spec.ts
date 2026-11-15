@@ -1310,17 +1310,18 @@ describe('Die Texte des Bearbeiten-Screens stehen auf dem Beleg', () => {
 
     expect(xml).toContain(INTRODUCTION);
     expect(xml).toContain(HINT);
-    expect(html).toContain(INTRODUCTION);
+    // Entwurf B: kein Einleitungssatz im PDF, der Zahlungshinweis bleibt.
+    expect(html).not.toContain(INTRODUCTION);
     expect(html).toContain(HINT);
   });
 
-  it('trägt Beschreibung und Postenzeitraum in das Dokument', async () => {
+  it('trägt Beschreibung und Postenzeitraum in das XML (nicht als Unterzeile im PDF)', async () => {
     const { invoiceId } = await withTexts('posten-beleg');
     await service.finalize(invoiceId, actor, SOURCE);
     const { xml, html } = await voucherFrom(invoiceId);
 
     expect(xml).toContain('Zugang für bis zu 60 Teilhabende');
-    expect(html).toContain('Zugang für bis zu 60 Teilhabende');
+    expect(html).not.toContain('Zugang für bis zu 60 Teilhabende');
     // Zwei Zeiträume: einer am Kopf, einer am Posten.
     expect(xml.match(/<ram:BillingSpecifiedPeriod>/g) ?? []).toHaveLength(2);
   });

@@ -1,3 +1,4 @@
+import { emptyIssuerProfile, validateIssuerProfile, type IssuerProfile } from '@saas-instant/shared';
 import { ISSUER_PRESETS } from './document/issuer.config';
 import {
   issuerSnapshot,
@@ -81,13 +82,11 @@ describe('recipientSnapshot', () => {
 });
 
 describe('missingMandatoryDetails (§ 14 UStG, § 125a HGB)', () => {
-  const issuer = issuerSnapshot(ISSUER_PRESETS);
 
   it('beanstandet nichts an einer vollständigen Rechnung', () => {
     expect(
       missingMandatoryDetails({
         ...recipientSnapshot(COMPLETE),
-        ...issuer,
         linesCount: 1,
       }),
     ).toEqual([]);
@@ -104,7 +103,6 @@ describe('missingMandatoryDetails (§ 14 UStG, § 125a HGB)', () => {
   it('beanstandet eine fehlende Empfängeranschrift', () => {
     const missing = missingMandatoryDetails({
       ...recipientSnapshot(EMPTY),
-      ...issuer,
       linesCount: 1,
     });
     expect(missing.join(' ')).toContain('Anschrift der Rechnungsempfängerin');
@@ -113,52 +111,14 @@ describe('missingMandatoryDetails (§ 14 UStG, § 125a HGB)', () => {
   it('beanstandet eine Anschrift, die nur aus einem Ort besteht', () => {
     const missing = missingMandatoryDetails({
       ...recipientSnapshot({ ...EMPTY, city: 'Weimar' }),
-      ...issuer,
       linesCount: 1,
     });
     expect(missing.join(' ')).toContain('Vollständige Anschrift');
   });
 
-  it('beanstandet eine fehlende USt-IdNr. der Ausstellerin', () => {
-    const missing = missingMandatoryDetails({
-      ...recipientSnapshot(COMPLETE),
-      ...issuer,
-      issuerVatId: null,
-      linesCount: 1,
-    });
-    expect(missing).toContain('Umsatzsteuer-Identifikationsnummer');
-  });
-
-  it('beanstandet fehlende Registerangaben nach § 125a HGB', () => {
-    const missing = missingMandatoryDetails({
-      ...recipientSnapshot(COMPLETE),
-      ...issuer,
-      issuerCommercialRegisterA: null,
-      issuerGeneralPartnerCommercialRegisterB: null,
-      linesCount: 1,
-    });
-    expect(missing).toContain('Handelsregisternummer der KG');
-    expect(missing).toContain('Handelsregisternummer der Komplementärin');
-  });
-
-  it('verlangt nichts zur Komplementärin, wenn keine genannt ist', () => {
-    const missing = missingMandatoryDetails({
-      ...recipientSnapshot(COMPLETE),
-      ...issuer,
-      issuerGeneralPartner: null,
-      issuerGeneralPartnerSeat: null,
-      issuerGeneralPartnerRegisterCourt: null,
-      issuerGeneralPartnerCommercialRegisterB: null,
-      issuerManagingDirector: null,
-      linesCount: 1,
-    });
-    expect(missing.filter((m) => m.includes('Komplementärin'))).toEqual([]);
-  });
-
   it('beanstandet eine Rechnung ohne Posten', () => {
     const missing = missingMandatoryDetails({
       ...recipientSnapshot(COMPLETE),
-      ...issuer,
       linesCount: 0,
     });
     expect(missing).toContain('Mindestens ein Rechnungsposten');
@@ -241,96 +201,92 @@ describe('E-Rechnung im Schnappschuss (Aussteller)', () => {
   });
 });
 
-describe('missingMandatoryDetails je Rechtsform und Käuferart', () => {
-  const issuer = issuerSnapshot(ISSUER_PRESETS);
-  const noRegister = {
-    issuerSeat: null,
-    issuerRegisterCourt: null,
-    issuerCommercialRegisterA: null,
-    issuerGeneralPartner: null,
-    issuerGeneralPartnerSeat: null,
-    issuerGeneralPartnerRegisterCourt: null,
-    issuerGeneralPartnerCommercialRegisterB: null,
-    issuerManagingDirector: null,
-  };
-
-  it('verlangt bei einer Gesellschaft Sitz, Gericht und Registernummer (Vorgabe)', () => {
-    const base = { ...recipientSnapshot(COMPLETE), ...issuer, ...noRegister, linesCount: 1 };
-    for (const legalForm of [undefined, 'company' as const]) {
-      const missing = missingMandatoryDetails({ ...base, legalForm });
-      expect(missing).toEqual(
-        expect.arrayContaining([
-          'Sitz der KG',
-          'Registergericht der KG',
-          'Handelsregisternummer der KG',
-        ]),
-      );
-    }
-  });
-
-  it.each(['sole_proprietor', 'association'] as const)(
-    'verlangt bei %s keine Register- und Sitzangaben',
-    (legalForm) => {
-      const missing = missingMandatoryDetails({
-        ...recipientSnapshot(COMPLETE),
-        ...issuer,
-        ...noRegister,
-        linesCount: 1,
-        legalForm,
-      });
-      expect(missing).toEqual([]);
+describe('Pflichtangaben der Ausstellerin je Rechtsform (validateIssuerProfile)', () => {
+  const full = (): IssuerProfile => ({
+    ...emptyIssuerProfile('gmbh_co_kg'),
+    name: 'Beispiel GmbH & Co. KG',
+    street: 'Musterstraße 1',
+    postalCode: '99999',
+    city: 'Musterstadt',
+    seat: 'Musterstadt',
+    registerCourt: 'Musterstadt',
+    registerNumber: 'HRA 99999',
+    vatId: 'DE136695976',
+    iban: 'DE89370400440532013000',
+    generalPartner: {
+      name: 'Beispiel Verwaltungs GmbH',
+      seat: 'Musterstadt',
+      registerCourt: 'Musterstadt',
+      registerNumber: 'HRB 99999',
+      managingDirectors: ['Erika Mustermann'],
+      supervisoryChair: '',
     },
-  );
+  });
+  const fields = (p: IssuerProfile): string[] =>
+    validateIssuerProfile(p).map((i) => i.field);
 
-  it('verlangt auch bei Einzelunternehmen USt-IdNr., Anschrift und Bank', () => {
-    const missing = missingMandatoryDetails({
-      ...recipientSnapshot(COMPLETE),
-      ...issuer,
-      ...noRegister,
-      issuerVatId: null,
-      issuerBankDetails: null,
-      linesCount: 1,
-      legalForm: 'sole_proprietor',
-    });
-    expect(missing).toEqual(
-      expect.arrayContaining(['Umsatzsteuer-Identifikationsnummer', 'Bankverbindung']),
-    );
+  it('lässt ein vollständiges Profil durch', () => {
+    expect(validateIssuerProfile(full())).toEqual([]);
   });
 
-  it('verlangt den Rückfrageweg der Ausstellerin (BR-DE-2)', () => {
-    const missing = missingMandatoryDetails({
-      ...recipientSnapshot(COMPLETE),
-      ...issuer,
-      issuerContactName: null,
-      issuerContactPhone: ' ',
-      issuerContactEmail: null,
-      linesCount: 1,
-    });
-    expect(missing).toEqual(
+  it('GmbH & Co. KG verlangt zusätzlich die Angaben der Komplementärin', () => {
+    const p = { ...full(), generalPartner: emptyIssuerProfile().generalPartner };
+    expect(fields(p)).toEqual(
       expect.arrayContaining([
-        'Ansprechpartner der Ausstellerin',
-        'Telefon der Ausstellerin',
-        'E-Mail der Ausstellerin',
+        'generalPartner.name',
+        'generalPartner.seat',
+        'generalPartner.registerCourt',
+        'generalPartner.registerNumber',
+        'generalPartner.managingDirectors',
       ]),
     );
   });
 
+  it('GmbH verlangt Register und Geschäftsführung, Einzelunternehmen die Inhaberin', () => {
+    const gmbh: IssuerProfile = {
+      ...full(),
+      legalForm: 'gmbh',
+      name: 'Beispiel GmbH',
+      registerNumber: '',
+      managingPersons: [],
+    };
+    expect(fields(gmbh)).toEqual(
+      expect.arrayContaining(['registerNumber', 'managingPersons']),
+    );
+    const sole: IssuerProfile = {
+      ...emptyIssuerProfile('einzelunternehmen'),
+      name: 'Erika Mustermann',
+      street: 'Musterstraße 1',
+      postalCode: '99999',
+      city: 'Musterstadt',
+      iban: 'DE89370400440532013000',
+      taxNumber: '12/345/67890',
+    };
+    expect(fields(sole)).toEqual(['ownerName']);
+    expect(fields({ ...sole, ownerName: 'Erika Mustermann' })).toEqual([]);
+  });
+
+  it('verlangt USt-IdNr. oder Steuernummer und eine IBAN', () => {
+    const p = { ...full(), vatId: '', taxNumber: '', iban: '' };
+    expect(fields(p)).toEqual(expect.arrayContaining(['vatId', 'iban']));
+  });
+});
+
+describe('missingMandatoryDetails: Käuferart', () => {
   it('verlangt bei einer Behörde die Leitweg-ID, bei einem Unternehmen nicht', () => {
     const authority = recipientSnapshot({ ...COMPLETE, buyerType: 'authority' });
     expect(
-      missingMandatoryDetails({ ...authority, ...issuer, linesCount: 1 }),
+      missingMandatoryDetails({ ...authority, linesCount: 1 }),
     ).toContain('Leitweg-ID der Behörde (Käuferreferenz)');
     expect(
       missingMandatoryDetails({
         ...recipientSnapshot({ ...COMPLETE, buyerType: 'authority', buyerReference: '991-1-1' }),
-        ...issuer,
         linesCount: 1,
       }),
     ).toEqual([]);
     expect(
       missingMandatoryDetails({
         ...recipientSnapshot({ ...COMPLETE, buyerType: 'consumer' }),
-        ...issuer,
         linesCount: 1,
       }),
     ).toEqual([]);

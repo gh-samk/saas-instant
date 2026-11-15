@@ -1,4 +1,4 @@
-import type { Issuer } from './issuer.config';
+import type { DocumentIssuer } from './issuer-mapping';
 
 /**
  * DAS DOKUMENTMODELL — die Zwischenform zwischen Datenbankzeile und Ausgabe.
@@ -79,7 +79,12 @@ export interface InvoiceDocument {
   /** UNTDID 4461: `58` Überweisung (Vorgabe) oder `59` Lastschrift. */
   paymentMeansCode?: string;
   directDebit?: DocumentDirectDebit;
-  issuer: Issuer;
+  /**
+   * Aussteller samt Darstellung: `issuer.blocks` (Briefkopf-, Kontakt-, Bank-
+   * und Pflichtangabenzeilen), `issuer.logoDataUri`, `issuer.accentColor`,
+   * `issuer.legalForm`. Das ist das Format, das der Renderer liest.
+   */
+  issuer: DocumentIssuer;
   recipient: DocumentRecipient;
   lines: DocumentLine[];
   taxBreakdown: DocumentTaxShare[];

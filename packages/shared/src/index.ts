@@ -13,3 +13,4 @@ export * from './labels';
 export * from './company-name';
 export * from './export';
 export * from './mail-layout';
+export * from './issuer-profile';

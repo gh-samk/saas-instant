@@ -36,6 +36,7 @@ import { BroadcastModule } from './broadcast/broadcast.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { FeatureFlagModule } from './feature-flags/feature-flag.module';
 import { SettingsModule } from './settings/settings.module';
+import { IssuerProfileModule } from './settings/issuer-profile.module';
 import { BackupSettingsModule } from './backup-settings/backup-settings.module';
 import { ManifestModule } from './manifest/manifest.module';
 import { InstallationModule } from './installation/installation.module';
@@ -46,6 +47,8 @@ import { InstallationModule } from './installation/installation.module';
     // Produkt-Manifest (global): Name, Mail, Abrechnung, Provisionierung, UI;
     // liefert außerdem GET /api/public-config.
     ManifestModule,
+    // Firmenprofil (global): Rechnungsaussteller, Logo, Akzentfarbe.
+    IssuerProfileModule,
     // Bindung an genau eine Software (Slug in der DB, Abweichung = Startabbruch).
     InstallationModule,
     // Globales Basis-Rate-Limit. Die Anmelderouten haben zusätzlich ein

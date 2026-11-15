@@ -1,12 +1,22 @@
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
 import { apiFetch } from '../lib/api-client';
 import { useT } from '../i18n';
+import { publicLogoUrl } from '../lib/api';
+import {
+  DEFAULT_ACCENT,
+  applyAccent,
+  isHexColor,
+  readRememberedAccent,
+  rememberAccent,
+} from '../lib/accent';
 
 export interface ProductValues {
   /**
@@ -20,6 +30,14 @@ export interface ProductValues {
   bound: boolean;
   /** Soll der Untertitel „Verwaltung" erscheinen? Nein, wenn der Name schon darauf endet. */
   showBrand: boolean;
+  /** Akzentfarbe der Oberfläche (Hell); Standard bis die Konfiguration da ist. */
+  accentColor: string;
+  /** Aufgehellte Akzentfarbe für den Dunkelmodus, oder null = aus der Farbe berechnet. */
+  accentOnDark: string | null;
+  /** Gibt es ein hochgeladenes Firmenlogo (`/api/public/logo`)? */
+  hasLogo: boolean;
+  /** Lädt die öffentliche Konfiguration neu, z. B. nach dem Speichern der Firmendaten. */
+  refresh: () => void;
 }
 
 /** Name vor der Anbindung bzw. solange `/api/public-config` nicht geantwortet hat. */
@@ -30,8 +48,22 @@ export function showsBrand(name: string): boolean {
   return !/verwaltung\s*$/i.test(name.trim());
 }
 
-function valuesFor(name: string, logoUrl: string | null, bound: boolean): ProductValues {
-  return { productName: name, logoUrl, bound, showBrand: showsBrand(name) };
+function valuesFor(
+  name: string,
+  logoUrl: string | null,
+  bound: boolean,
+  extra: Partial<Pick<ProductValues, 'accentColor' | 'accentOnDark' | 'hasLogo'>> = {},
+): ProductValues {
+  return {
+    productName: name,
+    logoUrl,
+    bound,
+    showBrand: showsBrand(name),
+    accentColor: extra.accentColor ?? DEFAULT_ACCENT,
+    accentOnDark: extra.accentOnDark ?? null,
+    hasLogo: extra.hasLogo ?? false,
+    refresh: () => undefined,
+  };
 }
 
 /** Neutraler Ersatz, solange `/api/public-config` nicht geantwortet hat. */
@@ -45,17 +77,35 @@ const STORAGE_KEY = 'product-config';
  * (privates Fenster, gesperrt) gilt die neutrale Vorgabe.
  */
 function remembered(): ProductValues {
+  // Der Akzent hat einen eigenen Speicher und gilt auch ohne Anbindung.
+  const accent = readRememberedAccent();
+  const base = rememberedProduct();
+  return { ...base, accentColor: accent.accentColor, accentOnDark: accent.accentOnDark };
+}
+
+function rememberedProduct(): ProductValues {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return PRODUCT_DEFAULT;
-    const o = JSON.parse(raw) as { productName?: unknown; logoUrl?: unknown; bound?: unknown };
+    const o = JSON.parse(raw) as {
+      productName?: unknown;
+      logoUrl?: unknown;
+      bound?: unknown;
+      hasLogo?: unknown;
+    };
     if (o.bound !== true || typeof o.productName !== 'string' || o.productName === '') {
       return PRODUCT_DEFAULT;
     }
+    const hasLogo = o.hasLogo === true;
     return valuesFor(
       o.productName,
-      typeof o.logoUrl === 'string' && o.logoUrl !== '' ? o.logoUrl : null,
+      hasLogo
+        ? publicLogoUrl()
+        : typeof o.logoUrl === 'string' && o.logoUrl !== ''
+          ? o.logoUrl
+          : null,
       true,
+      { hasLogo },
     );
   } catch {
     return PRODUCT_DEFAULT;
@@ -66,7 +116,13 @@ function remember(v: ProductValues): void {
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ productName: v.productName, logoUrl: v.logoUrl, bound: v.bound }),
+      JSON.stringify({
+        productName: v.productName,
+        // Eigenes Logo wird nicht als Adresse gemerkt, sondern als Flag.
+        logoUrl: v.hasLogo ? null : v.logoUrl,
+        bound: v.bound,
+        hasLogo: v.hasLogo,
+      }),
     );
   } catch {
     // Speicher nicht verfügbar: nur Komfort, kein Fehler.
@@ -85,12 +141,24 @@ const Context = createContext<ProductValues>(PRODUCT_DEFAULT);
 export function ProductProvider({ children }: { children: ReactNode }) {
   const t = useT();
   const [values, setValues] = useState<ProductValues>(remembered);
+  const [reload, setReload] = useState(0);
+  const [logoVersion, setLogoVersion] = useState<number | null>(null);
+
+  const refresh = useCallback(() => {
+    setLogoVersion(Date.now());
+    setReload((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    apiFetch<{ productName?: unknown; logoUrl?: unknown; bound?: unknown } | null>(
-      '/api/public-config',
-    )
+    apiFetch<{
+      productName?: unknown;
+      logoUrl?: unknown;
+      bound?: unknown;
+      accentColor?: unknown;
+      accentOnDark?: unknown;
+      hasLogo?: unknown;
+    } | null>('/api/public-config')
       .then((response) => {
         if (!active || !response) return;
         const bound = response.bound === true;
@@ -98,13 +166,23 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           bound && typeof response.productName === 'string' && response.productName !== ''
             ? response.productName
             : PRODUCT_NAME_DEFAULT;
-        const logo =
-          typeof response.logoUrl === 'string' && response.logoUrl !== ''
+        const hasLogo = response.hasLogo === true;
+        const logo = hasLogo
+          ? publicLogoUrl(logoVersion)
+          : typeof response.logoUrl === 'string' && response.logoUrl !== ''
             ? response.logoUrl
             : null;
-        const next = valuesFor(name, logo, bound);
+        const accentColor = isHexColor(response.accentColor)
+          ? response.accentColor.toLowerCase()
+          : DEFAULT_ACCENT;
+        const accentOnDark = isHexColor(response.accentOnDark)
+          ? response.accentOnDark.toLowerCase()
+          : null;
+        const next = valuesFor(name, logo, bound, { accentColor, accentOnDark, hasLogo });
         setValues(next);
         remember(next);
+        applyAccent(accentColor, accentOnDark);
+        rememberAccent(accentColor, accentOnDark);
         document.title = t('common.productContext.text', { name });
       })
       .catch(() => {
@@ -113,9 +191,11 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload]);
 
-  return <Context.Provider value={values}>{children}</Context.Provider>;
+  const value = useMemo(() => ({ ...values, refresh }), [values, refresh]);
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
 /** Ohne Provider (z. B. in Einzeltests) liefert der Hook die neutrale Vorgabe. */

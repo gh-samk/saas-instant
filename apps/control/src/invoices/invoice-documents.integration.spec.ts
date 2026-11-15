@@ -11,6 +11,7 @@ import {
   prisma,
 } from '../test-support/company-provisioning';
 import { IssuerConfigService } from './document/issuer.config';
+import { documentIssuerFromCurrent as documentIssuerFromCurrentForTest } from './document/issuer-mapping';
 import type { InvoiceRenderer } from './document/invoice-renderer.client';
 import type { CiiProfile } from './document/document.types';
 import { InvoiceDocumentService } from './document.service';
@@ -313,6 +314,47 @@ describe('Entwurf → Festschreiben → Dokumente', () => {
       },
     });
     expect(generated).toBe(1);
+  });
+
+  it('friert die Darstellung beim Festschreiben ein: Profiländerung danach ändert PDF-HTML und XML nicht', async () => {
+    const created = await draft('layout-freeze');
+    const base = await issuer.current();
+    // Mutable Attrappe: gibt zuerst das Profil von heute, später ein geändertes.
+    let now: Awaited<ReturnType<typeof issuer.current>> = {
+      ...base,
+      accentColor: '#112233',
+      logoDataUri: 'data:image/png;base64,AAAA',
+    };
+    const moving = new IssuerConfigService(env(ISSUER_ENV));
+    moving.current = async () => now;
+    const finalizing = new InvoiceService(prisma, audit, prices, moving, env(ISSUER_ENV));
+    await finalizing.finalize(created.invoiceId, actor, SOURCE);
+
+    now = {
+      ...now,
+      accentColor: '#AA0000',
+      logoDataUri: null,
+      profile: { ...now.profile, taxNumber: '99/999/99999', phone: '+49 1 2' },
+    };
+    const changedIssuer = documentIssuerFromCurrentForTest(now);
+    expect(changedIssuer.blocks.legalLines.join('|')).toContain('99/999/99999');
+
+    const first = rendererDouble();
+    const documents = new InvoiceDocumentService(prisma, audit, moving, first.renderer);
+    await documents.download('pdf', created.invoiceId, actor, SOURCE);
+    const html = first.calls[0]!.html;
+    expect(html).toContain('--acc:#112233');
+    expect(html).toContain('data:image/png;base64,AAAA');
+    expect(html).not.toContain('99/999/99999');
+    expect(first.calls[0]!.xml).not.toContain('99/999/99999');
+    expect(first.calls[0]!.xml).not.toContain('#AA0000');
+
+    // Der gespeicherte Schnappschuss ist nach dem Festschreiben unveränderlich.
+    await expect(
+      prisma.$executeRawUnsafe(
+        `UPDATE "Invoice" SET "issuerLayout" = '{}'::jsonb WHERE "id" = '${created.invoiceId}'`,
+      ),
+    ).rejects.toThrow(/GoBD/);
   });
 
   it('schützt gespeicherte Dokumente per Trigger vor dem Überschreiben (set-once)', async () => {

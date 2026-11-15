@@ -22,7 +22,7 @@ type PageState = 'checking' | 'form' | 'invalid' | 'done';
  */
 export function NewPasswordPage() {
   const t = useT();
-  const { productName, showBrand } = useProduct();
+  const { productName, showBrand, logoUrl } = useProduct();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') ?? '';
 
@@ -100,7 +100,7 @@ export function NewPasswordPage() {
 
   if (state === 'checking') {
     return (
-      <AuthCard title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
+      <AuthCard logoUrl={logoUrl} title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
         <Spinner text={t('passwort.checkingLink')} />
       </AuthCard>
     );
@@ -108,7 +108,7 @@ export function NewPasswordPage() {
 
   if (state === 'invalid') {
     return (
-      <AuthCard title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
+      <AuthCard logoUrl={logoUrl} title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
         <div className="flex items-start gap-3 text-left">
           <AlertTriangle
             className="mt-0.5 h-5 w-5 shrink-0 text-gefahr"
@@ -125,7 +125,7 @@ export function NewPasswordPage() {
 
   if (state === 'done') {
     return (
-      <AuthCard title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
+      <AuthCard logoUrl={logoUrl} title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
         <div className="flex items-center gap-2 text-left">
           <CheckCircle2 className="h-5 w-5 text-primaer" aria-hidden="true" />
           <p className="text-sm text-text">{t('passwort.doneText')}</p>
@@ -141,7 +141,7 @@ export function NewPasswordPage() {
   }
 
   return (
-    <AuthCard title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
+    <AuthCard logoUrl={logoUrl} title={productName} brand={showBrand ? t('passwort.brand') : undefined} subtitle={t('passwort.subtitle')}>
       {startSeconds === null ? (
         <p className="mb-4 text-sm text-leise">{t('passwort.introNoCountdown')}</p>
       ) : (

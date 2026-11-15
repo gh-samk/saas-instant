@@ -1,3 +1,4 @@
+import type { IssuerProfile } from '@saas-instant/shared';
 import { apiFetch, ApiError, fetchCsrf } from './api-client';
 import type {
   LoginOptionsJson,
@@ -2875,4 +2876,58 @@ export async function downloadGobdExport(
   const disposition = response.headers.get('content-disposition') ?? '';
   const name = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? null;
   return { blob: await response.blob(), fileName: name };
+}
+
+// ---------------------------------------------------------------------------
+// Firmendaten (Rechnungsstellerin), Logo und Akzentfarbe
+// ---------------------------------------------------------------------------
+
+export interface IssuerLogoInfo {
+  present: boolean;
+  mime: string;
+  sha256: string;
+}
+
+/** Eine fehlende oder fehlerhafte Pflichtangabe, wie der Server sie meldet. */
+export interface IssuerMissing {
+  field: string;
+  label: string;
+  code: string;
+}
+
+export interface IssuerSettings {
+  profile: IssuerProfile;
+  accentColor: string;
+  logo: IssuerLogoInfo | null;
+  missing: IssuerMissing[];
+}
+
+export function fetchIssuer(): Promise<IssuerSettings> {
+  return apiFetch<IssuerSettings>('/api/settings/issuer');
+}
+
+/** Speichert auch unvollständige Angaben; `missing` nennt, was für Rechnungen noch fehlt. */
+export function saveIssuer(body: {
+  profile: IssuerProfile;
+  accentColor: string;
+}): Promise<IssuerSettings> {
+  return apiFetch<IssuerSettings>('/api/settings/issuer', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function uploadIssuerLogo(file: File): Promise<unknown> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiFetch<unknown>('/api/settings/issuer/logo', { method: 'POST', body: form });
+}
+
+export function deleteIssuerLogo(): Promise<unknown> {
+  return apiFetch<unknown>('/api/settings/issuer/logo', { method: 'DELETE' });
+}
+
+/** Öffentliche Logo-Adresse; `version` (z. B. der Hash) umgeht veraltete Browser-Zwischenspeicher. */
+export function publicLogoUrl(version?: string | number | null): string {
+  return version ? `/api/public/logo?v=${encodeURIComponent(String(version))}` : '/api/public/logo';
 }

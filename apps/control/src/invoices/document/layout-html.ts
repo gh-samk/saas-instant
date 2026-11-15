@@ -2,14 +2,19 @@ import { centAsText } from '../invoice.amount';
 import type { InvoiceDocument } from './document.types';
 
 /**
- * DAS SICHTBARE RECHNUNGSDOKUMENT ALS HTML.
+ * DAS SICHTBARE RECHNUNGSDOKUMENT ALS HTML — Entwurf B (Briefkopf), freigegeben
+ * in `docs/design-proposals/rechnung-entwurf-b.html`.
  *
- * Übernommen aus `tools/invoice-renderer/src/layout-html.mjs`. Zwei
- * Dinge daraus sind für PDF/A entscheidend und stehen deshalb hier und nicht
- * im Renderer:
+ * Briefkopf, Bankblock und Pflichtangaben kommen fertig als Zeilen aus dem
+ * Firmenprofil (`issuer.blocks`), Logo und Akzentfarbe aus dem Profil. Das
+ * Dokument der Rechnungsdienst-Container (Java) nimmt HTML entgegen; dieses
+ * Modul ist die einzige Stelle, die es erzeugt. Zwei Dinge sind für PDF/A
+ * entscheidend und stehen deshalb hier:
  *
- * 1. `font-family` nennt GENAU EINE Schrift, die im Container als Datei
- *    vorliegt. Ein Rückfall auf eine Systemschrift kann dazu führen, dass der
+ * 1. `font-family` nennt die Schrift, die im Container als Datei vorliegt:
+ *    Inter, als Variable Font. Fontconfig kennt sie unter dem Familiennamen
+ *    „Inter Variable“ (nicht „Inter“); mit „Inter“ griff Chromium auf DejaVu
+ *    zurück. Ein Rückfall auf eine Systemschrift kann dazu führen, dass der
  *    Renderer eine nicht einbettbare Schrift wählt — PDF/A verlangt, dass jede
  *    verwendete Schrift eingebettet ist.
  * 2. KEINE EXTERNEN RESSOURCEN. Kein Bild per URL, keine Webfont-URL. Was beim
@@ -39,6 +44,14 @@ export function dateAsText(iso: string): string {
   return `${day}.${month}.${year}`;
 }
 
+/** `2026-11-01`/`2026-11-30` → `01.11. – 30.11.2026` (Jahr vorn nur bei Jahreswechsel). */
+function periodAsText(from: string, until: string): string {
+  const f = dateAsText(from);
+  return from.slice(0, 4) === until.slice(0, 4)
+    ? `${f.slice(0, 6)} – ${dateAsText(until)}`
+    : `${f} – ${dateAsText(until)}`;
+}
+
 /** Ländername aus dem Code; leer, wenn nichts gesetzt ist. Nichts wird erfunden. */
 function countryAsText(code: string): string {
   const value = (code ?? '').trim();
@@ -60,52 +73,84 @@ function quantityAsText(quantity: number): string {
     : quantity.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 3 });
 }
 
-export function createHtml(r: InvoiceDocument): string {
+/** Profil der ausgelieferten XML-Fassung; der ZUGFeRD-Hinweis gilt nur für EN16931. */
+export type LayoutProfile = 'EN16931' | 'XRECHNUNG';
+
+const DEFAULT_ACCENT = '#0369A1';
+
+const UNIT_NAMES: Record<string, string> = {
+  C62: 'Stück',
+  H87: 'Stück',
+  MON: 'Monat',
+  ANN: 'Jahr',
+  DAY: 'Tag',
+  HUR: 'Stunde',
+  LS: 'pauschal',
+  KGM: 'kg',
+  MTR: 'm',
+};
+
+const lines = (rows: string[]): string => rows.map((l) => h(l)).join('<br>');
+
+export function createHtml(r: InvoiceDocument, profile: LayoutProfile = 'EN16931'): string {
   const a = r.issuer;
   const e = r.recipient;
-  const k = a.generalPartner;
-  const countryName = countryAsText(a.address.country);
-  // Nur drucken, was gesetzt ist: ohne Gesellschafterin kein Block, ohne
-  // Register oder Geschäftsführung keine leeren Zeilen.
-  const partnerLines = [
-    k.seat ? `Sitz ${h(k.seat)}` : '',
-    `${k.registerCourt} ${k.registerIdentifier}`.trim() ? h(`${k.registerCourt} ${k.registerIdentifier}`.trim()) : '',
-    k.managingDirector.length > 0 ? `Geschäftsführer: ${h(k.managingDirector.join(', '))}` : '',
-  ].filter((line) => line !== '');
-  const partnerBlock = k.name.trim() === ''
-    ? ''
-    : `<div>
-    <b>Persönlich haftende Gesellschafterin</b><br>
-    ${h(k.name)}${partnerLines.length > 0 ? `<br>\n    ${partnerLines.join('<br>\n    ')}` : ''}
-  </div>`;
+  const accent = /^#[0-9a-fA-F]{6}$/.test(a.accentColor ?? '')
+    ? (a.accentColor as string)
+    : DEFAULT_ACCENT;
+  const [first = '', ...rest] = a.blocks.companyLines;
+  const logo = a.logoDataUri
+    ? `<img class="logo" alt="" src="${h(a.logoDataUri).replaceAll('"', '&quot;')}">`
+    : `<div class="mark">${h(Array.from(a.name.trim())[0] ?? '')}</div>`;
+  const contact = a.blocks.contactLines;
+  const companyBlock =
+    `<b>${h(first)}</b>` +
+    (rest.length > 0 ? `<br>${lines(rest)}` : '') +
+    (contact.length > 0 ? `<br><br>${lines(contact)}` : '');
+  const recipientLines = [
+    e.address.street,
+    `${e.address.postalCode} ${e.address.city}`.trim(),
+    countryAsText(e.address.country) === 'Deutschland' ? '' : countryAsText(e.address.country),
+  ].filter((l) => l !== '');
+
+  const meta: Array<[string, string]> = [
+    ['Nummer', h(r.number)],
+    ['Datum', dateAsText(r.invoiceDate)],
+    ['Zeitraum', periodAsText(r.servicePeriod.from, r.servicePeriod.until)],
+    ['Fällig am', dateAsText(r.dueAt)],
+  ];
+  if (r.buyerReference) meta.push(['Leitweg-ID', h(r.buyerReference)]);
 
   const linesRows = r.lines
     .map(
       (p) => `
-      <tr>
-        <td class="mitte">${h(p.row)}</td>
-        <td>
-          <span class="bezeichnung">${h(p.label)}</span>
-          ${p.description ? `<span class="beschreibung">${h(p.description)}</span>` : ''}
-          ${p.period ? `<span class="beschreibung">${dateAsText(p.period.from)} – ${dateAsText(p.period.until)}</span>` : ''}
-        </td>
-        <td class="rechts">${quantityAsText(p.quantity)}</td>
-        <td class="rechts">${centAsText(p.unitPriceCent)}</td>
-        <td class="mitte">${h(p.taxRate)} %</td>
-        <td class="rechts">${centAsText(p.netCent)}</td>
-      </tr>`,
+  <div class="tr"><div class="lei"><span class="pos">${h(p.row)}</span><span><b>${h(p.label)}</b></span></div><div class="num"><span>${quantityAsText(p.quantity)}</span><span>${h(
+    UNIT_NAMES[p.unit] ?? p.unit,
+  )}</span><span>${centAsText(p.unitPriceCent)} €</span><span>${centAsText(p.netCent)} €</span></div></div>`,
     )
     .join('');
 
   const taxRows = r.taxBreakdown
     .map(
-      (t) => `
-      <tr>
-        <th>zzgl. ${h(t.record)} % USt. auf ${centAsText(t.basisCent)} €</th>
-        <td class="rechts">${centAsText(t.taxCent)} €</td>
-      </tr>`,
+      (t) =>
+        `<div class="row"><span>zzgl. ${h(t.record)} % USt</span><span>${centAsText(t.taxCent)} €</span></div>`,
     )
     .join('');
+
+  // Zahlungssatz, gesetzlich nötige Hinweise (§ 19 UStG, Steuerbefreiung,
+  // Reverse Charge) und der eigene Zahlungshinweis; ZUGFeRD-Hinweis nur beim
+  // Profil EN16931. Kein Einleitungssatz, keine Unterzeile je Leistung.
+  const notes = [r.paymentTerm, r.hint, r.paymentNote].filter(
+    (t): t is string => (t ?? '') !== '',
+  );
+
+  // Fußzeile: Basislinie 4,5 mm, unterste Zeile höchstens bei 279 mm.
+  // Beginnt höher, wenn mehr Zeilen anfallen, statt abgeschnitten zu werden.
+  // Spaltenbreite 79 mm ≈ 44 Zeichen je Zeile bei 9 pt; lange Zeilen brechen um.
+  const rowCount = (rows: string[]): number =>
+    rows.reduce((n, l) => n + Math.max(1, Math.ceil(Array.from(l).length / 44)), 0);
+  const footerRows = Math.max(rowCount(a.blocks.bankLines), rowCount(a.blocks.legalLines), 1);
+  const footerTop = Math.min(247.5, 279 - footerRows * 4.5);
 
   return `<!DOCTYPE html>
 <html lang="de">
@@ -113,139 +158,69 @@ export function createHtml(r: InvoiceDocument): string {
 <meta charset="utf-8">
 <title>Rechnung ${h(r.number)}</title>
 <style>
-  @page { size: A4; margin: 16mm 18mm 12mm 18mm; }
-  * { box-sizing: border-box; }
-  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body {
-    font-family: "DejaVu Sans";
-    font-size: 9.5pt;
-    line-height: 1.45;
-    color: #1a1a1a;
-    margin: 0;
-  }
-  header { display: flex; justify-content: space-between; align-items: flex-start; }
-  .marke { font-size: 15pt; font-weight: bold; letter-spacing: 0.02em; }
-  .marke small { display: block; font-size: 8pt; font-weight: normal; color: #555; letter-spacing: 0; }
-  .absenderblock { text-align: right; font-size: 8pt; color: #555; line-height: 1.5; }
-  .absenderzeile { margin-top: 13mm; font-size: 7pt; color: #666;
-                   border-bottom: 0.4pt solid #bbb; padding-bottom: 1mm; }
-  .empfaenger { margin-top: 2mm; line-height: 1.5; }
-  .empfaenger .name { font-weight: bold; }
-  h1 { font-size: 13pt; margin: 10mm 0 1mm 0; }
-  .eckdaten { display: flex; gap: 8mm; font-size: 8.5pt; color: #444; margin-bottom: 6mm; }
-  .eckdaten div span { display: block; color: #777; font-size: 7.5pt; text-transform: uppercase;
-                       letter-spacing: 0.05em; }
-  table.lines { width: 100%; border-collapse: collapse; margin-top: 2mm; }
-  table.lines th { text-align: left; font-size: 7.5pt; text-transform: uppercase;
-                    letter-spacing: 0.05em; color: #555; border-bottom: 0.8pt solid #333;
-                    padding: 0 2mm 1.5mm 0; }
-  table.lines td { padding: 2.5mm 2mm 2.5mm 0; border-bottom: 0.4pt solid #ddd;
-                    vertical-align: top; }
-  .bezeichnung { display: block; font-weight: bold; }
-  .beschreibung { display: block; color: #555; font-size: 8.5pt; }
-  .rechts { text-align: right; white-space: nowrap; }
-  .mitte { text-align: center; white-space: nowrap; }
-  table.summe { margin-left: auto; margin-top: 4mm; border-collapse: collapse; min-width: 78mm; }
-  table.summe th { text-align: left; font-weight: normal; padding: 1mm 6mm 1mm 0; }
-  table.summe td { padding: 1mm 0; }
-  table.summe tr.gesamt th, table.summe tr.gesamt td {
-    font-weight: bold; font-size: 11pt; border-top: 0.8pt solid #333; padding-top: 2mm;
-  }
-  .zahlung { margin-top: 7mm; }
-  .zahlung h2 { font-size: 9.5pt; margin: 0 0 1mm 0; }
-  .zahlung dl { display: grid; grid-template-columns: 34mm 1fr; gap: 0.6mm 3mm; margin: 0; }
-  .zahlung dt { color: #666; }
-  .zahlung dd { margin: 0; }
-  .hinweis { margin-top: 6mm; font-size: 8.5pt; color: #444; }
-  .einleitung { margin: 5mm 0 0; font-size: 9.5pt; }
-  footer { margin-top: 8mm; border-top: 0.4pt solid #bbb; padding-top: 2mm;
-           font-size: 6.8pt; line-height: 1.5; color: #555;
-           display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
-  footer b { font-weight: bold; color: #333; }
+@page{size:A4;margin:0}
+:root{--ink:#16191d;--mut:#6b7480;--hair:#cfd3d9;--acc:${accent};--m:20mm;--n:9pt;--s:9pt;--u:4.5mm}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:"Inter Variable";color:var(--ink);font-size:var(--n);line-height:var(--u);font-feature-settings:"tnum"}
+.page{position:relative;width:210mm;height:297mm;background:#fff;overflow:hidden}
+.g{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));column-gap:4mm}
+.abs{position:absolute;left:var(--m);right:var(--m)}
+.s{font-size:var(--s);color:var(--mut)}
+b{font-weight:600}
+.mark{position:absolute;left:var(--m);top:13.5mm;width:9mm;height:9mm;background:var(--acc);color:#fff;display:grid;place-items:center;font-weight:600;line-height:1}
+.logo{position:absolute;left:var(--m);top:13.5mm;max-width:60mm;max-height:20mm;object-fit:contain}
+.co{top:13.5mm;font-size:var(--s);color:var(--mut)}
+.co>div{grid-column:4 / span 3}
+.co b{color:var(--ink)}
+.window{top:49.5mm;width:85mm;height:40.5mm}
+.meta{top:49.5mm}
+.meta>div{grid-column:4 / span 3;display:grid;grid-template-columns:29mm 1fr}
+.meta .l{font-size:var(--s);color:var(--mut)}
+h1{position:absolute;left:var(--m);top:94.5mm;font-size:var(--n);font-weight:600;color:var(--acc)}
+.body{position:absolute;top:103.5mm;left:var(--m);right:var(--m)}
+.tr{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));column-gap:4mm;padding:2.25mm 0;border-bottom:.2mm solid var(--hair)}
+.tr.h{padding:0 0 2.25mm;border-bottom:.2mm solid var(--ink);font-size:var(--s);color:var(--mut)}
+.tr .lei{grid-column:1 / span 3;display:grid;grid-template-columns:8mm 1fr}
+.tr .num{grid-column:4 / span 3;display:grid;grid-template-columns:14mm 21mm 1fr 1fr}
+.tr .num span:nth-child(n+3){text-align:right}
+.pos{color:var(--mut)}
+.sum{margin-top:4.5mm}.sum>div{grid-column:4 / span 3}
+.sum .row{display:flex;justify-content:space-between}
+.sum .tot{border-top:.2mm solid var(--ink);margin-top:2.25mm;padding-top:2.25mm;font-weight:600}
+.pay{margin-top:9mm}.pay>div{grid-column:4 / span 3}.pay p+p{margin-top:var(--u)}
+.ft{top:247.5mm;font-size:var(--s);color:var(--mut)}
+.ft .bank{grid-column:1 / span 3}.ft .legal{grid-column:4 / span 3}
+.fold{position:absolute;left:0;width:5mm;height:.2mm;background:#8a919b}
 </style>
 </head>
 <body>
-
-<header>
-  <div class="marke">${h(a.name)}<small>Rechnung</small></div>
-  <div class="absenderblock">
-    ${h(a.address.street)}<br>
-    ${h(a.address.postalCode)} ${h(a.address.city)}<br>
-    ${h(a.contact.phone)}<br>
-    ${h(a.contact.email)}
-  </div>
-</header>
-
-<div class="absenderzeile">${h(a.name)} · ${h(a.address.street)} · ${h(a.address.postalCode)} ${h(a.address.city)}</div>
-<div class="empfaenger">
-  <span class="name">${h(e.name)}</span><br>
-  ${h(e.address.street)}<br>
-  ${h(e.address.postalCode)} ${h(e.address.city)}
+<div class="page">
+ <div class="fold" style="top:105mm"></div><div class="fold" style="top:148.5mm;width:7mm"></div><div class="fold" style="top:210mm"></div>
+ ${logo}
+ <div class="abs g co"><div>${companyBlock}</div></div>
+ <div class="abs window"><b>${h(e.name)}</b><br>${lines(recipientLines)}</div>
+ <div class="abs g meta"><div>${meta
+   .map(([l, v]) => `<span class="l">${l}</span><span>${v}</span>`)
+   .join('')}</div></div>
+ <h1>${r.cancellationNote ? h(r.cancellationNote) : 'Rechnung'}</h1>
+ <div class="body">
+  <div class="tr h"><div class="lei"><span>Pos.</span><span>Leistung</span></div><div class="num"><span>Menge</span><span>Einheit</span><span>Einzelpreis</span><span>Netto</span></div></div>${linesRows}
+  <div class="g sum"><div>
+   <div class="row"><span>Summe netto</span><span>${centAsText(r.sumNetCent)} €</span></div>
+   ${taxRows}
+   <div class="row tot"><span>Rechnungsbetrag</span><span>${centAsText(r.paymentAmountCent)} €</span></div>
+  </div></div>
+  <div class="g pay"><div>
+   ${notes.map((t) => `<p>${h(t)}</p>`).join('\n   ')}
+   ${profile === 'EN16931' ? '<p class="note s">Diese Rechnung enthält eine maschinenlesbare Fassung nach ZUGFeRD (EN 16931).</p>' : ''}
+  </div></div>
+ </div>
+ <div class="abs g ft" style="top:${footerTop}mm">
+  <div class="bank">${lines(a.blocks.bankLines)}</div>
+  <div class="legal">${lines(a.blocks.legalLines)}</div>
+ </div>
 </div>
-
-<h1>Rechnung ${h(r.number)}</h1>
-
-<div class="eckdaten">
-  <div><span>Rechnungsdatum</span>${dateAsText(r.invoiceDate)}</div>
-  <div><span>Leistungszeitraum</span>${dateAsText(r.servicePeriod.from)} – ${dateAsText(r.servicePeriod.until)}</div>
-  <div><span>Fällig am</span>${dateAsText(r.dueAt)}</div>
-  <div><span>Ihr Zeichen</span>${h(r.orderReference)}</div>
-</div>
-
-${r.cancellationNote ? `<p class="hinweis"><b>${h(r.cancellationNote)}</b></p>` : ''}
-${r.introduction ? `<p class="einleitung">${h(r.introduction)}</p>` : ''}
-
-<table class="posten">
-  <thead>
-    <tr>
-      <th class="mitte">Pos.</th>
-      <th>Leistung</th>
-      <th class="rechts">Menge</th>
-      <th class="rechts">Einzelpreis €</th>
-      <th class="mitte">USt.</th>
-      <th class="rechts">Netto €</th>
-    </tr>
-  </thead>
-  <tbody>${linesRows}
-  </tbody>
-</table>
-
-<table class="summe">
-  <tr><th>Summe netto</th><td class="rechts">${centAsText(r.sumNetCent)} €</td></tr>
-  ${taxRows}
-  <tr class="gesamt"><th>Rechnungsbetrag</th><td class="rechts">${centAsText(r.paymentAmountCent)} €</td></tr>
-</table>
-
-<div class="zahlung">
-  <h2>Zahlung</h2>
-  <dl>
-    <dt>Verwendungszweck</dt><dd>Rechnung ${h(r.number)}</dd>
-    <dt>Kontoinhaberin</dt><dd>${h(a.name)}</dd>
-    <dt>IBAN</dt><dd>${h(a.bank.iban.replace(/(.{4})/g, '$1 ').trim())}</dd>
-    <dt>BIC</dt><dd>${h(a.bank.bic)} (${h(a.bank.institution)})</dd>
-  </dl>
-  <p class="hinweis">${h(r.paymentTerm)} ${h(r.hint)}</p>
-  ${r.paymentNote ? `<p class="hinweis">${h(r.paymentNote)}</p>` : ''}
-  <p class="hinweis">Dieser Rechnung ist eine maschinenlesbare Fassung nach ZUGFeRD (Profil EN 16931) als Anlage <b>factur-x.xml</b> beigefügt.</p>
-</div>
-
-<footer>
-  <div>
-    <b>${h(a.name)}</b><br>
-    ${h(a.address.street)}<br>
-    ${h(a.address.postalCode)} ${h(a.address.city)}${countryName ? `, ${h(countryName)}` : ''}<br>
-    ${a.seat ? `Sitz ${h(a.seat)}<br>` : ''}${h(a.registerCourt)} ${h(a.registerIdentifier)}
-  </div>
-  ${partnerBlock}
-  <div>
-    <b>Bank &amp; Steuer</b><br>
-    ${h(a.bank.institution)}<br>
-    IBAN ${h(a.bank.iban)}<br>
-    BIC ${h(a.bank.bic)}<br>
-    USt-IdNr. ${h(a.vatId)}
-  </div>
-</footer>
-
 </body>
 </html>
 `;

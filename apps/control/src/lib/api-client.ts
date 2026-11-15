@@ -184,6 +184,11 @@ export async function apiFetch<T>(
     ...(options?.headers as Record<string, string> | undefined),
   };
 
+  // Datei-Uploads: den Content-Type setzt der Browser samt Multipart-Grenze.
+  if (typeof FormData !== 'undefined' && options?.body instanceof FormData) {
+    delete header['Content-Type'];
+  }
+
   if (!SECURE_METHODS.has(method)) {
     header['x-csrf-token'] = await csrfHeaderValue();
   }

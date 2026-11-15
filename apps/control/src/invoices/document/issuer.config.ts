@@ -1,4 +1,5 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import type { LegalForm } from '@saas-instant/shared';
 import { ConfigService } from '@nestjs/config';
 import { ManifestService } from '../../manifest/manifest.service';
 import {
@@ -7,6 +8,12 @@ import {
   type IssuerLegalForm,
   type IssuerManifest,
 } from '../../manifest/sections/billing';
+import {
+  currentFromProfile,
+  legalFormFromManifest,
+  profileFromIssuer,
+  type CurrentIssuer,
+} from './issuer-mapping';
 
 /**
  * DIE AUSSTELLERDATEN — Pflichtangaben nach § 14 UStG und § 125a HGB.
@@ -30,12 +37,8 @@ import {
  * als BT-30.
  */
 export interface Issuer {
-  /**
-   * Rechtsform für die Pflichtprüfung beim Festschreiben. `company` =
-   * Handelsgesellschaft (Sitz/Register Pflicht), `sole_proprietor` und
-   * `association` ohne Registerpflicht auf der Rechnung.
-   */
-  legalForm: IssuerLegalForm;
+  /** Rechtsform der Ausstellerin (bestimmt die Pflichtangaben, siehe shared). */
+  legalForm: LegalForm;
   name: string;
   address: { street: string; postalCode: string; city: string; country: string };
   /**
@@ -48,6 +51,8 @@ export interface Issuer {
    */
   seat: string;
   vatId: string;
+  /** Steuernummer (BT-32), falls keine USt-IdNr. oder zusätzlich zu ihr. */
+  taxNumber?: string;
   /**
    * Die Gläubiger-Identifikationsnummer für SEPA-Lastschriften.
    *
@@ -84,7 +89,7 @@ export interface Issuer {
 }
 
 export const ISSUER_PRESETS: Issuer = {
-  legalForm: 'company',
+  legalForm: 'gmbh_co_kg',
   name: 'Example Company GmbH & Co KG',
   address: {
     street: 'Example Street 1',
@@ -221,12 +226,39 @@ const NO_GENERAL_PARTNER: Issuer['generalPartner'] = {
   managingDirector: [],
 };
 
+/** Token der Quelle, die das gepflegte Firmenprofil liefert (Datenbank). */
+export const ISSUER_PROFILE_SOURCE = Symbol('IssuerProfileSource');
+
+export interface IssuerProfileSource {
+  currentIssuer(): Promise<CurrentIssuer>;
+}
+
+/**
+ * Die Ausstellerangaben.
+ *
+ * `read()` liefert die STARTWERTE (Umgebung > Manifest > neutrale Vorgabe) und
+ * wird nur noch gebraucht, um das Firmenprofil beim ersten Zugriff einmalig zu
+ * befüllen. Alles andere — Festschreiben, Dokumente, Aufnahmeformular — liest
+ * `current()`: das in den Einstellungen gepflegte Profil.
+ */
 @Injectable()
 export class IssuerConfigService {
   constructor(
     private readonly config: ConfigService,
     @Optional() private readonly manifest?: ManifestService,
+    @Optional()
+    @Inject(ISSUER_PROFILE_SOURCE)
+    private readonly source?: IssuerProfileSource,
   ) {}
+
+  /**
+   * Das geltende Firmenprofil mit Logo und Akzentfarbe. Ohne Datenbankquelle
+   * (nur Tests ohne Datenbank) gilt der Startwert.
+   */
+  async current(): Promise<CurrentIssuer> {
+    if (this.source) return this.source.currentIssuer();
+    return currentFromProfile(profileFromIssuer(this.read()), null, null);
+  }
 
   private value(name: string, preset: string): string {
     return this.config.get<string>(name)?.trim() || preset;
@@ -240,7 +272,10 @@ export class IssuerConfigService {
     // Vorgaben, die das Manifest überlagert: Umgebung > Manifest > neutral.
     const v: Issuer = {
       ...preset,
-      legalForm: m.legalForm ?? preset.legalForm,
+      legalForm: legalFormFromManifest(
+        m.legalForm ?? 'company',
+        this.manifest ? (m.generalPartnerName ?? '') !== '' : true,
+      ),
       name: m.name ?? preset.name,
       address: {
         street: m.street ?? preset.address.street,
@@ -313,7 +348,13 @@ export class IssuerConfigService {
     const legalForm = (ISSUER_LEGAL_FORMS as readonly string[]).includes(
       legalFormEnv ?? '',
     )
-      ? (legalFormEnv as IssuerLegalForm)
+      ? legalFormFromManifest(
+          legalFormEnv as IssuerLegalForm,
+          this.value(
+            'CONTROL_INVOICE_GENERAL_PARTNER',
+            v.generalPartner.name,
+          ).trim() !== '',
+        )
       : v.legalForm;
 
     return {

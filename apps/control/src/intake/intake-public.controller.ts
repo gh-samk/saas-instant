@@ -88,8 +88,8 @@ export class IntakePublicController {
    * stellen. Eine Eigenschaft, deren blosses Lesen einen Dienst aufruft, ist
    * eine Falle fuer jeden, der die Klasse von aussen betrachtet.
    */
-  private creditor(): { name: string; id: string } {
-    const a = this.issuer.read();
+  private async creditor(): Promise<{ name: string; id: string }> {
+    const a = (await this.issuer.current()).issuer;
     return { name: a.name, id: a.creditorId };
   }
 
@@ -213,7 +213,7 @@ export class IntakePublicController {
           step: from,
           inputs,
           error,
-          creditor: this.creditor(),
+          creditor: await this.creditor(),
         }),
       );
     }
@@ -324,13 +324,14 @@ export class IntakePublicController {
 
   // --- Hilfsmittel --------------------------------------------------------
 
-  private showStep(
+  private async showStep(
     res: Response,
     token: string,
     companyName: string,
     step: number,
     inputs: Inputs,
-  ): void {
+  ): Promise<void> {
+    const creditor = await this.creditor();
     const page =
       step >= CheckStep
         ? checkPage({
@@ -338,14 +339,14 @@ export class IntakePublicController {
             companyName,
             step: CheckStep,
             inputs,
-            creditor: this.creditor(),
+            creditor,
           })
         : stepPage({
             token,
             companyName,
             step,
             inputs,
-            creditor: this.creditor(),
+            creditor,
           });
     this.send(res, HttpStatus.OK, page);
   }

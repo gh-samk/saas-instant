@@ -5,6 +5,10 @@ import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { PrismaService } from '../prisma/prisma.service';
 import { IssuerConfigService } from './document/issuer.config';
+import {
+  documentIssuerFromCurrent,
+  parseIssuerLayout,
+} from './document/issuer-mapping';
 import { createCii } from './document/cii-en16931';
 import { createHtml, dateAsText } from './document/layout-html';
 import type {
@@ -478,7 +482,13 @@ export class InvoiceDocumentService {
       throw new InvoiceStatusMismatchError(r.status, 'finalized');
     }
 
-    const coolifyConfig = this.issuer.read();
+    const currentIssuer = await this.issuer.current();
+    const coolifyConfig = currentIssuer.issuer;
+    // GoBD: Darstellung aus dem Festschreibzeitpunkt; nur Altzeilen ohne
+    // Schnappschuss fallen auf das aktuelle Profil zurück.
+    const layout =
+      parseIssuerLayout(r.issuerLayout) ??
+      documentIssuerFromCurrent(currentIssuer);
     const [street = '', postalCodeCity = '', country = 'DE'] =
       r.recipientAddress.split('\n');
     const separation = /^(\S+)\s+(.*)$/.exec(postalCodeCity.trim());
@@ -566,7 +576,7 @@ export class InvoiceDocumentService {
           }
         : {}),
       issuer: {
-        legalForm: coolifyConfig.legalForm,
+        legalForm: layout.legalForm,
         // SCHNAPPSCHUSS, wo er vorliegt — Firmierung, Anschrift, Register.
         name: r.issuerCompanyName,
         address: (() => {
@@ -623,28 +633,15 @@ export class InvoiceDocumentService {
               bic: r.issuerBic ?? '',
             }
           : bankFrom(r.issuerBankDetails, coolifyConfig.bank),
-        // BT-33 — der § 125a-HGB-Block als Fliesstext.
-        //
-        // [W3]: Der SITZ beider Gesellschaften gehört hinein. Er fehlte, und
-        // damit widersprachen sich die beiden Geschäftsbriefe des Hauses: Die
-        // Fusszeile der Rundmail nannte ihn, die Rechnung nicht.
-        legalAddition: [
-          r.issuerCompanyName,
-          r.issuerSeat ? `Sitz ${r.issuerSeat}` : '',
-          r.issuerRegisterCourt,
-          r.issuerCommercialRegisterA,
-        ]
-          .filter((part) => (part ?? '') !== '')
-          .join(', ') +
-          (r.issuerGeneralPartner
-            ? `. Persönlich haftende Gesellschafterin: ${r.issuerGeneralPartner}, ` +
-              (r.issuerGeneralPartnerSeat
-                ? `Sitz ${r.issuerGeneralPartnerSeat}, `
-                : '') +
-              `${r.issuerGeneralPartnerRegisterCourt ?? ''} ` +
-              `${r.issuerGeneralPartnerCommercialRegisterB ?? ''}. ` +
-              `Geschäftsführer: ${r.issuerManagingDirector ?? ''}.`
-            : '.'),
+        // BT-33 — die Pflichtangaben des Geschäftsbriefs, Zeilen mit " | ".
+        legalAddition: layout.legalAddition,
+        // Darstellung: Zeilenblöcke, Logo und Akzentfarbe des Firmenprofils.
+        // Aus `Invoice.issuerLayout` (beim Festschreiben eingefroren); nur
+        // Altzeilen ohne Schnappschuss nehmen das geltende Profil.
+        blocks: layout.blocks,
+        logoDataUri: layout.logoDataUri,
+        accentColor: layout.accentColor,
+        taxNumber: layout.taxNumber ?? '',
       },
       recipient: {
         name: r.recipientName,
@@ -694,16 +691,19 @@ export class InvoiceDocumentService {
               r.directDebitMandateReference,
               coolifyConfig.creditorId,
             )
-          : `Zahlbar ohne Abzug bis zum ${dateAsText(dueAt)}.`,
-      hint:
-        (r.lines.every((p) => p.taxCategory === 'S')
-          ? 'Es gilt die Regelbesteuerung. '
-          : [...new Set(r.lines.map((p) => p.taxExemptionReason).filter(Boolean))]
-              .map((reason) => `${reason}. `)
-              .join('')) +
-        'Leistungszeitraum: ' +
-        `${dateAsText(dateStringFromDate(r.servicePeriodFrom))} bis ` +
-        `${dateAsText(dateStringFromDate(r.servicePeriodUntil))}.`,
+          : 'Zahlbar ohne Abzug bis zum Fälligkeitsdatum auf das unten genannte Konto, Verwendungszweck: Rechnungsnummer.',
+      // Nur gesetzlich nötige Hinweise (Steuerbefreiung, Reverse Charge,
+      // § 19 UStG als Befreiungsgrund der Posten). Bei Regelbesteuerung leer:
+      // Der Leistungszeitraum steht schon in den Details des Belegs.
+      hint: [
+        ...new Set(
+          r.lines
+            .map((p) => p.taxExemptionReason)
+            .filter((x): x is string => !!x),
+        ),
+      ]
+        .map((reason) => `${reason}.`)
+        .join(' '),
       // Die beiden Texte des Bearbeiten-Screens. Leer heisst weg — eine
       // leere Zeile auf dem Beleg wäre schlechter als keine.
       ...(r.introduction ? { introduction: r.introduction } : {}),

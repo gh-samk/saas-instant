@@ -145,11 +145,20 @@ describe('[W5] Kontoaufzählung über die Antwortzeit', () => {
     // Einmal vorwärmen: der Dummy-Hash wird beim ersten Bedarf erzeugt.
     await measure('aufwaermen');
 
-    const known = await measure('sam');
-    const unknown = await measure('gibtsnicht');
+    // Median über mehrere abwechselnde Messungen: einzelne Ausreißer durch
+    // Last auf dem Testrechner verfälschen den Vergleich sonst.
+    const knownRuns: number[] = [];
+    const unknownRuns: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      knownRuns.push(await measure('sam'));
+      unknownRuns.push(await measure('gibtsnicht'));
+    }
+    const median = (xs: number[]): number => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)];
+    const known = median(knownRuns);
+    const unknown = median(unknownRuns);
 
-    // Vorher lag der Faktor bei ~12. Jetzt darf der Unterschied nicht mehr
-    // als das Doppelte betragen — Messrauschen bewusst großzügig bedacht.
+    // Vorher lag der Faktor bei ~12. Die Schwelle bleibt unverändert: der
+    // Unterschied darf nicht mehr als das Doppelte betragen.
     const factor = Math.max(known, unknown) / Math.min(known, unknown);
     expect(factor).toBeLessThan(2);
   });

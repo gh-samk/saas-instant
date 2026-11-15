@@ -102,7 +102,7 @@ export class IntakeService {
     }
 
     const day = today();
-    const a = this.issuer.read();
+    const a = (await this.issuer.current()).issuer;
 
     const result = await this.prisma.$transaction(async (tx) => {
       // ZUERST einlösen: Trifft das bedingte UPDATE keine Zeile, war jemand

@@ -12,6 +12,8 @@ import { writeSystemNote } from '../notes/system-note';
 import { CompanyNotFoundError } from '../companies/company.errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { IssuerConfigService, isPlaceholderIssuer } from './document/issuer.config';
+import { issuerLayoutSnapshot } from './document/issuer-mapping';
+import { validateIssuerProfile } from '@saas-instant/shared';
 import {
   type DateWindow,
   windowFrom,
@@ -35,6 +37,7 @@ import {
   InvoiceIncompleteError,
   PriceTierUnknownError,
   InvoiceIssuerPlaceholderError,
+  InvoiceIssuerIncompleteError,
   CancellationNotCancellableError,
 } from './invoice.errors';
 import {
@@ -546,22 +549,30 @@ export class InvoiceService {
         if (!company) throw new CompanyNotFoundError();
 
         const recipient = recipientSnapshot(company);
-        const issuerConfig = this.issuer.read();
+        const issuerNow = await this.issuer.current();
+        const issuerConfig = issuerNow.issuer;
         // PLATZHALTER-AUSSTELLER: kein Beleg. Geprüft VOR der Nummernvergabe,
         // damit keine Nummer für ein Muster verbraucht wird.
         if (isPlaceholderIssuer(issuerConfig)) {
           throw new InvoiceIssuerPlaceholderError();
         }
-        const issuerData = issuerSnapshot(issuerConfig);
+        // DIE PFLICHTANGABEN JE RECHTSFORM (Einstellungen → Firmendaten),
+        // ebenfalls VOR der Nummernvergabe. Jedes fehlende Feld wird genannt.
+        const issuerIssues = validateIssuerProfile(issuerNow.profile);
+        if (issuerIssues.length > 0) {
+          throw new InvoiceIssuerIncompleteError(issuerIssues);
+        }
+        const issuerData = {
+          ...issuerSnapshot(issuerConfig),
+          issuerLayout: issuerLayoutSnapshot(issuerNow) as unknown as Prisma.InputJsonValue,
+        };
         const linesCount = await tx.invoiceLine.count({
           where: { invoiceId: id },
         });
 
         const missing = missingMandatoryDetails({
           ...recipient,
-          ...issuerData,
           linesCount,
-          legalForm: issuerConfig.legalForm,
         });
         if (missing.length > 0) throw new InvoiceIncompleteError(missing);
 
@@ -679,6 +690,11 @@ export class InvoiceService {
     const cancellationId = await this.prisma.$transaction(
       async (tx) => {
         const original = await this.lockAndCheck(tx, id, CANCELLABLE);
+        // Darstellung des Originals (nicht in HEADER_FIELDS: enthält das Logo).
+        const originalLayout = await tx.invoice.findUnique({
+          where: { id },
+          select: { issuerLayout: true },
+        });
 
         if (original.cancelledInvoiceId !== null) {
           throw new CancellationNotCancellableError();
@@ -748,6 +764,9 @@ export class InvoiceService {
             issuerGeneralPartnerCommercialRegisterB: original.issuerGeneralPartnerCommercialRegisterB,
             issuerManagingDirector: original.issuerManagingDirector,
             issuerBankDetails: original.issuerBankDetails,
+            issuerLayout:
+              (originalLayout?.issuerLayout as Prisma.InputJsonValue | null) ??
+              Prisma.DbNull,
           },
           select: { id: true },
         });
@@ -1022,7 +1041,7 @@ export class InvoiceService {
           company.paymentMethod === 'direct_debit'
             ? (company.sepaMandateReference?.trim() || null)
             : null,
-        ...issuerSnapshot(this.issuer.read()),
+        ...issuerSnapshot((await this.issuer.current()).issuer),
         // Zahlungsart nach UNTDID 4461: 59 = SEPA-Lastschrift (nur mit
         // Mandat), sonst 58 = SEPA-Überweisung. Währung: die der Preisliste
         // (Spaltenvorgabe EUR).

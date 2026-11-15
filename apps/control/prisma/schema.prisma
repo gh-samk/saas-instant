@@ -941,6 +941,10 @@ model Invoice {
   issuerIban         String?
   issuerBic          String?
   issuerBankName     String?
+  /// Darstellung des Ausstellers zum Festschreibzeitpunkt (Briefkopfzeilen, Logo,
+  /// Akzentfarbe, Rechtsform). Wird beim Festschreiben gesetzt; danach schützt
+  /// der GoBD-Trigger sie wie jede andere Angabe. NULL nur bei Altdaten.
+  issuerLayout       Json?
 
   currency         String @default("EUR")
   /// Zahlungsart nach UNTDID 4461 (58 = SEPA-Ueberweisung).
@@ -1379,4 +1383,18 @@ model InstanceRestore {
 
   @@index([instanceId])
   @@index([backupId])
+}
+
+/// Angaben der Rechnungsstellerin (Rechtsform, Register, Bank, Logo). Genau eine
+/// Zeile (id = 'singleton', per CHECK erzwungen). `data` hält das IssuerProfile
+/// aus @saas-instant/shared; die Pflichtprüfung läuft vor dem Festschreiben.
+model IssuerProfile {
+  id          String   @id @default("singleton")
+  data        Json
+  accentColor String?
+  logo        Bytes?
+  logoMime    String?
+  logoSha256  String?
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
 }

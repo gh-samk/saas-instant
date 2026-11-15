@@ -5,6 +5,8 @@ import {
   ISSUER_PRESETS,
   IssuerConfigService,
 } from './document/issuer.config';
+import { validateIssuerProfile } from '@saas-instant/shared';
+import { documentIssuerFrom, profileFromIssuer } from './document/issuer-mapping';
 import {
   issuerSnapshot,
   missingMandatoryDetails,
@@ -67,33 +69,29 @@ describe('[W3] Der Sitz steht im Schnappschuss', () => {
   });
 
   /**
-   * DIE SCHARFE STELLE: Ohne Sitz lässt sich nicht mehr festschreiben. Damit
-   * kann der Mangel ab jetzt nicht wieder entstehen — nicht durch eine
-   * vergessene Konfiguration und nicht durch einen Umbau.
+   * DIE SCHARFE STELLE: Ohne Sitz lässt sich nicht mehr festschreiben. Die
+   * Prüfung läuft jetzt je Rechtsform über das Firmenprofil
+   * (`validateIssuerProfile`), nicht mehr über `missingMandatoryDetails`.
    */
   it('verweigert das Festschreiben ohne Sitz der KG', () => {
-    const missing = missingMandatoryDetails({
-      ...RECIPIENT,
-      ...snapshot(),
-      issuerSeat: null,
-      linesCount: 1,
-    });
-    expect(missing).toContain('Sitz der KG');
+    const profile = {
+      ...profileFromIssuer(new IssuerConfigService(emptyConfig()).read()),
+      seat: '',
+    };
+    expect(validateIssuerProfile(profile).map((i) => i.field)).toContain('seat');
   });
 
   it('verweigert das Festschreiben ohne Sitz der Komplementärin', () => {
-    const missing = missingMandatoryDetails({
-      ...RECIPIENT,
-      ...snapshot(),
-      issuerGeneralPartnerSeat: null,
-      linesCount: 1,
-    });
-    expect(missing).toContain('Sitz der Komplementärin');
+    const base = profileFromIssuer(new IssuerConfigService(emptyConfig()).read());
+    const profile = { ...base, generalPartner: { ...base.generalPartner, seat: '' } };
+    expect(validateIssuerProfile(profile).map((i) => i.field)).toContain(
+      'generalPartner.seat',
+    );
   });
 
   it('lässt einen vollständigen Schnappschuss durch', () => {
     expect(
-      missingMandatoryDetails({ ...RECIPIENT, ...snapshot(), linesCount: 1 }),
+      missingMandatoryDetails({ ...RECIPIENT, linesCount: 1 }),
     ).toEqual([]);
   });
 });
@@ -108,7 +106,7 @@ describe('[W3] Der Sitz steht auf dem Beleg', () => {
       servicePeriod: { from: '2026-09-01', until: '2027-08-31' },
       deliveryDate: '2026-08-31',
       orderReference: '',
-      issuer: new IssuerConfigService(emptyConfig()).read(),
+      issuer: documentIssuerFrom(new IssuerConfigService(emptyConfig()).read()),
       recipient: {
         name: 'Solawi Fulda e. V.',
         address: {
@@ -143,10 +141,16 @@ describe('[W3] Der Sitz steht auf dem Beleg', () => {
     };
   }
 
-  it('nennt den Sitz beider Gesellschaften in der Fusszeile', () => {
+  it('nennt den Sitz der Komplementärin und einen abweichenden Sitz der KG', () => {
     const html = createHtml(document());
-    // Zweimal: einmal für die KG, einmal für die Komplementärin.
-    expect(html.match(/Sitz Example City/g) ?? []).toHaveLength(2);
+    // Der Sitz der KG steht nur, wenn er vom Ort der Anschrift abweicht.
+    expect(html).toContain('Sitz Example City');
+    const moved = document();
+    moved.issuer = documentIssuerFrom({
+      ...ISSUER_PRESETS,
+      seat: 'Kassel',
+    });
+    expect(createHtml(moved)).toContain('Sitz Kassel');
   });
 
   /**
@@ -160,5 +164,6 @@ describe('[W3] Der Sitz steht auf dem Beleg', () => {
     // Der Rundmail-Text nennt den Sitz — die Rechnung auch.
     expect(addition).toContain('Sitz Example City');
     expect(html).toContain('Sitz Example City');
+    expect(html).toContain('Persönlich haftende Gesellschafterin');
   });
 });

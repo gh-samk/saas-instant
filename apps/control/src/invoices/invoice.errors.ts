@@ -74,6 +74,23 @@ export class InvoiceIncompleteError extends BusinessError {
 }
 
 /**
+ * Die Firmendaten (Einstellungen → Firmendaten) sind für die gewählte
+ * Rechtsform unvollständig oder fehlerhaft. Die Liste nennt jedes Feld.
+ */
+export class InvoiceIssuerIncompleteError extends BusinessError {
+  constructor(issues: { field: string; label: string; code: string }[]) {
+    super(
+      'issuer_incomplete',
+      'Die Firmendaten sind für die gewählte Rechtsform unvollständig. Die ' +
+        'Rechnung lässt sich deshalb nicht festschreiben. Bitte unter ' +
+        'Einstellungen → Firmendaten ergänzen.',
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      { issues: issues.map(({ field, label, code }) => ({ field, label, code })) },
+    );
+  }
+}
+
+/**
  * Der Aussteller ist noch der neutrale Platzhalter aus dem Quelltext.
  *
  * Ein festgeschriebener Beleg mit „Example Company" oder der Beispiel-IBAN
@@ -85,9 +102,8 @@ export class InvoiceIssuerPlaceholderError extends BusinessError {
     super(
       'invoice_issuer_placeholder',
       'Die Angaben der Ausstellerin sind noch Platzhalter (Firmenname, ' +
-        'USt-IdNr. oder IBAN). Bitte zuerst im Manifest unter billing.issuer ' +
-        '(oder über die CONTROL_INVOICE_*-Variablen) die echten Angaben ' +
-        'eintragen — eine festgeschriebene Rechnung lässt sich nicht mehr ändern.',
+        'USt-IdNr. oder IBAN). Bitte zuerst unter Einstellungen → Firmendaten ' +
+        'die echten Angaben eintragen — eine festgeschriebene Rechnung lässt sich nicht mehr ändern.',
       HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }

@@ -15,6 +15,7 @@ export default {
   tabUsers: 'Nutzer',
   tabDevices: 'Geräte',
   tabFeatures: 'Funktionen',
+  tabCompany: 'Firmendaten',
   devicesLoadError: 'Geräte konnten nicht geladen werden.',
   codeWrongRetry: 'Falscher Code. Bitte erneut versuchen.',
   currentPasswordWrong: 'Aktuelles Passwort ist falsch.',

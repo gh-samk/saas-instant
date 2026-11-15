@@ -135,25 +135,48 @@ function address(a: { street: string; postalCode: string; city: string; country:
 }
 
 function seller(a: Issuer): string {
+  const c = a.contact;
+  const hasContact = c.name.trim() !== '' && (c.phone !== '' || c.email !== '');
   return [
     '<ram:SellerTradeParty>',
+    // BT-29: BR-CO-26 verlangt BT-29, BT-30 oder BT-31. Eine nicht
+    // eingetragene Einzelunternehmerin ohne USt-IdNr. hat nur die Steuernummer
+    // (BT-32): sie dient dann zusätzlich als Verkäuferkennung.
+    !a.vatId && !a.registerIdentifier && a.taxNumber
+      ? `<ram:ID>${x(a.taxNumber)}</ram:ID>`
+      : '',
     `<ram:Name>${x(a.name)}</ram:Name>`,
-    // BT-33: registerrechtlicher Zusatz nach § 125a HGB.
+    // BT-33: Pflichtangaben des Geschäftsbriefs, Zeilen mit " | " verbunden.
     a.legalAddition ? `<ram:Description>${x(a.legalAddition)}</ram:Description>` : '',
-    // BT-30: Handelsregisternummer der KG, strukturiert.
+    // BT-30: Registernummer (HRA/HRB/GnR/VR), strukturiert — bei Registerformen.
     a.registerIdentifier
       ? `<ram:SpecifiedLegalOrganization><ram:ID>${x(a.registerIdentifier)}</ram:ID></ram:SpecifiedLegalOrganization>`
       : '',
-    '<ram:DefinedTradeContact>',
-    `<ram:PersonName>${x(a.contact.name)}</ram:PersonName>`,
-    `<ram:TelephoneUniversalCommunication><ram:CompleteNumber>${x(a.contact.phone)}</ram:CompleteNumber></ram:TelephoneUniversalCommunication>`,
-    `<ram:EmailURIUniversalCommunication><ram:URIID>${x(a.contact.email)}</ram:URIID></ram:EmailURIUniversalCommunication>`,
-    '</ram:DefinedTradeContact>',
+    hasContact
+      ? [
+          '<ram:DefinedTradeContact>',
+          `<ram:PersonName>${x(c.name)}</ram:PersonName>`,
+          c.phone
+            ? `<ram:TelephoneUniversalCommunication><ram:CompleteNumber>${x(c.phone)}</ram:CompleteNumber></ram:TelephoneUniversalCommunication>`
+            : '',
+          c.email
+            ? `<ram:EmailURIUniversalCommunication><ram:URIID>${x(c.email)}</ram:URIID></ram:EmailURIUniversalCommunication>`
+            : '',
+          '</ram:DefinedTradeContact>',
+        ].join('')
+      : '',
     address(a.address),
     // BT-34: elektronische Adresse der Ausstellerin, schemeID EM.
-    `<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${x(a.contact.email)}</ram:URIID></ram:URIUniversalCommunication>`,
-    // BT-31: Umsatzsteuer-Identifikationsnummer, schemeID VA.
-    `<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${x(a.vatId)}</ram:ID></ram:SpecifiedTaxRegistration>`,
+    c.email
+      ? `<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${x(c.email)}</ram:URIID></ram:URIUniversalCommunication>`
+      : '',
+    // BT-31: Umsatzsteuer-Identifikationsnummer (VA); BT-32: Steuernummer (FC).
+    a.vatId
+      ? `<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${x(a.vatId)}</ram:ID></ram:SpecifiedTaxRegistration>`
+      : '',
+    a.taxNumber
+      ? `<ram:SpecifiedTaxRegistration><ram:ID schemeID="FC">${x(a.taxNumber)}</ram:ID></ram:SpecifiedTaxRegistration>`
+      : '',
     '</ram:SellerTradeParty>',
   ].join('');
 }

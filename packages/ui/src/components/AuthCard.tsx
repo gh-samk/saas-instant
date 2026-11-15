@@ -5,9 +5,12 @@ export function AuthCard({
   title,
   brand,
   subtitle,
+  logoUrl,
   children,
 }: {
   title: string;
+  /** Logo über dem Titel; ohne Angabe bleibt die Karte wie bisher. */
+  logoUrl?: string | null;
   /**
    * Kleine Zeile unter dem Titel, die das SYSTEM benennt.
    *
@@ -29,6 +32,13 @@ export function AuthCard({
   return (
     <div className="min-h-[calc(100dvh_-_var(--demo-banner-hoehe,0px))] bg-flaeche-2 flex items-center justify-center px-4">
       <div className="bg-flaeche rounded-xl shadow-karte p-8 max-w-md w-full text-center">
+        {logoUrl && (
+          <img
+            src={logoUrl}
+            alt=""
+            className="mx-auto mb-4 max-h-16 max-w-[12rem] object-contain"
+          />
+        )}
         <h1 className="text-2xl font-bold text-primaer mb-1">{title}</h1>
         {brand && (
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-still">
