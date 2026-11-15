@@ -657,7 +657,7 @@ export function SettingsPage() {
     <section aria-labelledby="settings-title">
       <h1
         id="settings-title"
-        className="font-serif text-2xl font-bold text-text mb-1"
+        className="text-2xl font-semibold tracking-tight text-text mb-1"
       >{t('einstellungen.title')}</h1>
       <p className="mb-4 text-sm text-leise">{t('einstellungen.intro')}</p>
 

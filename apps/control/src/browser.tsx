@@ -6,6 +6,10 @@ import { configureUiTexts } from '@saas-instant/ui';
 import { I18nProvider, t } from './i18n';
 import './index.css';
 import './print.css';
+import { applyTheme, readTheme } from './lib/theme';
+
+// Gespeichertes Farbschema vor dem ersten Rendern setzen (System = kein Attribut).
+applyTheme(readTheme());
 
 // Das Design-System liest seine Texte über die Übersetzung der Anwendung (Namespace `ui`).
 configureUiTexts((key, params) => t(key, params));

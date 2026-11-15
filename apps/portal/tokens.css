@@ -1,0 +1,229 @@
+/* Portal-Tokens: Kopie der nötigen Variablen aus packages/ui/src/tokens.css
+   (das Portal hat keinen Build-Schritt). Bei Änderungen dort hier nachziehen.
+   Dunkel automatisch per prefers-color-scheme, erzwingbar per
+   data-theme="light|dark" am <html>-Element. */
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("fonts/inter-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Flächen und Text (Slate). */
+  --farbe-flaeche: #ffffff;      /* Karten, Sidebar, Modals */
+  --farbe-flaeche-2: #f8fafc;    /* App-Hintergrund */
+  --farbe-flaeche-3: #f1f5f9;    /* Chips, Hover-Flächen, Segmented-Container */
+  --farbe-flaeche-4: #fbfcfe;    /* abgesetzte Fläche: Tabellenkopf, Feldflächen */
+  --farbe-text: #0f172a;         /* Primärtext */
+  --farbe-text-leise: #475569;   /* Sekundärtext */
+  --farbe-text-still: #5b6b82;   /* Tertiärtext: Platzhalter, „—", Eyebrow */
+  --farbe-read: #1e293b;         /* Fließtext (Vorschlags-/Zieltexte) */
+  --farbe-rahmen: #e2e8f0;       /* Standard-Rahmen, Karten */
+  --farbe-rahmen-leise: #eef2f6; /* Trennlinie INNERHALB von Karten */
+  --farbe-rahmen-ui: #7b8aa0;    /* Rahmen von Eingabefeldern/Schaltern (>= 3:1) */
+
+  /* Akzent: ein nüchternes Blau. */
+  --farbe-primaer: #0369a1;
+  --farbe-primaer-hover: #075985;
+  --farbe-primaer-text: #ffffff;
+  --farbe-primaer-soft: #e0f2fe;         /* weiche Fläche (Chips, aktive Icons) */
+  --farbe-primaer-softtext: #075985;     /* Text/Icon auf weicher Fläche */
+  --farbe-primaer-softer: #f0f9ff;       /* sehr helle Fläche: Nav-Hover, Hinweisstreifen */
+  --farbe-primaer-softrahmen: #bae6fd;   /* Rahmen auf weicher Fläche */
+  --farbe-primaer-softtext-hover: #0c4a6e;
+  --farbe-fokus: #0369a1;
+
+  /* Semantik: Gefahr / Erfolg / Warnung, je bg / rahmen / text.
+     --farbe-gefahr(-text) = gefüllter destruktiver Knopf und Fehlertext. */
+  --farbe-gefahr: #b91c1c;
+  --farbe-gefahr-text: #ffffff;
+  --farbe-gefahr-bg: #fef2f2;
+  --farbe-gefahr-rahmen: #b91c1c;
+  --farbe-gefahr-bg-text: #991b1b;       /* Text auf --farbe-gefahr-bg */
+  --farbe-erfolg-bg: #f0fdf4;
+  --farbe-erfolg-rahmen: #15803d;
+  --farbe-erfolg-text: #166534;
+  --farbe-warnung-bg: #fffbeb;
+  --farbe-warnung-rahmen: #b45309;
+  --farbe-warnung-text: #92400e;
+
+  /* Eintragsfarben: Vorschlag=Info(Akzent), Bedenken=Warnung, Einwand=Gefahr,
+     Beschluss=Erfolg. Je Rolle bg / rahmen(=Akzent) / text. */
+  --e-vorschlag-bg: #f0f9ff;   --e-vorschlag-rahmen: #0369a1;  --e-vorschlag-text: #075985;
+  --e-bedenken-bg: #fffbeb;    --e-bedenken-rahmen: #b45309;   --e-bedenken-text: #92400e;
+  --e-einwand-bg: #fef2f2;     --e-einwand-rahmen: #b91c1c;    --e-einwand-text: #991b1b;
+  --e-beschluss-bg: #f0fdf4;   --e-beschluss-rahmen: #15803d;  --e-beschluss-text: #166534;
+
+  /* Helle Rahmen der Semantikfamilien (Hinweisstreifen, Karten). */
+  --e-vorschlag-rahmen-hell: #bae6fd;
+  --e-bedenken-rahmen-hell: #fde68a;
+  --e-einwand-rahmen-hell: #fecaca;
+  --e-beschluss-rahmen-hell: #bbf7d0;
+
+  /* Zustände ohne Semantikfamilie. */
+  --farbe-eingeladen: #a16207;       /* Punkt „Eingeladen" */
+  --farbe-eingeladen-text: #854d0e;
+  --farbe-inaktiv: #7b8aa0;          /* Punkt „Gesperrt", Schalter aus */
+  --farbe-knopf-gesperrt: #cbd5e1;   /* gesperrter Primärknopf (inaktiv, von AA ausgenommen) */
+
+  /* Schatten: dezent. */
+  --schatten-karte: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.08);
+  --schatten-karte-hover: 0 2px 4px rgb(15 23 42 / 0.06), 0 4px 10px rgb(15 23 42 / 0.08);
+  --schatten-dialog: 0 24px 56px rgb(15 23 42 / 0.22);
+  --schatten-popover: 0 12px 32px rgb(15 23 42 / 0.16);
+  --schatten-toast: 0 8px 24px rgb(15 23 42 / 0.20);
+  --schatten-segment: 0 1px 2px rgb(15 23 42 / 0.10);
+
+  /* Radius (klein), Übergang, Fokusring, Abstandsskala (4/8px). */
+  --radius-klein: 6px;
+  --radius-mittel: 8px;
+  --uebergang: 150ms ease-out;
+  --uebergang-lang: 200ms ease-out;
+  --fokus-breite: 2px;
+  --fokus-abstand: 2px;
+  --abstand-1: 4px;
+  --abstand-2: 8px;
+  --abstand-3: 12px;
+  --abstand-4: 16px;
+  --abstand-6: 24px;
+  --abstand-8: 32px;
+  --touch-ziel: 44px;
+}
+
+/* Dunkelmodus automatisch (System), außer der Nutzer erzwingt Hell. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --farbe-flaeche: #1e293b;
+    --farbe-flaeche-2: #0f172a;
+    --farbe-flaeche-3: #334155;
+    --farbe-flaeche-4: #172033;
+    --farbe-text: #f1f5f9;
+    --farbe-text-leise: #cbd5e1;
+    --farbe-text-still: #a3b1c6;
+    --farbe-read: #e2e8f0;
+    --farbe-rahmen: #334155;
+    --farbe-rahmen-leise: #263348;
+    --farbe-rahmen-ui: #7b8aa0;
+
+    --farbe-primaer: #38bdf8;
+    --farbe-primaer-hover: #7dd3fc;
+    --farbe-primaer-text: #082f49;
+    --farbe-primaer-soft: #0c4a6e;
+    --farbe-primaer-softtext: #bae6fd;
+    --farbe-primaer-softer: #0b3a58;
+    --farbe-primaer-softrahmen: #075985;
+    --farbe-primaer-softtext-hover: #e0f2fe;
+    --farbe-fokus: #38bdf8;
+
+    --farbe-gefahr: #f87171;
+    --farbe-gefahr-text: #450a0a;
+    --farbe-gefahr-bg: #450a0a;
+    --farbe-gefahr-rahmen: #f87171;
+    --farbe-gefahr-bg-text: #fca5a5;
+    --farbe-erfolg-bg: #052e16;
+    --farbe-erfolg-rahmen: #4ade80;
+    --farbe-erfolg-text: #86efac;
+    --farbe-warnung-bg: #451a03;
+    --farbe-warnung-rahmen: #fbbf24;
+    --farbe-warnung-text: #fcd34d;
+
+    --e-vorschlag-bg: #082f49;   --e-vorschlag-rahmen: #38bdf8;  --e-vorschlag-text: #7dd3fc;
+    --e-bedenken-bg: #451a03;    --e-bedenken-rahmen: #fbbf24;   --e-bedenken-text: #fcd34d;
+    --e-einwand-bg: #450a0a;     --e-einwand-rahmen: #f87171;    --e-einwand-text: #fca5a5;
+    --e-beschluss-bg: #052e16;   --e-beschluss-rahmen: #4ade80;  --e-beschluss-text: #86efac;
+
+    --e-vorschlag-rahmen-hell: #0c4a6e;
+    --e-bedenken-rahmen-hell: #78350f;
+    --e-einwand-rahmen-hell: #7f1d1d;
+    --e-beschluss-rahmen-hell: #14532d;
+
+    --farbe-eingeladen: #fbbf24;
+    --farbe-eingeladen-text: #fcd34d;
+    --farbe-inaktiv: #7b8aa0;
+    --farbe-knopf-gesperrt: #475569;
+
+    --schatten-karte: 0 1px 2px rgb(0 0 0 / 0.40), 0 1px 3px rgb(0 0 0 / 0.30);
+    --schatten-karte-hover: 0 2px 4px rgb(0 0 0 / 0.45), 0 4px 10px rgb(0 0 0 / 0.30);
+    --schatten-dialog: 0 24px 56px rgb(0 0 0 / 0.60);
+    --schatten-popover: 0 12px 32px rgb(0 0 0 / 0.55);
+    --schatten-toast: 0 8px 24px rgb(0 0 0 / 0.55);
+    --schatten-segment: 0 1px 2px rgb(0 0 0 / 0.50);
+  }
+}
+
+/* Dunkelmodus manuell erzwungen. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --farbe-flaeche: #1e293b;
+  --farbe-flaeche-2: #0f172a;
+  --farbe-flaeche-3: #334155;
+  --farbe-flaeche-4: #172033;
+  --farbe-text: #f1f5f9;
+  --farbe-text-leise: #cbd5e1;
+  --farbe-text-still: #a3b1c6;
+  --farbe-read: #e2e8f0;
+  --farbe-rahmen: #334155;
+  --farbe-rahmen-leise: #263348;
+  --farbe-rahmen-ui: #7b8aa0;
+
+  --farbe-primaer: #38bdf8;
+  --farbe-primaer-hover: #7dd3fc;
+  --farbe-primaer-text: #082f49;
+  --farbe-primaer-soft: #0c4a6e;
+  --farbe-primaer-softtext: #bae6fd;
+  --farbe-primaer-softer: #0b3a58;
+  --farbe-primaer-softrahmen: #075985;
+  --farbe-primaer-softtext-hover: #e0f2fe;
+  --farbe-fokus: #38bdf8;
+
+  --farbe-gefahr: #f87171;
+  --farbe-gefahr-text: #450a0a;
+  --farbe-gefahr-bg: #450a0a;
+  --farbe-gefahr-rahmen: #f87171;
+  --farbe-gefahr-bg-text: #fca5a5;
+  --farbe-erfolg-bg: #052e16;
+  --farbe-erfolg-rahmen: #4ade80;
+  --farbe-erfolg-text: #86efac;
+  --farbe-warnung-bg: #451a03;
+  --farbe-warnung-rahmen: #fbbf24;
+  --farbe-warnung-text: #fcd34d;
+
+  --e-vorschlag-bg: #082f49;   --e-vorschlag-rahmen: #38bdf8;  --e-vorschlag-text: #7dd3fc;
+  --e-bedenken-bg: #451a03;    --e-bedenken-rahmen: #fbbf24;   --e-bedenken-text: #fcd34d;
+  --e-einwand-bg: #450a0a;     --e-einwand-rahmen: #f87171;    --e-einwand-text: #fca5a5;
+  --e-beschluss-bg: #052e16;   --e-beschluss-rahmen: #4ade80;  --e-beschluss-text: #86efac;
+
+  --e-vorschlag-rahmen-hell: #0c4a6e;
+  --e-bedenken-rahmen-hell: #78350f;
+  --e-einwand-rahmen-hell: #7f1d1d;
+  --e-beschluss-rahmen-hell: #14532d;
+
+  --farbe-eingeladen: #fbbf24;
+  --farbe-eingeladen-text: #fcd34d;
+  --farbe-inaktiv: #7b8aa0;
+  --farbe-knopf-gesperrt: #475569;
+
+  --schatten-karte: 0 1px 2px rgb(0 0 0 / 0.40), 0 1px 3px rgb(0 0 0 / 0.30);
+  --schatten-karte-hover: 0 2px 4px rgb(0 0 0 / 0.45), 0 4px 10px rgb(0 0 0 / 0.30);
+  --schatten-dialog: 0 24px 56px rgb(0 0 0 / 0.60);
+  --schatten-popover: 0 12px 32px rgb(0 0 0 / 0.55);
+  --schatten-toast: 0 8px 24px rgb(0 0 0 / 0.55);
+  --schatten-segment: 0 1px 2px rgb(0 0 0 / 0.50);
+}

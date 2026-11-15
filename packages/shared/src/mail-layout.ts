@@ -35,17 +35,17 @@ export const MAIL_TOKENS = {
   /** `--farbe-flaeche` — die Karte, auf der die Mail steht. */
   surface: '#ffffff',
   /** `--farbe-flaeche-2` — der Hintergrund um die Karte herum. */
-  surface2: '#f6f7f5',
+  surface2: '#f8fafc',
   /** `--farbe-text` — Fliesstext. */
-  text: '#1e2621',
+  text: '#0f172a',
   /** `--farbe-text-leise` — Fusszeile und Nebensätze. */
-  textMuted: '#54605a',
+  textMuted: '#475569',
   /** `--farbe-rahmen` — Kartenrand und Trennlinie über der Fusszeile. */
-  layout: '#e3e7e1',
+  layout: '#e2e8f0',
   /** `--farbe-primaer` — Wortmarke und Verweise. */
-  primary: '#3a7d6b',
+  primary: '#0369a1',
   /** `--farbe-flaeche-4` — die abgesetzte Fläche der Fusszeile. */
-  surface4: '#fbfcfb',
+  surface4: '#fbfcfe',
 } as const;
 
 /**

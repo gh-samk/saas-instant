@@ -76,8 +76,9 @@ describe('Die Seiten aus dem Postfach', () => {
   it('behält einen Rückfallstapel, falls die Schrift nicht ankommt', () => {
     const html = page('Titel', 'Text');
     expect(html).toContain('font-display:swap');
-    expect(html).toMatch(/font-family:'Hanken Grotesk',[^;]*sans-serif/);
-    expect(html).toMatch(/font-family:'Source Serif 4',[^;]*serif/);
+    expect(html).toMatch(/font-family:'Inter',[^;]*sans-serif/);
+    // Eine einzige Familie: keine Serifenschrift mehr.
+    expect(html).not.toMatch(/Source\sSerif|Georgia|Times New Roman/);
   });
 
   /**

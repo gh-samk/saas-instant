@@ -83,7 +83,7 @@ export function ConsentsPage() {
     <section aria-labelledby="consents-title">
       <h1
         id="consents-title"
-        className="mb-1 font-serif text-2xl font-bold text-text"
+        className="mb-1 text-2xl font-semibold tracking-tight text-text"
       >
         {t('einwilligungen.title')}</h1>
       <BroadcastTabs numbers={numbers} />
@@ -167,12 +167,12 @@ export function ConsentsPage() {
       </ErrorBoundary>
 
         <Card className="h-full p-[18px]">
-          <p className="ziffern-tabellarisch font-serif text-[34px] font-bold leading-none text-text">
+          <p className="ziffern-tabellarisch text-3xl font-semibold leading-none text-text">
             {count ?? '—'}
           </p>
           <p className="mt-1.5 text-sm text-leise">
             {t('einwilligungen.confirmedAddressesLabel')}</p>
-          <p className="mt-3 flex items-start gap-2 text-[13px] text-still">
+          <p className="mt-3 flex items-start gap-2 text-sm text-still">
             <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             {t('einwilligungen.forecastHint')}</p>
         </Card>

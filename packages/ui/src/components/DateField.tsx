@@ -43,7 +43,7 @@ export const DateField = forwardRef<HTMLInputElement, Props>(
           aria-invalid={error ? true : undefined}
           aria-describedby={errorId}
           onChange={(e) => onChange?.(e.target.value)}
-          className="ziffern-tabellarisch w-full rounded-lg border border-rahmen bg-flaeche px-3 py-2 text-text focus:border-primaer focus:outline-none"
+          className="ziffern-tabellarisch w-full rounded-lg border border-rahmen-ui bg-flaeche px-3 py-2 text-text focus:border-primaer"
         />
         {helperText && !error && (
           <p className="mt-1 text-sm text-leise">{helperText}</p>

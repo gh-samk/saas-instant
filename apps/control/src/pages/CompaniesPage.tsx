@@ -149,7 +149,7 @@ export function CompaniesPage() {
               ansagt, statt dauerhaft dazustehen. */}
           <h1
             id="companies-title"
-            className="font-serif text-[26px] font-bold text-text"
+            className="text-2xl font-semibold tracking-tight text-text"
           >
             {t('organisationen.title')}
           </h1>
@@ -198,7 +198,7 @@ export function CompaniesPage() {
                 placeholder={t('organisationen.searchPlaceholder')}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="w-full rounded-lg border border-rahmen bg-flaeche py-2 pl-9 pr-3 text-sm text-text placeholder:text-leise focus:border-primaer focus:outline-none"
+                className="w-full rounded-lg border border-rahmen-ui bg-flaeche py-2 pl-9 pr-3 text-sm text-text placeholder:text-still focus:border-primaer"
               />
             </div>
           </div>

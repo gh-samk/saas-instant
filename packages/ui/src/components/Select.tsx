@@ -14,7 +14,7 @@ export function Select({
   return (
     <div className={`relative ${className ?? ''}`}>
       <select
-        className="w-full cursor-pointer appearance-none rounded-lg border border-rahmen bg-flaeche py-2 pl-3 pr-9 text-sm text-text transition-colors hover:border-leise/40 focus:border-primaer focus:outline-none focus:ring-2 focus:ring-primaer/20 disabled:cursor-not-allowed disabled:bg-flaeche-2 disabled:opacity-70"
+        className="w-full cursor-pointer appearance-none rounded-lg border border-rahmen-ui bg-flaeche py-2 pl-3 pr-9 text-sm text-text transition-colors hover:border-leise focus:border-primaer focus:ring-2 focus:ring-primaer/20 disabled:cursor-not-allowed disabled:bg-flaeche-2 disabled:opacity-70"
         {...rest}
       >
         {children}

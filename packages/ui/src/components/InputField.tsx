@@ -24,7 +24,7 @@ export const InputField = forwardRef<HTMLInputElement, Props>(
           ref={ref}
           aria-invalid={error ? true : undefined}
           aria-describedby={errorId}
-          className="w-full rounded-lg border border-rahmen bg-flaeche px-3 py-2 text-text placeholder:text-leise focus:border-primaer focus:outline-none"
+          className="w-full rounded-lg border border-rahmen-ui bg-flaeche px-3 py-2 text-text placeholder:text-still focus:border-primaer"
           {...rest}
         />
         {helperText && !error && (

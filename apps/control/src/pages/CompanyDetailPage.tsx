@@ -381,7 +381,7 @@ export function CompanyDetailPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <h1
                   id="company-title"
-                  className="font-serif text-2xl font-bold text-text break-words"
+                  className="text-2xl font-semibold tracking-tight text-text break-words"
                 >
                   {o.name}
                 </h1>
@@ -1173,7 +1173,7 @@ export function CompanyDetailPage() {
               eingewilligt wurde und ob eine Sperre vorliegt. Beides steht
               sonst nur im Rundmail-Bereich, also weit weg von der Handlung. */}
           <Card className="mb-4 p-[18px]">
-            <h2 className="mb-3 font-serif text-[17px] font-bold text-text">
+            <h2 className="mb-3 text-lg font-semibold text-text">
               {t('organisationen.consentAndBlock')}
             </h2>
             <div className="flex flex-wrap items-center gap-3 border-b border-rahmen-leise pb-3">

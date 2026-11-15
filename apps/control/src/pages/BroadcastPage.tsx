@@ -87,7 +87,7 @@ export function BroadcastPage() {
       <div className="mb-1 flex flex-wrap items-start justify-between gap-4">
         <h1
           id="broadcast-title"
-          className="min-w-0 font-serif text-2xl font-bold text-text"
+          className="min-w-0 text-2xl font-semibold tracking-tight text-text"
         >
           {t('rundmail.title')}
         </h1>

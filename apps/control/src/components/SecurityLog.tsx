@@ -74,7 +74,7 @@ export function SecurityLog({ className }: { className?: string }) {
   return (
     <Card className={`p-[18px] ${className ?? ''}`}>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-serif text-[17px] font-bold text-text">
+        <h2 className="text-[17px] font-semibold text-text">
           {t('components.securityLog.heading')}</h2>
         <Button variant="secondary" onClick={() => void load()}>
           {t('components.securityLog.button')}</Button>

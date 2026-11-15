@@ -186,7 +186,7 @@ export function CompanyOverview({
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="p-[18px]">
-          <h2 className="mb-3 font-serif text-[17px] font-bold text-text">
+          <h2 className="mb-3 text-[17px] font-semibold text-text">
             {t('components.companyOverview.heading')}</h2>
           {tasks === null ? (
             <p className="text-sm text-still">{t('components.companyOverview.text3')}</p>
@@ -221,7 +221,7 @@ export function CompanyOverview({
 
         <Card className="p-[18px]">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="font-serif text-[17px] font-bold text-text">
+            <h2 className="text-[17px] font-semibold text-text">
               {t('components.companyOverview.heading2')}</h2>
             <IconButton
               Icon={Pencil}

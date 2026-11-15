@@ -180,7 +180,7 @@ export function NewsletterBlockPage() {
 
   return (
     <div>
-      <h1 className="mb-1 font-serif text-2xl font-bold text-text">{t('newsletter.title')}</h1>
+      <h1 className="mb-1 text-2xl font-semibold tracking-tight text-text">{t('newsletter.title')}</h1>
       <BroadcastTabs numbers={numbers} />
 
       {/* DER SATZ STEHT ÜBER DEM FORMULAR, nicht darunter und nicht im

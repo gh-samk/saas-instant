@@ -1171,7 +1171,7 @@ function Frame({
   return (
     <div className="flex min-h-dvh justify-center bg-flaeche-2 px-4 py-8">
       <div className="w-full max-w-xl">
-        <h1 className="mb-1 font-serif text-2xl font-bold text-primaer">{t('ersteinrichtung.title')}</h1>
+        <h1 className="mb-1 text-2xl font-semibold tracking-tight text-text">{t('ersteinrichtung.title')}</h1>
         {step === undefined || !stepNames ? (
           <p className="mb-6 text-sm text-leise">{subtitle}</p>
         ) : (

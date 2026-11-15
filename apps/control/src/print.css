@@ -2,6 +2,21 @@
    Bewusst keine Design-Tokens: hier geht es ausschließlich darum, beim Drucken
    alles außer dem Codeblatt auszublenden. Farben stehen in tokens.css. */
 @media print {
+  /* Neutraler Druck: Papier hell, Schrift dunkel, unabhängig vom Farbschema
+     (auch bei erzwungenem Dunkelmodus). Systemfarben statt Roh-Hex. */
+  :root,
+  :root[data-theme='dark'] {
+    color-scheme: light;
+  }
+  body {
+    background: Canvas;
+    color: CanvasText;
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+  * {
+    box-shadow: none !important;
+  }
   body * {
     visibility: hidden;
   }

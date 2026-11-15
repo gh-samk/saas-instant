@@ -413,7 +413,7 @@ export function InvoiceDraftForm({
           />
 
           <Card className="mt-4 p-[18px]">
-            <h2 className="mb-4 font-serif text-[17px] font-bold text-text">
+            <h2 className="mb-4 text-[17px] font-semibold text-text">
               {t('components.invoiceDraftForm.heading')}</h2>
 
             {lines.map((p, i) => {
@@ -633,7 +633,7 @@ export function InvoiceDraftForm({
 
           {/* ------------------------------------- Text auf der Rechnung */}
           <Card className="mt-4 p-[18px]">
-            <h2 className="mb-3 font-serif text-[17px] font-bold text-text">
+            <h2 className="mb-3 text-[17px] font-semibold text-text">
               {t('components.invoiceDraftForm.heading2')}</h2>
             <TextArea
               id="rechnung-einleitung"
@@ -657,7 +657,7 @@ export function InvoiceDraftForm({
         {/* ------------------------------------------- Rechte Spalte */}
         <div className="min-w-0 xl:sticky xl:top-[78px] xl:self-start">
           <Card className="p-[18px]">
-            <h2 className="mb-3 font-serif text-[17px] font-bold text-text">
+            <h2 className="mb-3 text-[17px] font-semibold text-text">
               {t('components.invoiceDraftForm.heading3')}</h2>
 
             {/* DIE NUMMER IST GESPERRT UND LEER, solange die Rechnung Entwurf
@@ -713,7 +713,7 @@ export function InvoiceDraftForm({
 
           {/* ------------------------------------------- Interne Notiz */}
           <Card className="mt-4 p-[18px]">
-            <h2 className="mb-3 font-serif text-[17px] font-bold text-text">
+            <h2 className="mb-3 text-[17px] font-semibold text-text">
               {t('components.invoiceDraftForm.heading4')}</h2>
             <TextArea
               id="rechnung-interne-notiz"

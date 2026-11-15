@@ -1,9 +1,20 @@
 /* ============================================================
    saas-instant Design-Tokens
-   Warme, grüne Markenidentität. Vier bedeutungstragende
-   Eintragsfarben (docs/03) — Farbe ist NIE alleiniges Signal
-   (Label + Icon zusätzlich). Kein Dunkelmodus (bewusst entfernt).
-   Zwei Schriftfamilien: Sans (UI) + Serif (Überschriften/Fließtext).
+   Neutral, sachlich, nicht gebrandet: Slate-Grautöne, EIN nüchterner
+   Akzent (Blau). Vier bedeutungstragende Eintragsfarben
+   (Vorschlag/Bedenken/Einwand/Beschluss = Info/Warnung/Gefahr/Erfolg) —
+   Farbe ist NIE alleiniges Signal (Label + Icon zusätzlich).
+
+   Hell ist die Vorgabe. Dunkel gilt automatisch per
+   prefers-color-scheme und lässt sich am <html>-Element mit
+   data-theme="light" bzw. data-theme="dark" erzwingen.
+   Die Dunkelwerte stehen bewusst zweimal (Medienabfrage + Attribut);
+   scripts/contrast-check.mjs prüft, dass beide Blöcke identisch sind
+   und dass alle Text-/Hintergrundpaare WCAG AA erfüllen.
+
+   Schrift: Inter (Variable, selbst gehostet). --font-serif zeigt aus
+   Kompatibilitätsgründen auf dieselbe Sans-Familie; es gibt keine
+   Serifenschrift mehr.
 
    Einzige Quelle der Wahrheit für alle Apps. Wird per
    `@import "@saas-instant/ui/tokens.css";` nach `@import "tailwindcss";`
@@ -13,78 +24,225 @@
 :root {
   color-scheme: light;
 
-  /* Neutrale, warme Flächen + grüne Primärfarbe (Marke). */
-  --farbe-flaeche: #ffffff;      /* Karten, Sidebar, Modals (surf) */
-  --farbe-flaeche-2: #f6f7f5;    /* App-Hintergrund (bg) */
-  --farbe-flaeche-3: #eef1ec;    /* Chips, Hover-Flächen, Segmented-Container */
-  --farbe-text: #1e2621;         /* Primärtext (ink) */
-  --farbe-text-leise: #54605a;   /* Sekundärtext (ink2) */
-  --farbe-read: #2a332d;         /* Fließtext in Serifenschrift (Vorschlags-/Zieltexte) */
-  --farbe-rahmen: #e3e7e1;       /* Standard-Rahmen (line) */
-  --farbe-primaer: #3a7d6b;      /* Marke: Buttons, aktive Nav, Fokus */
-  --farbe-primaer-hover: #2f6a5a;
+  /* Flächen und Text (Slate). */
+  --farbe-flaeche: #ffffff;      /* Karten, Sidebar, Modals */
+  --farbe-flaeche-2: #f8fafc;    /* App-Hintergrund */
+  --farbe-flaeche-3: #f1f5f9;    /* Chips, Hover-Flächen, Segmented-Container */
+  --farbe-flaeche-4: #fbfcfe;    /* abgesetzte Fläche: Tabellenkopf, Feldflächen */
+  --farbe-text: #0f172a;         /* Primärtext */
+  --farbe-text-leise: #475569;   /* Sekundärtext */
+  --farbe-text-still: #5b6b82;   /* Tertiärtext: Platzhalter, „—", Eyebrow */
+  --farbe-read: #1e293b;         /* Fließtext (Vorschlags-/Zieltexte) */
+  --farbe-rahmen: #e2e8f0;       /* Standard-Rahmen, Karten */
+  --farbe-rahmen-leise: #eef2f6; /* Trennlinie INNERHALB von Karten */
+  --farbe-rahmen-ui: #7b8aa0;    /* Rahmen von Eingabefeldern/Schaltern (>= 3:1) */
+
+  /* Akzent: ein nüchternes Blau. */
+  --farbe-primaer: #0369a1;
+  --farbe-primaer-hover: #075985;
   --farbe-primaer-text: #ffffff;
-  --farbe-primaer-soft: #e6f0ec;     /* grüne Soft-Fläche (Chips, aktive Icons) */
-  --farbe-primaer-softtext: #2c6152; /* Text/Icon auf grüner Soft-Fläche */
-  --farbe-fokus: #3a7d6b;
-  --farbe-gefahr: #c0453f;       /* destruktiv = Einwand-Rot */
+  --farbe-primaer-soft: #e0f2fe;         /* weiche Fläche (Chips, aktive Icons) */
+  --farbe-primaer-softtext: #075985;     /* Text/Icon auf weicher Fläche */
+  --farbe-primaer-softer: #f0f9ff;       /* sehr helle Fläche: Nav-Hover, Hinweisstreifen */
+  --farbe-primaer-softrahmen: #bae6fd;   /* Rahmen auf weicher Fläche */
+  --farbe-primaer-softtext-hover: #0c4a6e;
+  --farbe-fokus: #0369a1;
+
+  /* Semantik: Gefahr / Erfolg / Warnung, je bg / rahmen / text.
+     --farbe-gefahr(-text) = gefüllter destruktiver Knopf und Fehlertext. */
+  --farbe-gefahr: #b91c1c;
   --farbe-gefahr-text: #ffffff;
+  --farbe-gefahr-bg: #fef2f2;
+  --farbe-gefahr-rahmen: #b91c1c;
+  --farbe-gefahr-bg-text: #991b1b;       /* Text auf --farbe-gefahr-bg */
+  --farbe-erfolg-bg: #f0fdf4;
+  --farbe-erfolg-rahmen: #15803d;
+  --farbe-erfolg-text: #166534;
+  --farbe-warnung-bg: #fffbeb;
+  --farbe-warnung-rahmen: #b45309;
+  --farbe-warnung-text: #92400e;
 
-  /* Eintragsfarben: Vorschlag=blau, Bedenken=amber, Einwand=rot (vereinheitlicht),
-     Beschluss=grün. Je Rolle bg / rahmen(=Akzent) / text (AA-Kontrast). */
-  --e-vorschlag-bg: #eaf1fa;   --e-vorschlag-rahmen: #2e6bb0;  --e-vorschlag-text: #1f4e86;
-  --e-bedenken-bg: #fbf3dc;    --e-bedenken-rahmen: #c58a16;   --e-bedenken-text: #835905;
-  --e-einwand-bg: #fbeae8;     --e-einwand-rahmen: #c0453f;    --e-einwand-text: #8c2c28;
-  --e-beschluss-bg: #e5f3ea;   --e-beschluss-rahmen: #2e8b57;  --e-beschluss-text: #1d6b41;
+  /* Eintragsfarben: Vorschlag=Info(Akzent), Bedenken=Warnung, Einwand=Gefahr,
+     Beschluss=Erfolg. Je Rolle bg / rahmen(=Akzent) / text. */
+  --e-vorschlag-bg: #f0f9ff;   --e-vorschlag-rahmen: #0369a1;  --e-vorschlag-text: #075985;
+  --e-bedenken-bg: #fffbeb;    --e-bedenken-rahmen: #b45309;   --e-bedenken-text: #92400e;
+  --e-einwand-bg: #fef2f2;     --e-einwand-rahmen: #b91c1c;    --e-einwand-text: #991b1b;
+  --e-beschluss-bg: #f0fdf4;   --e-beschluss-rahmen: #15803d;  --e-beschluss-text: #166534;
 
-  /* ---------------------------------------------------------------
-     Ergänzung für dichte Listen- und Detailansichten.
+  /* Helle Rahmen der Semantikfamilien (Hinweisstreifen, Karten). */
+  --e-vorschlag-rahmen-hell: #bae6fd;
+  --e-bedenken-rahmen-hell: #fde68a;
+  --e-einwand-rahmen-hell: #fecaca;
+  --e-beschluss-rahmen-hell: #bbf7d0;
 
-     REIN ADDITIV. Kein Name umbenannt, kein Wert geändert: Die 23
-     Farbwerte oben bleiben byte-identisch. Was hier dazukommt, sind
-     Rollen, die es im Bestand noch nicht gab — Tertiärtext, die leise
-     Trennlinie, die abgesetzte Fläche, die vier Rahmenfarben der
-     Semantikfamilien.
+  /* Zustände ohne Semantikfamilie. */
+  --farbe-eingeladen: #a16207;       /* Punkt „Eingeladen" */
+  --farbe-eingeladen-text: #854d0e;
+  --farbe-inaktiv: #7b8aa0;          /* Punkt „Gesperrt", Schalter aus */
+  --farbe-knopf-gesperrt: #cbd5e1;   /* gesperrter Primärknopf (inaktiv, von AA ausgenommen) */
 
-     Warum das wichtig ist: `apps/web` hängt an derselben Datei
-     (`apps/web/src/index.css`). Eine Umbenennung dort träfe 47
-     Dateien, ein geänderter Wert die ganze Anwendung. Die
-     Gegenprobe ist der Content-Hash des web-CSS-Bundles vor und nach
-     dieser Änderung — bleibt er gleich, war die Erweiterung additiv.
-     --------------------------------------------------------------- */
+  /* Schatten: dezent. */
+  --schatten-karte: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.08);
+  --schatten-karte-hover: 0 2px 4px rgb(15 23 42 / 0.06), 0 4px 10px rgb(15 23 42 / 0.08);
+  --schatten-dialog: 0 24px 56px rgb(15 23 42 / 0.22);
+  --schatten-popover: 0 12px 32px rgb(15 23 42 / 0.16);
+  --schatten-toast: 0 8px 24px rgb(15 23 42 / 0.20);
+  --schatten-segment: 0 1px 2px rgb(15 23 42 / 0.10);
 
-  --farbe-text-still: #8a938b;   /* Tertiärtext (ink3): Platzhalter, „—", Eyebrow */
-  --farbe-rahmen-leise: #edf0ec; /* Trennlinie INNERHALB von Karten (line2) */
-  --farbe-flaeche-4: #fbfcfb;    /* abgesetzte Fläche (surf2): Tabellenkopf, Feldflächen */
-  --farbe-primaer-softer: #f1f6f3; /* sehr helle grüne Fläche: Nav-Hover, Hinweisstreifen */
-  --farbe-primaer-softrahmen: #c9e0d6; /* Rahmen auf grüner Soft-Fläche */
-  --farbe-primaer-softtext-hover: #1e4a3e; /* Hover eines Textlinks in Tabellenzeilen */
+  /* Radius (klein), Übergang, Fokusring, Abstandsskala (4/8px). */
+  --radius-klein: 6px;
+  --radius-mittel: 8px;
+  --uebergang: 150ms ease-out;
+  --uebergang-lang: 200ms ease-out;
+  --fokus-breite: 2px;
+  --fokus-abstand: 2px;
+  --abstand-1: 4px;
+  --abstand-2: 8px;
+  --abstand-3: 12px;
+  --abstand-4: 16px;
+  --abstand-6: 24px;
+  --abstand-8: 32px;
+  --touch-ziel: 44px;
+}
 
-  /* Rahmenfarben der vier Semantikfamilien. Die Familien selbst haben
-     schon bg/akzent/text; für Hinweisstreifen und Karten fehlte der
-     HELLE Rahmen — der Akzent wäre dort zu kräftig. */
-  --e-vorschlag-rahmen-hell: #cfdff1;
-  --e-bedenken-rahmen-hell: #f0e2b0;
-  --e-einwand-rahmen-hell: #f1ccc9;
-  --e-beschluss-rahmen-hell: #c4e5cf;
+/* Dunkelmodus automatisch (System), außer der Nutzer erzwingt Hell. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
 
-  /* Zustände, die keiner Semantikfamilie angehören. */
-  --farbe-eingeladen: #d8b23e;       /* Punkt „Eingeladen" */
-  --farbe-eingeladen-text: #9a7b1e;
-  --farbe-inaktiv: #cdd4cd;          /* Punkt „Gesperrt", Schalter aus */
-  --farbe-knopf-gesperrt: #b9c4bd;   /* gesperrter Primärknopf */
+    --farbe-flaeche: #1e293b;
+    --farbe-flaeche-2: #0f172a;
+    --farbe-flaeche-3: #334155;
+    --farbe-flaeche-4: #172033;
+    --farbe-text: #f1f5f9;
+    --farbe-text-leise: #cbd5e1;
+    --farbe-text-still: #a3b1c6;
+    --farbe-read: #e2e8f0;
+    --farbe-rahmen: #334155;
+    --farbe-rahmen-leise: #263348;
+    --farbe-rahmen-ui: #7b8aa0;
 
-  --schatten-karte: 0 4px 14px rgb(20 40 30 / 0.07);
-  --schatten-karte-hover: 0 6px 20px rgb(20 40 30 / 0.09);
-  --schatten-dialog: 0 24px 60px rgb(20 40 30 / 0.30);
-  --schatten-popover: 0 18px 44px rgb(20 40 30 / 0.20);
-  --schatten-toast: 0 12px 34px rgb(20 40 30 / 0.28);
+    --farbe-primaer: #38bdf8;
+    --farbe-primaer-hover: #7dd3fc;
+    --farbe-primaer-text: #082f49;
+    --farbe-primaer-soft: #0c4a6e;
+    --farbe-primaer-softtext: #bae6fd;
+    --farbe-primaer-softer: #0b3a58;
+    --farbe-primaer-softrahmen: #075985;
+    --farbe-primaer-softtext-hover: #e0f2fe;
+    --farbe-fokus: #38bdf8;
+
+    --farbe-gefahr: #f87171;
+    --farbe-gefahr-text: #450a0a;
+    --farbe-gefahr-bg: #450a0a;
+    --farbe-gefahr-rahmen: #f87171;
+    --farbe-gefahr-bg-text: #fca5a5;
+    --farbe-erfolg-bg: #052e16;
+    --farbe-erfolg-rahmen: #4ade80;
+    --farbe-erfolg-text: #86efac;
+    --farbe-warnung-bg: #451a03;
+    --farbe-warnung-rahmen: #fbbf24;
+    --farbe-warnung-text: #fcd34d;
+
+    --e-vorschlag-bg: #082f49;   --e-vorschlag-rahmen: #38bdf8;  --e-vorschlag-text: #7dd3fc;
+    --e-bedenken-bg: #451a03;    --e-bedenken-rahmen: #fbbf24;   --e-bedenken-text: #fcd34d;
+    --e-einwand-bg: #450a0a;     --e-einwand-rahmen: #f87171;    --e-einwand-text: #fca5a5;
+    --e-beschluss-bg: #052e16;   --e-beschluss-rahmen: #4ade80;  --e-beschluss-text: #86efac;
+
+    --e-vorschlag-rahmen-hell: #0c4a6e;
+    --e-bedenken-rahmen-hell: #78350f;
+    --e-einwand-rahmen-hell: #7f1d1d;
+    --e-beschluss-rahmen-hell: #14532d;
+
+    --farbe-eingeladen: #fbbf24;
+    --farbe-eingeladen-text: #fcd34d;
+    --farbe-inaktiv: #7b8aa0;
+    --farbe-knopf-gesperrt: #475569;
+
+    --schatten-karte: 0 1px 2px rgb(0 0 0 / 0.40), 0 1px 3px rgb(0 0 0 / 0.30);
+    --schatten-karte-hover: 0 2px 4px rgb(0 0 0 / 0.45), 0 4px 10px rgb(0 0 0 / 0.30);
+    --schatten-dialog: 0 24px 56px rgb(0 0 0 / 0.60);
+    --schatten-popover: 0 12px 32px rgb(0 0 0 / 0.55);
+    --schatten-toast: 0 8px 24px rgb(0 0 0 / 0.55);
+    --schatten-segment: 0 1px 2px rgb(0 0 0 / 0.50);
+  }
+}
+
+/* Dunkelmodus manuell erzwungen. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --farbe-flaeche: #1e293b;
+  --farbe-flaeche-2: #0f172a;
+  --farbe-flaeche-3: #334155;
+  --farbe-flaeche-4: #172033;
+  --farbe-text: #f1f5f9;
+  --farbe-text-leise: #cbd5e1;
+  --farbe-text-still: #a3b1c6;
+  --farbe-read: #e2e8f0;
+  --farbe-rahmen: #334155;
+  --farbe-rahmen-leise: #263348;
+  --farbe-rahmen-ui: #7b8aa0;
+
+  --farbe-primaer: #38bdf8;
+  --farbe-primaer-hover: #7dd3fc;
+  --farbe-primaer-text: #082f49;
+  --farbe-primaer-soft: #0c4a6e;
+  --farbe-primaer-softtext: #bae6fd;
+  --farbe-primaer-softer: #0b3a58;
+  --farbe-primaer-softrahmen: #075985;
+  --farbe-primaer-softtext-hover: #e0f2fe;
+  --farbe-fokus: #38bdf8;
+
+  --farbe-gefahr: #f87171;
+  --farbe-gefahr-text: #450a0a;
+  --farbe-gefahr-bg: #450a0a;
+  --farbe-gefahr-rahmen: #f87171;
+  --farbe-gefahr-bg-text: #fca5a5;
+  --farbe-erfolg-bg: #052e16;
+  --farbe-erfolg-rahmen: #4ade80;
+  --farbe-erfolg-text: #86efac;
+  --farbe-warnung-bg: #451a03;
+  --farbe-warnung-rahmen: #fbbf24;
+  --farbe-warnung-text: #fcd34d;
+
+  --e-vorschlag-bg: #082f49;   --e-vorschlag-rahmen: #38bdf8;  --e-vorschlag-text: #7dd3fc;
+  --e-bedenken-bg: #451a03;    --e-bedenken-rahmen: #fbbf24;   --e-bedenken-text: #fcd34d;
+  --e-einwand-bg: #450a0a;     --e-einwand-rahmen: #f87171;    --e-einwand-text: #fca5a5;
+  --e-beschluss-bg: #052e16;   --e-beschluss-rahmen: #4ade80;  --e-beschluss-text: #86efac;
+
+  --e-vorschlag-rahmen-hell: #0c4a6e;
+  --e-bedenken-rahmen-hell: #78350f;
+  --e-einwand-rahmen-hell: #7f1d1d;
+  --e-beschluss-rahmen-hell: #14532d;
+
+  --farbe-eingeladen: #fbbf24;
+  --farbe-eingeladen-text: #fcd34d;
+  --farbe-inaktiv: #7b8aa0;
+  --farbe-knopf-gesperrt: #475569;
+
+  --schatten-karte: 0 1px 2px rgb(0 0 0 / 0.40), 0 1px 3px rgb(0 0 0 / 0.30);
+  --schatten-karte-hover: 0 2px 4px rgb(0 0 0 / 0.45), 0 4px 10px rgb(0 0 0 / 0.30);
+  --schatten-dialog: 0 24px 56px rgb(0 0 0 / 0.60);
+  --schatten-popover: 0 12px 32px rgb(0 0 0 / 0.55);
+  --schatten-toast: 0 8px 24px rgb(0 0 0 / 0.55);
+  --schatten-segment: 0 1px 2px rgb(0 0 0 / 0.50);
 }
 
 /* Tokens für Tailwind-Utilities verfügbar machen. */
 @theme inline {
-  --font-sans: "Hanken Grotesk Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-serif: "Source Serif 4 Variable", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Kompatibilität: keine Serifenschrift mehr, bestehende Verweise zeigen auf Sans. */
+  --font-serif: var(--font-sans);
+
+  /* Kleine Radien, gleichmäßig (Utilities rounded-md … rounded-3xl). */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 8px;
+  --radius-3xl: 8px;
+  --default-transition-duration: 150ms;
 
   --color-flaeche: var(--farbe-flaeche);
   --color-flaeche-2: var(--farbe-flaeche-2);
@@ -129,6 +287,16 @@
 
   --color-eingeladen: var(--farbe-eingeladen);
   --color-eingeladen-text: var(--farbe-eingeladen-text);
+  --color-rahmen-ui: var(--farbe-rahmen-ui);
+  --color-gefahr-bg: var(--farbe-gefahr-bg);
+  --color-gefahr-rahmen: var(--farbe-gefahr-rahmen);
+  --color-gefahr-bg-text: var(--farbe-gefahr-bg-text);
+  --color-erfolg-bg: var(--farbe-erfolg-bg);
+  --color-erfolg-rahmen: var(--farbe-erfolg-rahmen);
+  --color-erfolg-text: var(--farbe-erfolg-text);
+  --color-warnung-bg: var(--farbe-warnung-bg);
+  --color-warnung-rahmen: var(--farbe-warnung-rahmen);
+  --color-warnung-text: var(--farbe-warnung-text);
   --color-inaktiv: var(--farbe-inaktiv);
   --color-knopf-gesperrt: var(--farbe-knopf-gesperrt);
 
@@ -137,37 +305,44 @@
   --shadow-dialog: var(--schatten-dialog);
   --shadow-popover: var(--schatten-popover);
   --shadow-toast: var(--schatten-toast);
+  --shadow-segment: var(--schatten-segment);
 }
 
 @layer base {
+  html {
+    font-size: 16px;
+  }
+
   body {
     background-color: var(--farbe-flaeche-2);
     color: var(--farbe-text);
     font-family: var(--font-sans);
-    font-feature-settings: "tnum" 0;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Überschriften in Serif (redaktioneller Charakter des Designs). */
+  /* Eine Familie (Inter) für alles; Überschriften nur über Gewicht abgesetzt. */
   h1, h2, h3 {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    line-height: 1.25;
   }
 
-  /* Redaktioneller Fließtext (Ziele, Vorschläge, Beschlüsse) opt-in per Klasse. */
   .fliesstext {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
   }
 
-  /* Tabellenziffern für Datums-/Zahlenausgaben (kein Layout-Springen). */
-  .ziffern-tabellarisch {
+  /* Tabellenziffern für Beträge, Daten und Tabellen (kein Layout-Springen). */
+  .ziffern-tabellarisch,
+  table,
+  time {
     font-variant-numeric: tabular-nums;
   }
 
   /* Sichtbarer Fokusring, einheitlich über alle interaktiven Elemente. */
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-    outline: 2px solid var(--farbe-fokus);
-    outline-offset: 2px;
-    border-radius: 2px;
+    outline: var(--fokus-breite) solid var(--farbe-fokus);
+    outline-offset: var(--fokus-abstand);
   }
 
   /* Zeigefinger auf allen klickbaren Buttons (Tailwind v4 setzt sonst „default").
@@ -176,5 +351,24 @@
   [role="button"]:not([aria-disabled="true"]),
   summary {
     cursor: pointer;
+  }
+
+  /* Touch-Ziele mindestens 44px auf Touchgeräten. */
+  @media (pointer: coarse) {
+    :where(button, [role="button"], select, input:not([type="checkbox"], [type="radio"], [type="hidden"])) {
+      min-height: var(--touch-ziel);
+    }
+  }
+
+  /* Bewegung reduzieren, wenn vom System gewünscht. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

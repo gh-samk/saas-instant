@@ -156,7 +156,7 @@ export function WordingField({
         onBlur={report}
         onKeyUp={updateState}
         onMouseUp={updateState}
-        className={`${height} w-full overflow-y-auto rounded-b-lg border border-rahmen bg-flaeche px-3 py-2 text-sm text-text focus:border-primaer focus:outline-none [&_p]:mb-2`}
+        className={`${height} w-full overflow-y-auto rounded-b-lg border border-rahmen-ui bg-flaeche px-3 py-2 text-sm text-text focus:border-primaer [&_p]:mb-2`}
       />
 
       {helperText && <p className="mt-1 text-sm text-leise">{helperText}</p>}

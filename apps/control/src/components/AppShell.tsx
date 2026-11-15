@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../context/AuthContext';
 import { useProduct } from '../context/ProductContext';
 import { fetchNavigationCounters, type NavigationCounters } from '../lib/api';
@@ -89,9 +90,9 @@ const NAV_BOTTOM: NavTarget[] = [
 ];
 
 const NAV_LINK_CLASS = (isActive: boolean) =>
-  `flex items-center gap-3 rounded-lg px-2.5 py-2 text-[15px] font-semibold ${
+  `flex items-center gap-3 rounded-lg px-2.5 py-2 text-[15px] font-medium transition-colors duration-150 ${
     isActive
-      ? 'bg-primaer-soft text-primaer-softtext'
+      ? 'bg-primaer-soft font-semibold text-primaer-softtext'
       : 'text-text hover:bg-primaer-softer'
   }`;
 
@@ -106,7 +107,7 @@ function CounterPill({ value, kind }: { value: number; kind: CounterKind }) {
   if (value <= 0) return null;
   return (
     <span
-      className={`ml-auto grid min-w-[20px] shrink-0 place-items-center rounded-full px-1.5 py-0.5 text-[11px] font-bold ziffern-tabellarisch ${
+      className={`ml-auto grid min-w-[20px] shrink-0 place-items-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold ziffern-tabellarisch ${
         kind === 'urgent'
           ? 'bg-gefahr text-gefahr-text'
           : 'bg-bedenken-bg text-bedenken-text'
@@ -251,17 +252,17 @@ export function AppShell() {
         <aside className="sticky top-0 hidden h-dvh w-[268px] shrink-0 flex-col border-r border-rahmen bg-flaeche lg:flex">
           <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
             <span
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-primaer-soft font-serif text-base font-bold text-primaer-softtext"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primaer-soft text-base font-semibold text-primaer-softtext"
               aria-hidden="true"
             >
               {logoUrl ? (
-                <img src={logoUrl} alt="" className="h-8 w-8 rounded-[9px] object-contain" />
+                <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg object-contain" />
               ) : (
                 productName.charAt(0).toUpperCase()
               )}
             </span>
             <span className="leading-tight">
-              <span className="block font-serif text-lg font-bold text-primaer">
+              <span className="block text-lg font-semibold text-primaer">
                 {productName}
               </span>
               <span className="block text-[11px] font-semibold uppercase tracking-[0.06em] text-still">
@@ -275,7 +276,8 @@ export function AppShell() {
               counter={counter}
             />
           </div>
-          <div className="p-4">
+          <div className="flex flex-col gap-3 p-4">
+            <ThemeSwitcher />
             <NavList targets={NAV_BOTTOM} label={t('components.appShell.label9')} counter={counter} />
           </div>
         </aside>
@@ -290,7 +292,7 @@ export function AppShell() {
             >
               <Menu className="h-5 w-5" aria-hidden="true" />
             </button>
-            <span className="font-serif text-lg font-bold text-primaer lg:hidden">
+            <span className="text-lg font-semibold text-primaer lg:hidden">
               {productName}
             </span>
 
@@ -325,7 +327,7 @@ export function AppShell() {
                       : `/companies?search=${encodeURIComponent(value)}`,
                   );
                 }}
-                className="w-full rounded-lg border border-rahmen bg-flaeche-4 py-2 pl-9 pr-14 text-sm text-text placeholder:text-still"
+                className="w-full rounded-lg border border-rahmen-ui bg-flaeche-4 py-2 pl-9 pr-14 text-sm text-text placeholder:text-still"
               />
               <span
                 className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-rahmen bg-flaeche px-1.5 py-0.5 text-[11px] font-semibold text-still lg:block"
@@ -344,7 +346,7 @@ export function AppShell() {
               onClick={() => void logout()}
               aria-label={t('components.appShell.ariaLabel3')}
               title={t('components.appShell.title')}
-              className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-rahmen text-leise transition-colors duration-150 hover:bg-flaeche-3 hover:text-text"
+              className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-rahmen-ui text-leise transition-colors duration-150 hover:bg-flaeche-3 hover:text-text"
             >
               <LogOut className="h-[18px] w-[18px]" aria-hidden="true" />
             </button>
@@ -367,14 +369,14 @@ export function AppShell() {
           className="fixed inset-0 z-50 lg:hidden"
           onClick={() => setDrawerOpen(false)}
         >
-          <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
+          <div className="absolute inset-0 bg-flaeche-2/70 backdrop-blur-[2px]" aria-hidden="true" />
           <aside
             ref={panelRef}
             className="absolute inset-y-0 left-0 flex w-[268px] flex-col border-r border-rahmen bg-flaeche"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 pb-2">
-              <span className="px-1 font-serif text-2xl font-bold text-primaer">
+              <span className="px-1 text-2xl font-semibold text-primaer">
                 {productName}
               </span>
               <button
@@ -393,7 +395,8 @@ export function AppShell() {
                 onNavigate={() => setDrawerOpen(false)}
               />
             </div>
-            <div className="border-t border-rahmen p-4">
+            <div className="flex flex-col gap-3 border-t border-rahmen p-4">
+              <ThemeSwitcher />
               <NavList
                 targets={NAV_BOTTOM}
                 label={t('components.appShell.label9')}

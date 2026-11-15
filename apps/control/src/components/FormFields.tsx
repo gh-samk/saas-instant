@@ -69,7 +69,7 @@ export function TextArea({
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-rahmen bg-flaeche px-3 py-2 text-sm text-text placeholder:text-leise focus:border-primaer focus:outline-none disabled:opacity-70"
+        className="w-full rounded-lg border border-rahmen-ui bg-flaeche px-3 py-2 text-sm text-text placeholder:text-still focus:border-primaer disabled:opacity-70"
       />
       {helperText && <p className="mt-1 text-sm text-leise">{helperText}</p>}
     </div>

@@ -7,7 +7,7 @@
  * ===========================================================================
  *
  * Sie lädt sie über `@saas-instant/ui/fonts`, und Vite gibt ihnen dabei einen
- * Hash im Dateinamen (`hanken-grotesk-latin-wght-normal-CaVRRdDk.woff2`). Der
+ * Hash im Dateinamen (`inter-latin-wght-normal-<Hash>.woff2`). Der
  * ändert sich bei jedem Fassungswechsel der Schrift. Für die React-Oberfläche
  * ist das richtig — sie bekommt den Namen aus dem Bündel.
  *
@@ -35,8 +35,7 @@ const TARGET = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'fo
  * und Vietnamesisch wären 60 kB, die niemand zu sehen bekommt.
  */
 const FONTS = [
-  ['@fontsource-variable/hanken-grotesk', 'hanken-grotesk-latin-wght-normal.woff2'],
-  ['@fontsource-variable/source-serif-4', 'source-serif-4-latin-wght-normal.woff2'],
+  ['@fontsource-variable/inter', 'inter-latin-wght-normal.woff2'],
 ];
 
 mkdirSync(TARGET, { recursive: true });

@@ -283,7 +283,7 @@ export function InstanceCreateDialog({
             <div className="rounded-lg border-2 border-primaer bg-primaer-soft p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-primaer-softtext">
                 {t('components.instanceCreateDialog.text8')}</p>
-              <p className="font-serif text-lg font-bold text-text break-words">
+              <p className="text-lg font-semibold text-text break-words">
                 {companyName}
               </p>
               <div className="mt-3 flex items-center gap-2 rounded-lg border border-rahmen bg-flaeche px-3 py-2">

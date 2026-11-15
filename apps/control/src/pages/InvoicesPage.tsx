@@ -125,7 +125,7 @@ export function InvoicesPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h1
           id="invoices-title"
-          className="font-serif text-[26px] font-bold text-text"
+          className="text-2xl font-semibold tracking-tight text-text"
         >
           {t('rechnungen.title')}
         </h1>

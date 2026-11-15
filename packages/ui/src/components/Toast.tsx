@@ -53,7 +53,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div
               key={t.id}
               role="status"
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-karte ${
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-toast ${
                 t.typeValue === 'success'
                   ? 'border-beschluss-rahmen bg-beschluss-bg text-beschluss-text'
                   : 'border-einwand-rahmen bg-einwand-bg text-einwand-text'
@@ -64,7 +64,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <button
                 onClick={() => remove(t.id)}
                 aria-label={uiT('toast.close')}
-                className="ml-1 opacity-70 hover:opacity-100"
+                className="ml-1 rounded-md p-0.5 opacity-80 transition-opacity duration-150 hover:opacity-100"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>

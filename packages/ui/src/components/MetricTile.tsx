@@ -76,7 +76,7 @@ export function MetricTile({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`flex w-full items-center gap-3 rounded-2xl border bg-flaeche px-4 py-3.5 text-left transition-all hover:-translate-y-px hover:shadow-karte-hover ${style.layout} ${selected ? 'ring-2 ring-primaer' : ''}`}
+      className={`flex w-full items-center gap-3 rounded-lg border bg-flaeche px-4 py-3.5 text-left transition-all hover:-translate-y-px hover:shadow-karte-hover ${style.layout} ${selected ? 'ring-2 ring-primaer' : ''}`}
     >
       <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${style.circle}`}>
         <Icon className={`h-[18px] w-[18px] ${style.symbol}`} aria-hidden="true" />

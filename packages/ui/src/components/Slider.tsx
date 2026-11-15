@@ -45,7 +45,7 @@ export function Slider({
           value={value}
           aria-valuetext={valueText}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-flaeche-3 accent-[var(--farbe-primaer)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primaer"
+          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-flaeche-3 accent-[var(--farbe-primaer)]"
         />
         {display && (
           <span className="ziffern-tabellarisch min-w-[6.5rem] text-right text-sm text-text">

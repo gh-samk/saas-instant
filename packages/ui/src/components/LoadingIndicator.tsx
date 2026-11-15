@@ -18,7 +18,7 @@ export function Spinner({ text = uiT('loadingIndicator.text') }: { text?: string
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
-      className={`animate-pulse rounded-md bg-flaeche-3 ${className ?? ''}`}
+      className={`motion-safe:animate-pulse rounded-md bg-flaeche-3 ${className ?? ''}`}
       aria-hidden="true"
     />
   );

@@ -188,7 +188,7 @@ export function Dialog({
                       id={titleId}
                       className={
                         eyebrow
-                          ? 'font-serif text-2xl font-bold text-text'
+                          ? 'text-2xl font-semibold text-text'
                           : 'text-lg font-semibold text-text'
                       }
                     >

@@ -168,7 +168,7 @@ export function InvoiceDetailPage() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-serif text-[26px] font-bold text-text">
+            <h1 className="text-2xl font-semibold tracking-tight text-text">
               {isNew
                 ? t('rechnungen.newInvoice')
                 : invoice?.invoiceNumber

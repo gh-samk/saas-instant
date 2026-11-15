@@ -233,7 +233,7 @@ export function BroadcastTemplatePage() {
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1
           id="template-title"
-          className="min-w-0 break-words font-serif text-2xl font-bold text-text"
+          className="min-w-0 break-words text-2xl font-semibold tracking-tight text-text"
         >
           {template.name}
         </h1>

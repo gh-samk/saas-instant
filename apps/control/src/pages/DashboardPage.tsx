@@ -293,7 +293,7 @@ export function DashboardPage() {
       <div className="mb-4 flex flex-wrap items-baseline gap-x-3">
         <h1
           id="dashboard-title"
-          className="font-serif text-[26px] font-bold text-text"
+          className="text-2xl font-semibold tracking-tight text-text"
         >{t('dashboard.title')}</h1>
         {data && (
           <span className="text-sm text-still ziffern-tabellarisch">

@@ -63,7 +63,7 @@ export function BroadcastTabs({ numbers }: { numbers: BroadcastNumbers }) {
             aria-current={active ? 'page' : undefined}
             className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
               active
-                ? 'bg-flaeche text-text shadow-[0_1px_3px_rgb(20_40_30/0.10)]'
+                ? 'bg-flaeche text-text shadow-segment'
                 : 'text-leise hover:text-text'
             }`}
           >

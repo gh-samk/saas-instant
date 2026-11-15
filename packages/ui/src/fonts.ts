@@ -1,12 +1,11 @@
 /**
  * Schriften des Design-Systems als Seiteneffekt-Import.
  *
- * Reihenfolge und Auswahl entsprechen exakt dem bisherigen Stand in
- * `apps/web/src/main.tsx`. Der Import muss VOR dem CSS-Import der App stehen,
- * damit die Reihenfolge im gebauten Bundle unverändert bleibt.
+ * Der Import muss VOR dem CSS-Import der App stehen, damit die Reihenfolge im
+ * gebauten Bundle stimmt.
  *
- * Sans = Hanken Grotesk (UI), Serif = Source Serif 4 (Überschriften, Fließtext).
- * Beide sind in `tokens.css` als `--font-sans` bzw. `--font-serif` hinterlegt.
+ * Eine einzige Familie: Inter (Variable, selbst gehostet über Fontsource,
+ * keine Verbindung zu Google Fonts). In `tokens.css` als `--font-sans`
+ * hinterlegt; `--font-serif` zeigt auf dieselbe Familie.
  */
-import '@fontsource-variable/hanken-grotesk';
-import '@fontsource-variable/source-serif-4';
+import '@fontsource-variable/inter';

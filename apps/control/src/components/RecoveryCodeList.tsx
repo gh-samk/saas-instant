@@ -78,7 +78,7 @@ export function RecoveryCodeList({
             required
             checked={confirmed}
             onChange={(e) => onConfirmedChange(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-rahmen text-primaer focus:outline-none"
+            className="mt-0.5 h-4 w-4 rounded border-rahmen-ui text-primaer"
           />
           {t('components.recoveryCodeList.label2')}</label>
       </div>

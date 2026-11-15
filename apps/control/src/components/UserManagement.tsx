@@ -189,7 +189,7 @@ export function UserManagement() {
             linke Seite — an eine Stelle, an der ihn niemand sucht. */}
         <div className="mb-1 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="font-serif text-[17px] font-bold text-text">{t('components.userManagement.heading')}</h2>
+            <h2 className="text-[17px] font-semibold text-text">{t('components.userManagement.heading')}</h2>
             <p className="mt-1 text-sm text-leise">
               {t('components.userManagement.text8')}{' '}
               <span className="font-medium text-text">

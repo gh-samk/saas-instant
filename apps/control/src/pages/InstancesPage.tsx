@@ -65,7 +65,7 @@ export function InstancesPage() {
 
   return (
     <section aria-labelledby="instances-title" className="space-y-6">
-      <h1 id="instances-title" className="font-serif text-[26px] font-bold text-text">
+      <h1 id="instances-title" className="text-2xl font-semibold tracking-tight text-text">
         {t('instanzen.title')}
       </h1>
 

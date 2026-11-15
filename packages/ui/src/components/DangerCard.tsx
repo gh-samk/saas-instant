@@ -39,7 +39,7 @@ export function DangerCard({
 }) {
   const Heading = headingLevel === 2 ? 'h2' : 'h3';
   return (
-    <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-einwand-rahmen-hell bg-flaeche px-[18px] py-4">
+    <section className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-einwand-rahmen-hell bg-flaeche px-[18px] py-4">
       <div className="min-w-0">
         <Heading className="text-[17px] font-bold text-text">{title}</Heading>
         <p className="mt-0.5 text-sm text-leise">{children}</p>

@@ -48,19 +48,19 @@ export const PAGES_TOKENS = {
   /** `--farbe-flaeche` — Karten. */
   surface: '#ffffff',
   /** `--farbe-flaeche-2` — Seitenhintergrund. */
-  surface2: '#f6f7f5',
+  surface2: '#f8fafc',
   /** `--farbe-text` — Primärtext. */
-  text: '#1e2621',
+  text: '#0f172a',
   /** `--farbe-text-leise` — Sekundärtext. */
-  textMuted: '#54605a',
+  textMuted: '#475569',
   /** `--farbe-rahmen` — Standardrahmen. */
-  layout: '#e3e7e1',
-  /** `--farbe-primaer` — Marke: Wortmarke, Knopf, Fokus. */
-  primary: '#3a7d6b',
+  layout: '#e2e8f0',
+  /** `--farbe-primaer` — Akzent: Wortmarke, Knopf, Fokus. */
+  primary: '#0369a1',
   /** `--farbe-primaer-hover` — Knopf unter dem Zeiger. */
-  primaryHover: '#2f6a5a',
-  /** `--farbe-gefahr` — Fehlermeldungen im Formular (Einwand-Rot). */
-  danger: '#c0453f',
+  primaryHover: '#075985',
+  /** `--farbe-gefahr` — Fehlermeldungen im Formular (Gefahr-Rot). */
+  danger: '#b91c1c',
 } as const;
 
 /**
@@ -159,40 +159,35 @@ export function pagesHeader(heading: string): string {
     // den Schriften im Bündel einen Hash im Namen. Die Oberfläche bekommt
     // ihn aus dem Bündel, diese Seite wird serverseitig als Zeichenkette
     // gebaut und kann ihn nicht kennen. `scripts/copy-fonts.mjs`
-    // legt die zwei lateinischen Teilmengen beim Bauen unter festem Namen
+    // legt die lateinische Teilmenge beim Bauen unter festem Namen
     // in `public/` ab.
     //
     // `font-display:swap`: Die Seite ist sofort lesbar, auch wenn die
     // Schrift noch laedt oder gar nicht ankommt. Der Systemstapel bleibt
     // deshalb als Rueckfallebene stehen.
-    "@font-face{font-family:'Hanken Grotesk';font-style:normal;",
+    "@font-face{font-family:'Inter';font-style:normal;",
     'font-weight:100 900;font-display:swap;',
-    "src:url('/fonts/hanken-grotesk-latin-wght-normal.woff2') format('woff2');}",
-    "@font-face{font-family:'Source Serif 4';font-style:normal;",
-    'font-weight:200 900;font-display:swap;',
-    "src:url('/fonts/source-serif-4-latin-wght-normal.woff2') format('woff2');}",
+    "src:url('/fonts/inter-latin-wght-normal.woff2') format('woff2');}",
     // OHNE DAS RAGT JEDES EINGABEFELD RECHTS HERAUS: `width:100%` plus
     // Polsterung plus Rahmen ergibt mehr als die Breite des Kastens, und der
     // rechte Abstand ist dann kleiner als der linke. Gemeldet am 07.09.2026.
     '*,*::before,*::after{box-sizing:border-box;}',
-    "body{font-family:'Hanken Grotesk',system-ui,-apple-system,\"Segoe UI\",sans-serif;",
+    "body{font-family:'Inter',system-ui,-apple-system,\"Segoe UI\",sans-serif;",
     'margin:0;padding:2rem 1.5rem 3rem;',
     'background:var(--farbe-flaeche-2);color:var(--farbe-text);}',
     '.sl-huelle{max-width:34rem;margin:0 auto;}',
     // KOPF: die Wortmarke als Text, wie im Mailrahmen. Kein Bild — ein Logo,
     // das nicht laedt, ist schlechter als gar keines.
-    ".sl-marke{font-family:'Source Serif 4',Georgia,'Times New Roman',serif;",
-    'font-size:1.3rem;',
+    '.sl-marke{font-size:1.25rem;',
     'font-weight:700;color:var(--farbe-primaer);margin:0 0 1.25rem;}',
     'main{background:var(--farbe-flaeche);',
-    'border:1px solid var(--farbe-rahmen);border-radius:12px;padding:2rem;}',
-    // Überschriften stehen in der Anwendung in der Serife — hier auch.
-    "h1{font-family:'Source Serif 4',Georgia,'Times New Roman',serif;",
-    'font-size:1.45rem;margin:0 0 1rem;}',
+    'border:1px solid var(--farbe-rahmen);border-radius:8px;padding:2rem;}',
+    // Überschriften: dieselbe Familie, nur über das Gewicht abgesetzt.
+    'h1{font-size:1.5rem;font-weight:600;line-height:1.25;margin:0 0 1rem;}',
     'p{line-height:1.6;margin:0 0 .75rem;color:var(--farbe-text-leise);}',
     // Der Knopf trägt dieselbe Marke wie die Anwendung, ohne geladenes CSS.
     'button{font:inherit;font-weight:600;cursor:pointer;margin-top:.5rem;',
-    'padding:.7rem 1.4rem;border-radius:10px;border:1px solid var(--farbe-primaer);',
+    'padding:.7rem 1.4rem;border-radius:6px;min-height:44px;border:1px solid var(--farbe-primaer);',
     'background:var(--farbe-primaer);color:var(--farbe-flaeche);}',
     'button:hover{background:var(--farbe-primaer-hover);',
     'border-color:var(--farbe-primaer-hover);}',

@@ -90,7 +90,7 @@ export function Table({
   const fixedWidths = columnsWidths !== undefined;
   const list = variant === 'list';
   return (
-    <div className="overflow-x-auto rounded-xl border border-rahmen">
+    <div className="overflow-x-auto rounded-lg border border-rahmen">
       <table
         className={[
           'w-full text-left text-sm',

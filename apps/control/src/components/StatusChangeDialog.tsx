@@ -163,7 +163,7 @@ export function StatusChangeDialog({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder={t('components.statusChangeDialog.placeholder')}
-          className="w-full rounded-lg border border-rahmen bg-flaeche px-3 py-2 text-sm text-text placeholder:text-leise focus:border-primaer focus:outline-none"
+          className="w-full rounded-lg border border-rahmen-ui bg-flaeche px-3 py-2 text-sm text-text placeholder:text-still focus:border-primaer"
         />
 
         {ended && (
