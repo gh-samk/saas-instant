@@ -60,6 +60,17 @@ und `invoices/invoice-immutable.spec.ts`, siehe
 [docs/operations/security-model.md](docs/operations/security-model.md)). Eine neue
 Ausnahme dort braucht eine ausdrückliche Begründung.
 
+## Demo-Daten
+
+Für Screenshots der Oberfläche legt `pnpm --filter @saas-instant/control seed:demo`
+rein erfundene Beispieldaten an (8 Organisationen in verschiedenen Status, 6
+Instanzen mit Kennzahlen der letzten 30 Tage, 7 Rechnungen, einige Notizen;
+Adressen unter `example.com`, keine echten Namen oder IBANs). Voraussetzungen: der
+Testbenutzer aus `seed` existiert, `CONTROL_SEED_ALLOWED=ja` ist gesetzt, und
+`NODE_ENV` ist nicht `production`. Alle Datensätze haben feste IDs mit Präfix
+`demo-`; ein erneuter Lauf ersetzt nur diese und berührt nichts anderes. Es werden
+ausschließlich lokale Datenbankzeilen geschrieben, nie Coolify oder Instanzen (R1).
+
 ## Konventionen
 
 - **Sprachregeln.** Bezeichner im Code sind **englisch** (Dateien, Klassen,

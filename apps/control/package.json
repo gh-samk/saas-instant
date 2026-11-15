@@ -15,6 +15,7 @@
     "test:web": "vitest run",
     "test:integration": "jest --config jest.integration.config.ts",
     "seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
+    "seed:demo": "ts-node --project tsconfig.seed.json prisma/demo-seed.ts",
     "emergency": "node dist/cli/emergency.js",
     "emergency:enrollment": "node dist/cli/emergency.js enrollment",
     "emergency:password": "node dist/cli/emergency.js password",

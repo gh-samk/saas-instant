@@ -27,6 +27,17 @@ Everything listed exists in the code. Whether it works in your setup depends on 
 - **Operational switches:** feature flags that instances read via `GET /api/flags`.
 - **Sign-in:** passkey, or password plus a second factor (e-mail code, authenticator app or passkey), recovery codes, audit and security log, emergency commands inside the container. Roles: `owner` and `administrator`.
 
+## Screenshots
+
+Taken with the fictitious demo data from `pnpm --filter @saas-instant/control seed:demo` (see [CONTRIBUTING.md](CONTRIBUTING.md)). The interface is in German in v1.
+
+| | |
+|---|---|
+| ![Daily overview](docs/screenshots/02-dashboard.png)<br>**Today:** open tasks from invoices and instances | ![Companies](docs/screenshots/03-companies.png)<br>**Companies** with status |
+| ![Company](docs/screenshots/04-company-detail.png)<br>**Company:** contact, history, next steps | ![Instances](docs/screenshots/05-instances.png)<br>**Instances** per company |
+| ![Invoices](docs/screenshots/06-invoices.png)<br>**Invoices** | ![Invoice](docs/screenshots/07-invoice-detail.png)<br>**Invoice** with PDF/XML, payment, reminder |
+| ![Sign-in](docs/screenshots/01-login.png)<br>**Sign-in** with passkey or password + second factor | ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (mode "portal"): list of the managers |
+
 ## Architecture at a glance
 
 ```

@@ -8,5 +8,5 @@
     "noEmit": true,
     "incremental": false
   },
-  "include": ["prisma/seed.ts", "src"]
+  "include": ["prisma/seed.ts", "prisma/demo-seed.ts", "src"]
 }

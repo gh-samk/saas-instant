@@ -27,6 +27,17 @@ Alle Punkte sind im Code vorhanden; ob sie in Ihrer Umgebung laufen, hängt von 
 - **Betriebsschalter:** Feature-Flags, die Instanzen über `GET /api/flags` lesen.
 - **Anmeldung:** Passkey oder Passwort mit zweitem Faktor (E-Mail-Code, Authenticator-App oder Passkey), Wiederherstellungscodes, Audit- und Sicherheitslog, Notfallkommandos im Container. Rollen: `owner` und `administrator`.
 
+## Screenshots
+
+Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/control seed:demo` (siehe [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+| | |
+|---|---|
+| ![Tagesübersicht](docs/screenshots/02-dashboard.png)<br>**Heute:** offene Aufgaben aus Rechnungen und Instanzen | ![Organisationen](docs/screenshots/03-companies.png)<br>**Organisationen** mit Status |
+| ![Organisation](docs/screenshots/04-company-detail.png)<br>**Organisation:** Kontakt, Verlauf, nächste Schritte | ![Instanzen](docs/screenshots/05-instances.png)<br>**Instanzen** je Organisation |
+| ![Rechnungen](docs/screenshots/06-invoices.png)<br>**Rechnungen** | ![Rechnung](docs/screenshots/07-invoice-detail.png)<br>**Rechnung** mit PDF/XML, Zahlung, Erinnerung |
+| ![Anmeldung](docs/screenshots/01-login.png)<br>**Anmeldung** mit Passkey oder Passwort + zweitem Faktor | ![Portal](docs/screenshots/09-portal.png)<br>**Portal** (Modus „Portal“): Liste der Verwaltungen |
+
 ## Architektur in Kürze
 
 ```
