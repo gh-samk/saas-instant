@@ -61,7 +61,7 @@ export function BroadcastTabs({ numbers }: { numbers: BroadcastNumbers }) {
             key={tabs.path}
             to={tabs.path}
             aria-current={active ? 'page' : undefined}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+            className={`inline-flex min-h-11 items-center rounded-lg px-3 py-1.5 text-sm sm:inline-block sm:min-h-0 font-semibold transition-colors ${
               active
                 ? 'bg-flaeche text-text shadow-segment'
                 : 'text-leise hover:text-text'

@@ -52,7 +52,7 @@ export function Tabs({
               aria-controls={`${basisId}-panel-${i}`}
               tabIndex={selected ? 0 : -1}
               onClick={() => setActive(i)}
-              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
+              className={`-mb-px min-h-11 border-b-2 px-4 py-2 text-sm sm:min-h-0 font-medium ${
                 selected
                   ? 'border-primaer text-primaer'
                   : 'border-transparent text-leise hover:text-text'

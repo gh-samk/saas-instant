@@ -40,7 +40,11 @@ export function IconButton({
   className,
   ...rest
 }: Props) {
-  const edge = size === 'small' ? 'h-[30px] w-[30px]' : 'h-9 w-9';
+  // Unter `sm` (Telefon) 44 px Trefferfläche, ab `sm` das bisherige Mass.
+  const edge =
+    size === 'small'
+      ? 'h-11 w-11 sm:h-[30px] sm:w-[30px]'
+      : 'h-11 w-11 sm:h-9 sm:w-9';
   const symbol = size === 'small' ? 'h-[15px] w-[15px]' : 'h-[18px] w-[18px]';
   return (
     <button

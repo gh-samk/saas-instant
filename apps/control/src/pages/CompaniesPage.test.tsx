@@ -308,3 +308,48 @@ describe('Organisationsliste', () => {
     expect(table.querySelectorAll('colgroup col')).toHaveLength(6);
   });
 });
+
+/** Schmaler Bildschirm: `matchMedia` meldet „passt nicht" für jede Mindestbreite. */
+function stubNarrow() {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
+
+describe('Organisationsliste — Karten unter 1280 px', () => {
+  it('zeigt statt der Tabelle Karten mit Status und offenem Betrag, ohne Platzhalter', async () => {
+    stubNarrow();
+    const empty = { ...ONE, id: '22222222-2222-4222-8222-222222222222', name: 'Leere Gruppe', city: null, reviewDueDate: null, openAmountCent: 0 };
+    setFetchReady(() => list([ONE, empty]));
+    window.history.pushState({}, '', '/companies');
+    renderWithI18n(<App />);
+
+    const cards = await screen.findByRole('list', { name: 'Organisationen' });
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const [first, second] = within(cards).getAllByRole('listitem');
+    expect(within(first).getByRole('link', { name: 'Solawi Rheintal' })).toHaveAttribute(
+      'href',
+      '/companies/11111111-1111-4111-8111-111111111111',
+    );
+    expect(first).toHaveTextContent('1.240,00');
+    expect(first).toHaveTextContent('01.12.2026');
+    // Nichts Offenes, keine Frist: weder Betrag noch Frist noch „—".
+    expect(second).not.toHaveTextContent('—');
+    expect(second).not.toHaveTextContent('Frist');
+    expect(second).not.toHaveTextContent('Offen');
+  });
+
+  it('bleibt auf breitem Bildschirm bei der Tabelle (ohne matchMedia)', async () => {
+    setFetchReady(() => list([ONE]));
+    window.history.pushState({}, '', '/companies');
+    renderWithI18n(<App />);
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+  });
+});

@@ -109,3 +109,40 @@ describe('Instanzliste', () => {
     expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
   });
 });
+
+/** Schmaler Bildschirm: `matchMedia` meldet „passt nicht" für jede Mindestbreite. */
+function stubNarrow() {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
+
+describe('Instanzliste — Karten unter 1280 px', () => {
+  it('zeigt statt der Tabelle Karten, die in den Reiter „Instanz" führen', async () => {
+    stubNarrow();
+    mockFetch((path) =>
+      path.includes('/api/instances')
+        ? new Response(JSON.stringify([ENTRY]), { status: 200 })
+        : new Response('{}', { status: 200 }),
+    );
+    window.history.pushState({}, '', '/instances');
+    renderWithI18n(<App />);
+
+    const cards = await screen.findByRole('list', { name: 'Instanzen' });
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const card = within(cards).getByRole('listitem');
+    expect(within(card).getByRole('link', { name: 'beispiel' })).toHaveAttribute(
+      'href',
+      `/companies/${COMPANY_ID}?tab=instance`,
+    );
+    expect(card).toHaveTextContent('Aktiv');
+    expect(card).toHaveTextContent('Beispiel e. V.');
+    expect(card).toHaveTextContent('12.09.2026');
+  });
+});

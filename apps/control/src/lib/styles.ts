@@ -33,3 +33,10 @@ export const TEXT_BUTTON =
  * damit erhalten. Werte aus der Tailwind-Skala, keine rohen Pixel (R7).
  */
 export const TEXT_BUTTON_ACTION = `inline-flex min-h-11 items-center gap-1 py-2 ${TEXT_BUTTON}`;
+
+/**
+ * Wie `TEXT_BUTTON`, aber nur auf dem Telefon (unter `sm`) mit 44 px
+ * Trefferfläche — ab `sm` bleibt der Text so schlank wie bisher. Für
+ * Textschaltflächen in Zeilen, wo die 44 px am Desktop die Zeile aufblähten.
+ */
+export const TEXT_BUTTON_TOUCH = `inline-flex min-h-11 items-center ${TEXT_BUTTON} sm:inline-block sm:min-h-0`;

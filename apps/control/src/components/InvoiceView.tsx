@@ -39,6 +39,7 @@ import {
 import { formatAmount } from '../utils/amount';
 import { formatQuantity, formatPercent } from '../utils/decimal';
 import { formatDate } from '../utils/date';
+import { useMediaQuery } from '../lib/use-media-query';
 import { useT } from '../i18n';
 
 /**
@@ -161,6 +162,9 @@ export function InvoiceView({
 }) {
   const t = useT();
   const toast = useToast();
+  // Ab `sm` die Postentabelle, darunter Karten (sonst laufen Einzelpreis, Steuer
+  // und Brutto bei 375 px aus der Karte). Eine Darstellung je Breite, nie beide.
+  const isWide = useMediaQuery('(min-width: 640px)');
 
   /**
    * Holt PDF oder XML und legt es als Download vor.
@@ -469,6 +473,7 @@ export function InvoiceView({
 
       <Card className="mt-6 p-6">
         <h2 className="mb-4 text-lg font-semibold text-text">{t('components.invoiceView.heading')}</h2>
+        {isWide ? (
         <Table
           columns={[t('components.invoiceView.columns'), t('components.invoiceView.columns2'), t('components.invoiceView.columns3'), t('components.invoiceView.columns4'), t('components.invoiceView.columns5')]}
           label={t('components.invoiceView.label8')}
@@ -496,6 +501,30 @@ export function InvoiceView({
             </tr>
           ))}
         </Table>
+        ) : (
+        <ul
+          aria-label={t('components.invoiceView.label8')}
+          className="divide-y divide-rahmen overflow-hidden rounded-lg border border-rahmen"
+        >
+          {invoice.lines.map((p) => (
+            <li key={p.id} className="flex flex-col gap-1 p-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 break-words text-sm font-medium text-text">
+                  {p.label}
+                </span>
+                <span className="shrink-0 text-sm font-semibold text-text ziffern-tabellarisch">
+                  {formatAmount(p.grossAmount)}
+                </span>
+              </div>
+              <p className="text-xs text-leise ziffern-tabellarisch">
+                {formatQuantity(p.quantity)} × {formatAmount(p.unitPriceNet)}
+                {' · '}
+                {t('components.invoiceView.columns4')} {formatPercent(p.taxRate)}
+              </p>
+            </li>
+          ))}
+        </ul>
+        )}
         <dl className="mt-3 flex flex-col items-end gap-1 text-sm">
           <div className="flex gap-3">
             <dt className="text-leise">{t('components.invoiceView.text7')}</dt>

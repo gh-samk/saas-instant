@@ -150,7 +150,6 @@ export default {
   switch: 'Wechseln',
   tabContactContract: 'Kontakt & Vertrag',
   tabOverview: 'Überblick',
-  tableScrollHint: 'Die Tabelle lässt sich seitlich schieben, um alle Spalten zu sehen.',
   terms: 'Konditionen',
   title: 'Organisationen',
   toAllCompanies: 'Zu allen Organisationen',

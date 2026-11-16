@@ -14,6 +14,7 @@ import {
   Badge,
   Dialog,
   FilterChips,
+  Select,
   InputField,
   Card,
   Button,
@@ -23,6 +24,7 @@ import {
   Table,
   useToast,
 } from '@saas-instant/ui';
+import { useMediaQuery } from '../lib/use-media-query';
 import { PasskeyButton } from '../components/PasskeyButton';
 import type { PasskeyState } from '../components/PasskeyButton';
 import { PasswordWithStrength } from '../components/PasswordWithStrength';
@@ -71,7 +73,7 @@ import {
   newPasswordValid,
   passwordStrength,
 } from '../lib/password-strength';
-import { TEXT_BUTTON } from '../lib/styles';
+import { TEXT_BUTTON, TEXT_BUTTON_TOUCH } from '../lib/styles';
 import { formatDate } from '../utils/date';
 import { maskEmail } from '../utils/email-mask';
 import { passkeyEnrollment, passkeysPossible } from '../lib/webauthn';
@@ -170,6 +172,8 @@ export function SettingsPage() {
     );
   };
 
+  // Ab `sm` die Chipleiste, darunter eine Auswahlliste (siehe unten).
+  const tabsInline = useMediaQuery('(min-width: 640px)');
   const [devices, setDevices] = useState<DeviceEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [revocationFor, setRevocationFor] = useState<DeviceEntry | null>(null);
@@ -679,19 +683,45 @@ export function SettingsPage() {
         <p role="note" className="mb-4 text-sm text-leise">{t('sso.portalFactorsHint')}</p>
       )}
 
-      <FilterChips
-        className="mb-5"
-        label={t('einstellungen.sectionCaption')}
-        active={tabs}
-        onSelect={setTabs}
-        chips={visibleTabs.map((r) => ({
-          value: r.value,
-          label: r.label,
-          ...(r.value === 'devices' && devices !== null
-            ? { count: devices.length }
-            : {}),
-        }))}
-      />
+      {/* UNTER `sm` EINE AUSWAHLLISTE statt acht Chips: Acht Knöpfe brechen bei
+          375 px in drei, vier Zeilen um (oder verschwinden hinter einem
+          Seitwärtswischen); die Liste braucht eine Zeile, zeigt alle Bereiche
+          auf einmal, hat von Haus aus 44 px Trefferfläche und eine
+          Bedienung, die das Telefon schon kennt. Ab `sm` bleiben die Chips. */}
+      {tabsInline ? (
+        <FilterChips
+          className="mb-5"
+          label={t('einstellungen.sectionCaption')}
+          active={tabs}
+          onSelect={setTabs}
+          chips={visibleTabs.map((r) => ({
+            value: r.value,
+            label: r.label,
+            ...(r.value === 'devices' && devices !== null
+              ? { count: devices.length }
+              : {}),
+          }))}
+        />
+      ) : (
+        <div className="mb-5">
+          <label htmlFor="settings-section" className="mb-1 block text-sm font-medium text-text">
+            {t('einstellungen.sectionCaption')}
+          </label>
+          <Select
+            id="settings-section"
+            value={tabs}
+            onChange={(e) => setTabs(e.target.value)}
+            className="[&_select]:min-h-11"
+          >
+            {visibleTabs.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+                {r.value === 'devices' && devices !== null ? ` (${devices.length})` : ''}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
 
       {/* ============================================== Reiter „Geräte" */}
       {tabs === 'devices' && (
@@ -768,7 +798,7 @@ export function SettingsPage() {
                     }
                     setRevocationFor(g);
                   }}
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-rahmen text-leise transition-colors hover:bg-flaeche-3 hover:text-text"
+                  className="grid h-11 w-11 shrink-0 sm:h-9 sm:w-9 place-items-center rounded-lg border border-rahmen text-leise transition-colors hover:bg-flaeche-3 hover:text-text"
                 >
                   <Trash2 className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -835,7 +865,7 @@ export function SettingsPage() {
                     <>
                       {t('einstellungen.emailCodeActiveAt', { email: maskEmail(state?.loginCodeEmail ?? '') })}<button
                         type="button"
-                        className={TEXT_BUTTON}
+                        className={TEXT_BUTTON_TOUCH}
                         onClick={() => openEmailDialog('change')}
                       >{t('einstellungen.changeAddress')}</button>
                     </>
@@ -888,7 +918,7 @@ export function SettingsPage() {
                           eine Zeile darüber. */}{t('einstellungen.setUp')}{' '}
                       <button
                         type="button"
-                        className={TEXT_BUTTON}
+                        className={TEXT_BUTTON_TOUCH}
                         onClick={openTotpDialog}
                       >{t('einstellungen.changeApp')}</button>
                     </>
@@ -941,7 +971,7 @@ export function SettingsPage() {
                 Sprunglink dorthin. */}
             <button
               type="button"
-              className={`shrink-0 text-sm ${TEXT_BUTTON}`}
+              className={`shrink-0 text-sm ${TEXT_BUTTON_TOUCH}`}
               onClick={() =>
                 document
                   .getElementById('device-list')
@@ -1184,7 +1214,7 @@ export function SettingsPage() {
               ) : (
                 <button
                   type="button"
-                  className={TEXT_BUTTON}
+                  className={TEXT_BUTTON_TOUCH}
                   onClick={() => void sendEmailCode()}
                 >
                   {newCodeRequired

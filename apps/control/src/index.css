@@ -26,6 +26,17 @@ textarea[aria-invalid='true'] {
   border-color: var(--farbe-gefahr);
 }
 
+/* Eingabefelder auf dem Telefon mit 44 px Trefferfläche. Die Felder stehen an
+   Dutzenden Stellen mit eigenen Klassen (gemessen: 38 bis 42 px); eine Regel
+   hier ersetzt Dutzende Einzeländerungen. Ab 640 px gilt unverändert das alte
+   Mass. Ungeschichtet aus demselben Grund wie die Regel darüber. */
+@media (max-width: 639.98px) {
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='hidden']),
+  select {
+    min-height: 2.75rem;
+  }
+}
+
 /* Bewegung reduzieren, wenn vom System gewünscht. Identisch zu apps/web. */
 @media (prefers-reduced-motion: reduce) {
   *,

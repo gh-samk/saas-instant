@@ -36,7 +36,7 @@ import {
   type PaymentState,
 } from '../lib/api';
 import { tableText, tableRow } from '../lib/density';
-import { useMediaQuery } from '../lib/use-media-query';
+import { useWideList } from '../components/CardList';
 import { formatAmountCent } from '../utils/amount';
 import { formatDate } from '../utils/date';
 import { useT } from '../i18n';
@@ -87,7 +87,7 @@ export function InvoicesPage() {
   // der Seitenleiste 706 px — für sechs Spalten samt Status-Badge und
   // Hauptknopf zu wenig (Badge und „Bearbeiten" überlappten). Ab 1280 px passt
   // die Zeile ohne Kürzen und ohne Seitwärtsscrollen.
-  const wide = useMediaQuery('(min-width: 1280px)');
+  const wide = useWideList();
   const [exportOpen, setExportOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   // Der Export ist Inhabern und Administratoren vorbehalten (wie im Backend).
@@ -363,7 +363,7 @@ export function InvoicesPage() {
                   <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                     <Link
                       to={`/companies/${r.companyId}/invoices/${r.id}`}
-                      className="ziffern-tabellarisch text-sm font-semibold text-text hover:underline"
+                      className="inline-flex min-h-11 items-center ziffern-tabellarisch text-sm font-semibold text-text hover:underline"
                     >
                       {r.invoiceNumber ?? '—'}
                     </Link>
@@ -371,7 +371,7 @@ export function InvoicesPage() {
                   </div>
                   <Link
                     to={`/companies/${r.companyId}`}
-                    className="min-w-0 break-words text-sm text-text hover:underline"
+                    className="inline-flex min-h-11 min-w-0 items-center break-words text-sm text-text hover:underline"
                   >
                     {r.companyName ?? t('rechnungen.company')}
                   </Link>

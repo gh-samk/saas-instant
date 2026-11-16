@@ -34,7 +34,7 @@ export function ThemeSwitcher() {
               setChoice(value);
               saveTheme(value);
             }}
-            className={`grid h-8 w-8 pointer-coarse:min-w-11 place-items-center rounded-md transition-colors duration-150 ${
+            className={`grid h-11 w-11 sm:h-8 sm:w-8 pointer-coarse:min-w-11 place-items-center rounded-md transition-colors duration-150 ${
               active
                 ? 'bg-flaeche text-primaer shadow-segment'
                 : 'text-leise hover:text-text'

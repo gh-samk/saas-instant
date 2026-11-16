@@ -10,6 +10,7 @@ import {
   Table,
   useToast,
 } from '@saas-instant/ui';
+import { CardList, CardListItem, useWideList } from '../components/CardList';
 import { CompanyCreateDialog } from '../components/CompanyCreateDialog';
 import { CompanyStatusBadge } from '../components/CompanyStatusBadge';
 import { errorText } from '../lib/api-client';
@@ -46,6 +47,7 @@ export function CompaniesPage() {
   const [parameter, setParameter] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const wide = useWideList();
 
   // Der Chipwert steht in der URL („pilot", „anfrage", leer für alle) und
   // wird erst hier zu den Status, nach denen der Server filtert. So bleibt
@@ -274,6 +276,7 @@ export function CompaniesPage() {
               `mindestbreite`: Sechs Spalten quetschen sich auf einem schmalen
               Bildschirm zu Unlesbarkeit. Die Hülle scrollt waagerecht, die
               SEITE nicht. */}
+          {wide ? (
           <Table
             columns={[
               t('organisationen.company'),
@@ -389,13 +392,60 @@ export function CompaniesPage() {
               </tr>
             ))}
           </Table>
-
-          {/* `sm:hidden`, nicht `md:hidden`: Ab 640 px stehen die Spalten fest
-              und die Tabelle scrollt nicht mehr — der Hinweis wäre dort
-              falsch. */}
-          <p className="mt-2 text-xs text-leise sm:hidden">
-            {t('organisationen.tableScrollHint')}
-          </p>
+          ) : (
+          <CardList label={t('organisationen.title')}>
+            {data.companies.map((o) => (
+              <CardListItem key={o.id}>
+                <div className="min-w-0 flex-1">
+                  {/* Gestreckter Link wie in der Tabellenzeile; der
+                      Filterzustand reist an der URL mit. */}
+                  <Link
+                    to={{
+                      pathname: `/companies/${o.id}`,
+                      search: parameter.toString(),
+                    }}
+                    className="after:absolute after:inset-0"
+                  >
+                    <span className="block break-words text-sm font-semibold text-text">
+                      {o.name}
+                    </span>
+                  </Link>
+                  {o.city && (
+                    <span className={`block break-words ${tableText.compact.secondary}`}>
+                      {o.city}
+                    </span>
+                  )}
+                  {/* Status und offener Betrag in einer Zeile, die Frist nur
+                      wenn es eine gibt: „—" für Leeres sagte der Karte nichts. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 ziffern-tabellarisch">
+                    <CompanyStatusBadge status={o.status} />
+                    {o.openAmountCent !== 0 && (
+                      <span
+                        className={`text-sm ${
+                          o.openOverdue ? 'font-semibold text-gefahr' : 'font-medium text-text'
+                        }`}
+                      >
+                        <span className="font-normal text-leise">
+                          {t('organisationen.open')}{' '}
+                        </span>
+                        {formatAmountCent(o.openAmountCent)}
+                      </span>
+                    )}
+                    {o.reviewDueDate && (
+                      <span className="text-sm text-text">
+                        <span className="text-leise">
+                          {t('organisationen.nextDeadline')}{' '}
+                        </span>
+                        {formatDate(o.reviewDueDate)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-still" aria-hidden="true" />
+              </CardListItem>
+            ))}
+          </CardList>
+          )}
 
           {pagesCount > 1 && (
             <nav

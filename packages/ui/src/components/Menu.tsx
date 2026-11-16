@@ -197,7 +197,7 @@ export function Menu({
           setOpen((v) => !v);
         }}
         onKeyDown={onTriggerKeyDown}
-        className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors duration-150 ${TRIGGER_STYLES[variant]}`}
+        className={`inline-flex min-h-11 items-center sm:min-h-10 justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors duration-150 ${TRIGGER_STYLES[variant]}`}
       >
         {icon}
         {label}

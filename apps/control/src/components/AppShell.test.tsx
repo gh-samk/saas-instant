@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithI18n as render } from '../test-support/render-with-i18n';
 import App from '../App';
 
@@ -175,7 +175,8 @@ describe('Kopfleiste — Stellung des Abmelden-Knopfes', () => {
     render(<App />);
 
     const button = await screen.findByRole('button', { name: 'Abmelden' });
-    expect(button.className).toContain('ml-auto');
+    // Die Gruppe (Suche, Rolle, Abmelden) trägt den Rand, nicht der Knopf.
+    expect(button.parentElement!.className).toContain('ml-auto');
   });
 
   it('der Knopf ist das letzte Element der Kopfleiste', async () => {
@@ -186,6 +187,60 @@ describe('Kopfleiste — Stellung des Abmelden-Knopfes', () => {
     const button = await screen.findByRole('button', { name: 'Abmelden' });
     const header = button.closest('header');
     expect(header).not.toBeNull();
-    expect(header!.lastElementChild).toBe(button);
+    expect(header!.lastElementChild).toBe(button.parentElement);
+    expect(button.parentElement!.lastElementChild).toBe(button);
+  });
+});
+
+/**
+ * Unter `sm` ersetzt ein Such-Knopf das gestauchte Feld; er öffnet dasselbe
+ * Feld über die ganze Kopfzeile. Die Breite kommt aus `matchMedia`.
+ */
+describe('Kopfleiste — Suche auf dem Telefon', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function narrow() {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  }
+
+  it('zeigt statt des Feldes einen Such-Knopf von 44 px', async () => {
+    narrow();
+    arrangeFetch({ tasksUrgent: 0, invoicesOpen: 0 });
+    window.history.pushState({}, '', '/');
+    render(<App />);
+
+    const open = await screen.findByRole('button', { name: 'Suche öffnen' });
+    expect(open.className).toContain('h-11');
+    expect(open.className).toContain('w-11');
+    expect(screen.queryByLabelText('Schnellsuche')).not.toBeInTheDocument();
+  });
+
+  it('öffnet beim Klick das Feld mit Fokus; Enter sucht, Schließen räumt auf', async () => {
+    narrow();
+    arrangeFetch({ tasksUrgent: 0, invoicesOpen: 0 });
+    window.history.pushState({}, '', '/');
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Suche öffnen' }));
+    const field = await screen.findByLabelText('Schnellsuche');
+    expect(field).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suche schließen' }));
+    expect(screen.queryByLabelText('Schnellsuche')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suche öffnen' }));
+    const second = await screen.findByLabelText('Schnellsuche');
+    fireEvent.change(second, { target: { value: 'Muster' } });
+    fireEvent.keyDown(second, { key: 'Enter' });
+    await waitFor(() => expect(window.location.search).toBe('?search=Muster'));
+    expect(screen.queryByLabelText('Schnellsuche')).not.toBeInTheDocument();
   });
 });

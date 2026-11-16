@@ -389,7 +389,7 @@ export function CompanyDetailPage() {
     <section aria-labelledby="company-title">
       <Link
         to={backToList}
-        className="mb-2 inline-flex items-center gap-1 text-sm text-primaer underline underline-offset-2 hover:text-primaer-hover"
+        className="mb-2 inline-flex min-h-11 items-center sm:min-h-0 gap-1 text-sm text-primaer underline underline-offset-2 hover:text-primaer-hover"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         {t('organisationen.toAllCompanies')}

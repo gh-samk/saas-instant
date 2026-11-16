@@ -38,6 +38,8 @@ export default {
   'appShell.ariaLabel2': 'Schnellsuche',
   'appShell.placeholder': 'Organisation, Ansprechpartnerin, Ort',
   'appShell.label10': '⌘K',
+  'appShell.searchOpen': 'Suche öffnen',
+  'appShell.searchClose': 'Suche schließen',
   'appShell.ariaLabel3': 'Abmelden',
   'appShell.title': 'Abmelden',
   'appShell.area': 'Diese Ansicht',

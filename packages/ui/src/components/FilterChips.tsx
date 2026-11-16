@@ -51,7 +51,7 @@ export function FilterChips<T extends string>({
             type="button"
             aria-pressed={selected}
             onClick={() => onSelect(chip.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+            className={`min-h-11 rounded-lg px-3 py-1.5 text-sm sm:min-h-0 font-semibold transition-colors ${
               selected
                 ? 'bg-flaeche text-text shadow-segment'
                 : 'text-leise hover:text-text'

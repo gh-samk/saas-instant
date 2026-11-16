@@ -27,7 +27,7 @@ interface Props extends AnchorHTMLAttributes<HTMLAnchorElement> {
 
 /** Die Klassen, damit ein `Link` aus React-Router gleich aussehen kann. */
 export const ROW_LINK_CLASSES =
-  'inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-primaer-softtext transition-colors hover:text-primaer-softtext-hover';
+  'inline-flex min-h-11 items-center gap-1.5 text-[13.5px] font-semibold text-primaer-softtext transition-colors hover:text-primaer-softtext-hover sm:min-h-0';
 
 export function RowLink({ children, withArrow = true, className, ...rest }: Props) {
   return (

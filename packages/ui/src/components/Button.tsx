@@ -4,13 +4,13 @@ import { Loader2 } from 'lucide-react';
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'secondaryGreen' | 'danger' | 'ghost';
   loading?: boolean;
-  /** Größe: sm (32px), md (Vorgabe, 40px), lg (44px). Auf Touchgeräten gilt mindestens 44px. */
+  /** Größe ab `sm`: sm (32px), md (Vorgabe, 40px), lg (44px). Darunter (Telefon) gilt für alle mindestens 44px. */
   size?: 'sm' | 'md' | 'lg';
 }
 
 const SIZES: Record<NonNullable<Props['size']>, string> = {
-  sm: 'min-h-8 px-3 py-1 text-sm',
-  md: 'min-h-10 px-4 py-2 text-sm',
+  sm: 'min-h-11 px-3 py-1 text-sm sm:min-h-8',
+  md: 'min-h-11 px-4 py-2 text-sm sm:min-h-10',
   lg: 'min-h-11 px-5 py-2.5 text-base',
 };
 

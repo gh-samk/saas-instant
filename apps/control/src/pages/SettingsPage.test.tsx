@@ -357,3 +357,54 @@ describe('Reiter „Sicherheit" in einer Portal-Sitzung', () => {
     expect(screen.queryByRole('button', { name: 'Neue Codes erzeugen' })).toBeNull();
   });
 });
+
+/** Schmaler Bildschirm: `matchMedia` meldet „passt nicht" für jede Mindestbreite. */
+function stubNarrow() {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
+
+describe('Einstellungen — Bereichswahl auf dem Telefon', () => {
+  it('ersetzt die Chipleiste unter 640 px durch eine Auswahlliste mit allen Bereichen', async () => {
+    stubNarrow();
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    const select = await screen.findByLabelText('Bereich der Einstellungen');
+    expect(select.tagName).toBe('SELECT');
+    // Chips und Liste nie zugleich.
+    expect(screen.queryByRole('group', { name: 'Bereich der Einstellungen' })).toBeNull();
+    expect(within(select).getAllByRole('option').length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('wechselt den Bereich über die Liste und schreibt ihn in die URL', async () => {
+    stubNarrow();
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    const select = await screen.findByLabelText('Bereich der Einstellungen');
+    fireEvent.change(select, { target: { value: 'user' } });
+    await waitFor(() => expect(window.location.search).toContain('tab=user'));
+    expect(await screen.findByRole('heading', { name: 'Nutzer' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Bereich der Einstellungen')).toHaveValue('user');
+  });
+
+  it('behält ab 640 px die Chips (Gruppe, aria-pressed)', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    const group = await screen.findByRole('group', { name: 'Bereich der Einstellungen' });
+    expect(within(group).getAllByRole('button')[0]).toHaveAttribute('aria-pressed');
+    expect(screen.queryByRole('combobox', { name: 'Bereich der Einstellungen' })).toBeNull();
+  });
+});

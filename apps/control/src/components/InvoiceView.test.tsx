@@ -175,3 +175,50 @@ describe('InvoiceView: Buchhaltung', () => {
     expect(screen.queryByRole('button', { name: 'Als übergeben vermerken' })).toBeNull();
   });
 });
+
+/** Schmaler Bildschirm: `matchMedia` meldet „passt nicht" für jede Mindestbreite. */
+function stubNarrow() {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
+
+describe('InvoiceView: Posten als Karten unter 640 px', () => {
+  const LINES = [
+    {
+      id: 'p1',
+      label: 'Einrichtungspauschale',
+      quantity: '2.000',
+      unitPriceNet: '250.00',
+      taxRate: '19.00',
+      grossAmount: '595.00',
+    },
+  ] as unknown as InvoiceWithRetention['lines'];
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('zeigt Bezeichnung, Menge × Einzelpreis, Steuer und Brutto statt der Tabelle', () => {
+    stubNarrow();
+    show({ lines: LINES });
+
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const list = screen.getByRole('list', { name: 'Rechnungsposten' });
+    const item = within(list).getByRole('listitem');
+    expect(item).toHaveTextContent('Einrichtungspauschale');
+    expect(item).toHaveTextContent('595,00');
+    expect(item).toHaveTextContent('250,00');
+    expect(item).toHaveTextContent('Steuer');
+  });
+
+  it('zeigt ab 640 px weiterhin die Tabelle', () => {
+    show({ lines: LINES });
+
+    expect(screen.getByRole('table', { name: 'Rechnungsposten' })).toBeInTheDocument();
+  });
+});

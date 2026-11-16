@@ -824,7 +824,7 @@ export function InvoiceDraftForm({
                           ? t('components.invoiceDraftForm.title')
                           : t('components.invoiceDraftForm.title2')
                       }
-                      className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-leise transition-colors hover:bg-flaeche-3 hover:text-gefahr disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-leise"
+                      className="grid h-11 w-11 shrink-0 sm:h-9 sm:w-9 place-items-center rounded-lg text-leise transition-colors hover:bg-flaeche-3 hover:text-gefahr disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-leise"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </button>
