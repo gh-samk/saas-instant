@@ -34,6 +34,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     dockerHost: env['DOCKER_HOST'] ?? 'tcp://docker-socket-proxy:2375',
     extraOwnProjects: [env['AGENT_COMPOSE_PROJECT'], env['CONTROL_COMPOSE_PROJECT']].filter((x): x is string => !!x),
     invoiceRetentionYears: Number(env['INVOICE_RETENTION_YEARS'] ?? 10),
-    version: env['AGENT_VERSION'] ?? '0.1.0',
+    version: env['AGENT_VERSION'] ?? '1.1.0',
   };
 }
