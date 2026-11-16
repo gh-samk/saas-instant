@@ -128,7 +128,7 @@ portal_dc() {
   [ "$(mode)" = "portal" ] || return 0
   migrate_registry
   ensure_auth_net
-  docker compose --env-file "$PORTAL_DIR/portal.env" -f "$PORTAL_COMPOSE_FILE" "$@"
+  PORTAL_REGISTRY_DIR="$PORTAL_DIR/registry" docker compose --env-file "$PORTAL_DIR/portal.env" -f "$PORTAL_COMPOSE_FILE" "$@"
 }
 
 # --- Portal-Anmeldedienst ---------------------------------------------------

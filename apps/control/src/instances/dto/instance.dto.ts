@@ -69,6 +69,11 @@ export class BackupReportDto {
   @Matches(/^[0-9a-fA-F]{64}$/, { message: 'Die Prüfsumme muss SHA-256 in Hex sein.' })
   sha256?: string;
 
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{64}$/, { message: 'Die Prüfsumme der Uploads muss SHA-256 in Hex sein.' })
+  uploadsSha256?: string;
+
   /**
    * Der Tag der Sicherung. NICHT IN DER ZUKUNFT ([K3]).
    *

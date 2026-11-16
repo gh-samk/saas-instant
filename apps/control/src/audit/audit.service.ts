@@ -367,6 +367,7 @@ export const AUDIT_ACTION = {
   vaultLocked: 'vault.locked',
   vaultPassphraseAdded: 'vault.passphrase.added',
   vaultPassphraseChanged: 'vault.passphrase.changed',
+  vaultPassphraseRemoved: 'vault.passphrase.removed',
   vaultRecoveryRegenerated: 'vault.recovery.regenerated',
   /** Einmal-Lauf nach dem Entsperren: nur Anzahl je Tabelle. */
   vaultEncryptExisting: 'vault.encrypt_existing',

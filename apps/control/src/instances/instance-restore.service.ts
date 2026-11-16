@@ -169,10 +169,17 @@ export class InstanceRestoreService {
 
     const backup = await this.prisma.backup.findFirst({
       where: { id: dto.backupId, instanceId },
-      select: { id: true, kind: true, objectKey: true, status: true },
+      select: { id: true, kind: true, objectKey: true, status: true, sha256: true, uploadsSha256: true },
     });
     if (backup === null) throw new BackupNotFoundError();
-    if (backup.kind !== 'instance' || backup.objectKey === null || backup.status !== 'ok') {
+    // Ohne die gemeldete Prüfsumme gibt es nichts, womit der Agent die Echtheit der Sicherung gegen
+    // den Speicher belegen könnte; solche Altzeilen werden nicht wiederhergestellt.
+    if (
+      backup.kind !== 'instance' ||
+      backup.objectKey === null ||
+      backup.status !== 'ok' ||
+      backup.sha256 === null
+    ) {
       throw new BackupNotRestorableError();
     }
 
@@ -239,7 +246,8 @@ export class InstanceRestoreService {
     });
 
     const objectKey = backup.objectKey;
-    void this.carryOut(row.id, newSubdomain, objectKey, dto.ageIdentity, secrets).catch(
+    const sha256 = backup.sha256;
+    void this.carryOut(row.id, newSubdomain, objectKey, sha256, backup.uploadsSha256, dto.ageIdentity, secrets).catch(
       (exception: unknown) => {
         const text = exception instanceof Error ? exception.message : String(exception);
         this.logger.error(`Wiederherstellung ${row.id} abgebrochen: ${scrub(text, [dto.ageIdentity])}`);
@@ -390,6 +398,8 @@ export class InstanceRestoreService {
     restoreId: string,
     newSubdomain: string,
     objectKey: string,
+    sha256: string,
+    uploadsSha256: string | null,
     ageIdentity: string,
     secrets: { metricsToken: string; setupToken: string },
   ): Promise<void> {
@@ -434,7 +444,7 @@ export class InstanceRestoreService {
         coolifyApplicationId: created.ref,
       });
       if (target === null) throw new BackupPlanIncompleteError();
-      const jobId = await this.startAgentJob(objectKey, ageIdentity, target);
+      const jobId = await this.startAgentJob(objectKey, sha256, uploadsSha256, ageIdentity, target);
       const job = await this.pollJob(jobId, ageIdentity);
       if (job.status !== 'succeeded') {
         const detail = typeof job.message === 'string' ? `: ${job.message}` : '.';
@@ -452,7 +462,9 @@ export class InstanceRestoreService {
         where: { id: restoreId },
         data: {
           status: 'ready',
-          message: 'Wiederhergestellt. Die alte Instanz läuft unverändert weiter und wartet auf die Übernahme.',
+          message:
+            'Wiederhergestellt. Die alte Instanz läuft unverändert weiter und wartet auf die Übernahme.' +
+            (job.result?.note ? ` Hinweis: ${scrub(job.result.note, [ageIdentity]).slice(0, 200)}` : ''),
         },
       });
     } catch (exception) {
@@ -466,10 +478,22 @@ export class InstanceRestoreService {
 
   private async startAgentJob(
     objectKey: string,
+    sha256: string,
+    uploadsSha256: string | null,
     ageIdentity: string,
     target: AgentInstance,
   ): Promise<string> {
-    const { jobId } = await this.agent.startJob({ kind: 'restore', objectKey, ageIdentity, target });
+    // Die bei der Sicherung gemeldete Prüfsumme geht mit: Der Agent prüft sie vor dem Entschlüsseln
+    // gegen den Speicher, damit dessen Meta-Datei allein nichts beweist; ebenso die der Uploads (falls bekannt;
+    // sonst spielt der Agent die Uploads nicht ein und meldet das im Ergebnis).
+    const { jobId } = await this.agent.startJob({
+      kind: 'restore',
+      objectKey,
+      sha256,
+      ...(uploadsSha256 !== null ? { uploadsSha256 } : {}),
+      ageIdentity,
+      target,
+    });
     return jobId;
   }
 

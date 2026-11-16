@@ -177,16 +177,58 @@ export interface CalculationResult {
 }
 
 /**
+ * Verteilt die Steuer einer Gruppe (Kategorie, Satz, Befreiungsgrund) so auf
+ * ihre Posten, dass die Postensteuern GENAU die Gruppensteuer ergeben.
+ *
+ * Ausgangspunkt ist die je Posten gerundete Steuer. Die Differenz zur
+ * Gruppensteuer (höchstens wenige Cent) wird in Einzelcent bei den Posten
+ * aufgeschlagen bzw. abgezogen, deren Rundung am weitesten in die Gegenrichtung
+ * lag (Verfahren des größten Rests); bei Gleichstand gewinnt der frühere
+ * Posten. Das Ergebnis ist deterministisch und hängt nur von den Eingaben ab.
+ */
+function allocateTax(
+  members: { netCent: number; taxCent: number; exact: number }[],
+  groupTaxCent: number,
+): void {
+  let rest = groupTaxCent - members.reduce((s, m) => s + m.taxCent, 0);
+  if (rest === 0) return;
+  const direction = rest > 0 ? 1 : -1;
+  // Je größer `exact - taxCent` in Richtung der Differenz, desto eher
+  // wurde der Posten gegen diese Richtung gerundet.
+  const order = members
+    .map((member, index) => ({ member, index }))
+    .sort(
+      (a, b) =>
+        direction * (b.member.exact - b.member.taxCent) -
+          direction * (a.member.exact - a.member.taxCent) || a.index - b.index,
+    );
+  let round = 0;
+  while (rest !== 0) {
+    const target = order[round % order.length]!.member;
+    target.taxCent += direction;
+    rest -= direction;
+    round += 1;
+  }
+}
+
+/**
  * Rechnet Posten, Steueraufteilung und Summen aus.
  *
- * DIE STEUER WIRD JE SATZ GEBILDET, NICHT JE POSTEN. EN 16931 verlangt genau
- * eine Steueraufteilung (BG-23) je Kombination aus Kategorie und Satz; die
- * Summe der einzeln gerundeten Postensteuern wäre bei Rundung nicht dieselbe
- * Zahl, und der Validator meldete einen Rechenfehler.
+ * [M10] EINE REGEL FÜR ALLES: DIE STEUER WIRD JE SATZ AUS DER SUMME DER
+ * NETTOBETRÄGE GEBILDET, nicht je Posten. EN 16931 (BR-CO-17) verlangt für
+ * jede Steueraufteilung (BG-23) genau `Basis × Satz / 100`, kaufmännisch auf
+ * Cent gerundet; die Summe einzeln gerundeter Postensteuern wäre bei Rundung
+ * nicht dieselbe Zahl (2 × 12,50 € zu 19 %: 2 × 2,38 = 4,76 gegen 4,75), und
+ * ein Validator meldete einen Rechenfehler. Formular-Vorschau
+ * (`utils/invoice-amount.ts`), Speicherung und Beleg folgen derselben Regel.
  *
  * Der Steuerbetrag AM POSTEN wird trotzdem geführt — die Spalte
- * `Rechnungsposten.steuerbetrag` verlangt ihn, und die Oberfläche zeigt ihn.
- * Er ist nachrichtlich; maßgeblich für die Summe ist die Aufteilung.
+ * `InvoiceLine.taxAmount` verlangt ihn, und die Oberfläche zeigt ihn. Damit
+ * Posten und Beleg nicht auseinanderlaufen, werden die Postensteuern so
+ * verteilt, dass ihre Summe je Gruppe GENAU die Gruppensteuer ist (siehe
+ * `allocateTax`). Wer die gespeicherten Postenbeträge aufsummiert — die
+ * API-Summe, der Zahlungsabgleich, die Steueraufteilung im Dokument —, kommt
+ * damit auf dieselbe Zahl wie die Vorschau.
  */
 export function calculate(inputs: LineInput[]): CalculationResult {
   if (inputs.length === 0) {
@@ -217,10 +259,17 @@ export function calculate(inputs: LineInput[]): CalculationResult {
     };
   });
 
+  const groupKey = (p: LineInput): string =>
+    `${p.taxCategory ?? 'S'}|${p.taxRate}|${p.taxExemptionReason ?? ''}`;
+
   const byRecord = new Map<string, TaxShare>();
-  for (const p of lines) {
+  const members = new Map<
+    string,
+    { netCent: number; taxCent: number; exact: number }[]
+  >();
+  lines.forEach((p) => {
     const category = p.taxCategory ?? 'S';
-    const key = `${category}|${p.taxRate}|${p.taxExemptionReason ?? ''}`;
+    const key = groupKey(p);
     const entry = byRecord.get(key) ?? {
       category,
       record: p.taxRate,
@@ -230,17 +279,35 @@ export function calculate(inputs: LineInput[]): CalculationResult {
     };
     entry.basisCent += p.netCent;
     byRecord.set(key, entry);
-  }
-  const taxBreakdown = [...byRecord.values()].map((share) => ({
-    ...share,
-    taxCent: roundCent((share.basisCent * share.record) / 100),
-  }));
+    const list = members.get(key) ?? [];
+    list.push({
+      netCent: p.netCent,
+      taxCent: p.taxCent,
+      exact: (p.netCent * p.taxRate) / 100,
+    });
+    members.set(key, list);
+  });
+  const taxBreakdown = [...byRecord.entries()].map(([key, share]) => {
+    const taxCent = roundCent((share.basisCent * share.record) / 100);
+    allocateTax(members.get(key)!, taxCent);
+    return { ...share, taxCent };
+  });
 
-  const sumNetCent = lines.reduce((s, p) => s + p.netCent, 0);
+  // Die verteilten Postensteuern zurück in die Posten schreiben.
+  const cursor = new Map<string, number>();
+  const settled: CalculatedLine[] = lines.map((p) => {
+    const key = groupKey(p);
+    const at = cursor.get(key) ?? 0;
+    cursor.set(key, at + 1);
+    const taxCent = members.get(key)![at]!.taxCent;
+    return { ...p, taxCent, grossCent: p.netCent + taxCent };
+  });
+
+  const sumNetCent = settled.reduce((s, p) => s + p.netCent, 0);
   const sumTaxCent = taxBreakdown.reduce((s, t) => s + t.taxCent, 0);
 
   return {
-    lines,
+    lines: settled,
     taxBreakdown,
     sumNetCent,
     sumTaxCent,

@@ -2,6 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Controller, Get, Header } from '@nestjs/common';
 import { APP_VERSION } from './version';
+import { AllowWhileLocked } from './vault/allow-while-locked.decorator';
 import { VaultService, type VaultState } from './vault/vault.service';
 
 /**
@@ -43,6 +44,9 @@ export class AppController {
    *
    * Der Mailstand liegt jetzt hinter der Sitzung: `GET /api/zugang/postausgang`.
    */
+  @AllowWhileLocked(
+    'Betrieb und Monitoring: meldet gerade den Tresor-Zustand und liest keine Kundendaten.',
+  )
   @Get('health')
   async health(): Promise<{ status: VaultState }> {
     // Einziger Zustand, den der Endpunkt verrät: ob der Tresor entsperrt ist.
@@ -69,6 +73,7 @@ export class AppController {
    * `||` statt `??`: Ein LEER gesetztes APP_GIT_SHA ist nicht `undefined` —
    * genau daran zeigte die Kundenanwendung lange einen leeren Commit.
    */
+  @AllowWhileLocked('Fassung, Commit und Bauzeitpunkt; keine Datenbankzugriffe.')
   @Get('version')
   version(): { version: string; commit: string; builtAt: string | null } {
     return {
@@ -83,6 +88,7 @@ export class AppController {
  * `/robots.txt` liegt bewusst AUSSERHALB des Präfixes `/api` — Suchmaschinen
  * fragen die Datei immer in der Wurzel ab.
  */
+@AllowWhileLocked('Statischer Text ohne Datenbankzugriff.')
 @Controller()
 export class RobotsController {
   @Get('robots.txt')

@@ -11,10 +11,13 @@ import type { PrismaService } from '../prisma/prisma.service';
  * muss sie wissen, dass es keinen Preis gibt, den sie anbieten dürfte.
  */
 
-function service(company: {
-  priceTier: string | null;
-  paymentInterval: 'yearly' | 'half_yearly' | 'monthly' | null;
-}): PricingService {
+function service(
+  company: {
+    priceTier: string | null;
+    paymentInterval: 'yearly' | 'half_yearly' | 'monthly' | null;
+  },
+  setupLines = 0,
+): PricingService {
   const prisma = {
     company: {
       findUnique: async () => ({
@@ -25,6 +28,7 @@ function service(company: {
       }),
     },
     metric: { findMany: async () => [] },
+    invoiceLine: { count: async () => setupLines },
   } as unknown as PrismaService;
   const config = {
     read: () => PRICE_PRESETS,
@@ -62,5 +66,58 @@ describe('Stufenvorschlag: Vertrag der Organisation', () => {
     expect(result.contract.tierKey).toBe('frei-getippt');
     expect(result.contract.tier).toBeNull();
     expect(result.contract.paymentInterval).toBeNull();
+  });
+});
+
+describe('Stufenvorschlag: Einrichtung nur einmal [N8f]', () => {
+  const contract = { priceTier: 'stufe2', paymentInterval: 'yearly' as const };
+
+  it('schlägt die Einrichtung vor, solange noch keine berechnet wurde', async () => {
+    const result = await service(contract, 0).suggestion('c1', '2026-08-17');
+    expect(result.setupCalculable).toBe(true);
+    expect(result.setupInvoiced).toBe(false);
+  });
+
+  it('schlägt sie nicht mehr vor, sobald ein Einrichtungsposten festgeschrieben ist', async () => {
+    const result = await service(contract, 1).suggestion('c1', '2026-08-17');
+    expect(result.setupCalculable).toBe(false);
+    expect(result.setupInvoiced).toBe(true);
+  });
+
+  it('zählt nur festgeschriebene, nicht stornierte Rechnungen der Organisation', async () => {
+    let seen: unknown;
+    const prisma = {
+      company: {
+        findUnique: async () => ({
+          customAmount: null,
+          instanceStartDate: null,
+          instance: null,
+          ...contract,
+        }),
+      },
+      metric: { findMany: async () => [] },
+      invoiceLine: {
+        count: async (args: unknown) => {
+          seen = args;
+          return 0;
+        },
+      },
+    } as unknown as PrismaService;
+    const config = {
+      read: () => PRICE_PRESETS,
+      tier: () => null,
+    } as unknown as PricingConfigService;
+    await new PricingService(prisma, config).suggestion('c1', '2026-08-17');
+    expect(seen).toMatchObject({
+      where: {
+        label: { startsWith: 'Einrichtung' },
+        invoice: {
+          companyId: 'c1',
+          finalizedAt: { not: null },
+          status: { not: 'cancelled' },
+          cancelledInvoiceId: null,
+        },
+      },
+    });
   });
 });

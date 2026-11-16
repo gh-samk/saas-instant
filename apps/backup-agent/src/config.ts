@@ -11,8 +11,18 @@ export interface AgentConfig {
   controlDatabaseUrl: string | undefined;
   dockerHost: string;
   extraOwnProjects: string[];
+  /** Zusaetzliche Sperrliste fuer Restore-Ziele (Namen oder Praefixe mit `*`). */
+  deniedProjects: string[];
+  /** Zeitlimit je Auftrag in Millisekunden. */
+  jobTimeoutMs: number;
   invoiceRetentionYears: number;
   version: string;
+}
+
+/** Minuten aus der Umgebung; ungueltig oder leer = Vorgabe. */
+function positiveMinutes(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return raw && Number.isFinite(n) && n >= 1 && n <= 24 * 60 ? n : fallback;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
@@ -33,6 +43,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     controlDatabaseUrl: env['CONTROL_DATABASE_URL'] || undefined,
     dockerHost: env['DOCKER_HOST'] ?? 'tcp://docker-socket-proxy:2375',
     extraOwnProjects: [env['AGENT_COMPOSE_PROJECT'], env['CONTROL_COMPOSE_PROJECT']].filter((x): x is string => !!x),
+    deniedProjects: (env['RESTORE_DENY_PROJECTS'] ?? '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter((x) => /^[A-Za-z0-9_.-]+\*?$/.test(x)),
+    jobTimeoutMs: positiveMinutes(env['JOB_TIMEOUT_MINUTES'], 120) * 60_000,
     invoiceRetentionYears: Number(env['INVOICE_RETENTION_YEARS'] ?? 10),
     version: env['AGENT_VERSION'] ?? '1.1.0',
   };

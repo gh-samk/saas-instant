@@ -222,3 +222,36 @@ describe('InvoiceView: Posten als Karten unter 640 px', () => {
     expect(screen.getByRole('table', { name: 'Rechnungsposten' })).toBeInTheDocument();
   });
 });
+
+describe('InvoiceView: Zahlung berichtigen und Stornorechnung [M13][H2]', () => {
+  it('bietet bei einer bezahlten Rechnung im Menü „Weitere“ das Berichtigen an', async () => {
+    show({ paymentState: 'paid', status: 'paid', paidAmount: '583.10', openAmount: '0.00' });
+    // „Zahlung erfassen“ gibt es hier nicht mehr …
+    expect(screen.queryByRole('button', { name: /^Zahlung erfassen$/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Weitere Aktionen' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Zahlungsstand berichtigen/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('radio', { name: /berichtigen/ })).toBeChecked();
+  });
+
+  it('bietet ohne erfasste Zahlung kein Berichtigen an', () => {
+    show({ paymentState: 'open', status: 'sent', paidAmount: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Weitere Aktionen' }));
+    expect(screen.queryByRole('menuitem', { name: /Zahlungsstand berichtigen/ })).toBeNull();
+  });
+
+  it('lässt eine Stornorechnung versendbar, aber nicht bezahlbar oder erinnerbar', () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue(BASE as never);
+    show({
+      paymentState: 'cancelled',
+      status: 'finalized',
+      isCancellation: true,
+      cancelledInvoiceId: 'r0',
+      sumGross: '-583.10',
+      openAmount: '-583.10',
+    });
+    expect(screen.getByRole('button', { name: /^Versenden$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Zahlung erfassen/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Zahlungserinnerung/ })).toBeNull();
+  });
+});

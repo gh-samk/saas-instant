@@ -38,7 +38,7 @@ check "single: .env vorhanden" test -f "$S/installations/alpha/.env"
 check ".env hat Rechte 600" test "$(perm "$S/installations/alpha/.env")" = 600
 check "Manifest kopiert" test -f "$S/installations/alpha/saas-instant.manifest.yaml"
 check "Manifest trägt die Kennung" grep -q 'slug: alpha' "$S/installations/alpha/saas-instant.manifest.yaml"
-for v in JWT_SECRET CONTROL_CONFIG_KEY CONTROL_POSTGRES_PASSWORD BACKUP_AGENT_SECRET AGENT_STATE_KEY BACKUP_REPORT_KEY; do
+for v in JWT_SECRET CONTROL_CONFIG_KEY CONTROL_POSTGRES_PASSWORD BACKUP_AGENT_SECRET AGENT_STATE_KEY BACKUP_REPORT_KEY BACKUP_DB_PASSWORD; do
   check "$v ist gesetzt und lang" grep -Eq "^$v=[0-9a-f]{32,}\$" "$S/installations/alpha/.env"
 done
 check "Backup-Geheimnisse sind verschieden" bash -c "[ \$(grep -E '^(BACKUP_AGENT_SECRET|AGENT_STATE_KEY|BACKUP_REPORT_KEY|JWT_SECRET)=' '$S/installations/alpha/.env' | cut -d= -f2 | sort -u | wc -l) -eq 4 ]"
@@ -47,7 +47,9 @@ check_not "Compose: CONTROL_BACKUP_KEY nicht mehr leer durchgereicht" grep -Eq '
 check "Compose: Agent und Verwaltung lesen denselben .env-Wert BACKUP_REPORT_KEY" bash -c "[ \$(grep -c 'BACKUP_REPORT_KEY:?' '$REPO/docker-compose.yml') -eq 3 ] && [ \$(grep -c '^BACKUP_REPORT_KEY=' '$S/installations/alpha/.env') -eq 1 ] && ! grep -q '^CONTROL_BACKUP_KEY=' '$S/installations/alpha/.env'"
 check "Compose: backup-agent ohne ports, mit cap_drop und State-Volume" bash -c "awk '/^  backup-agent:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' > '$TMP/agent.yml'; ! grep -q 'ports:' '$TMP/agent.yml' && grep -q 'cap_drop' '$TMP/agent.yml' && grep -q 'backup-agent-state:/state' '$TMP/agent.yml' && grep -q 'read_only: true' '$TMP/agent.yml'"
 check "Compose: Docker-Socket nur im docker-socket-proxy gemountet" bash -c "[ \$(grep -c 'docker\.sock' '$REPO/docker-compose.yml') -eq 1 ] && awk '/^  docker-socket-proxy:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' | grep -q 'docker.sock:ro'"
-check "Compose: docker-socket-proxy mit Allowlist, ohne ports" bash -c "awk '/^  docker-socket-proxy:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' > '$TMP/proxy.yml'; ! grep -q 'ports:' '$TMP/proxy.yml' && grep -q 'CONTAINERS: \"1\"' '$TMP/proxy.yml' && grep -q 'EXEC: \"1\"' '$TMP/proxy.yml' && grep -q 'IMAGES: \"0\"' '$TMP/proxy.yml' && grep -q 'VOLUMES: \"0\"' '$TMP/proxy.yml' && grep -q 'NETWORKS: \"0\"' '$TMP/proxy.yml' && grep -q 'SWARM: \"0\"' '$TMP/proxy.yml'"
+check "Compose: docker-socket-proxy ohne ports, mit eigener Allowlist-Vorlage und ohne die Schalter POST/CONTAINERS" bash -c "awk '/^  docker-socket-proxy:/{f=1;next} /^  (#|[a-z-]+:)/{f=0} f' '$REPO/docker-compose.yml' > '$TMP/proxy.yml'; ! grep -q 'ports:' '$TMP/proxy.yml' && grep -q 'ops/docker-proxy/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro' '$TMP/proxy.yml' && ! grep -Eq '^ +(POST|CONTAINERS|EXEC):' '$TMP/proxy.yml' && grep -q 'cap_drop' '$TMP/proxy.yml'"
+check "Proxy-Allowlist: nur die sechs Aufrufe des Agents, am Ende deny, kein DELETE/create/kill" bash -c "f='$REPO/ops/docker-proxy/haproxy.cfg.template'; [ \$(grep -c '^    http-request allow' \$f) -eq 6 ] && grep -q '^    http-request deny\$' \$f && ! grep -E '^    http-request allow' \$f | grep -Eq 'METH_DELETE|create|kill|restart|images|volumes|env\\('"
+check "Compose: Agent verbindet sich mit eigener Rolle backup_agent, nicht als Superuser control" bash -c "grep -q 'CONTROL_DATABASE_URL: postgresql://backup_agent:' '$REPO/docker-compose.yml' && ! grep -q 'CONTROL_DATABASE_URL: postgresql://control:' '$REPO/docker-compose.yml' && grep -q 'control-db-roles:' '$REPO/docker-compose.yml' && grep -q 'service_completed_successfully' '$REPO/docker-compose.yml' && grep -q 'pg_read_all_data' '$REPO/ops/control-db/backup-agent-role.sql'"
 check "Compose: control-api kennt BACKUP_AGENT_URL" grep -qF 'BACKUP_AGENT_URL: ${BACKUP_AGENT_URL:-http://backup-agent:8787}' "$REPO/docker-compose.yml"
 check "Backup-Agent: Dockerfile laeuft nicht als root" bash -c "grep -q '^USER 10002' '$REPO/apps/backup-agent/Dockerfile'"
 check "Modus-Lock = single" grep -q '^mode=single$' "$S/.saas-instant-mode"
@@ -147,6 +149,14 @@ check_not "single: --portal-url wird verweigert" "$TMP/single/install.sh" --dir 
 check "single: .env ohne SSO-Angaben (Verhalten unverändert)" bash -c "! grep -Eq '^(AUTH_MODE|PORTAL_)' '$S/installations/alpha/.env' && grep -q '^CONTROL_APP_URL=http://localhost:' '$S/installations/alpha/.env' && grep -q '^COOKIE_SECURE=0\$' '$S/installations/alpha/.env'"
 check "portal lokal (ohne --portal-url): http-Aussteller, Cookies nicht secure" bash -c "grep -Eq '^PORTAL_ISSUER=http://localhost:[0-9]+\$' '$P/portal/portal.env' && grep -q '^PORTAL_COOKIE_SECURE=false\$' '$P/portal/portal.env' && grep -q '^PORTAL_TRUST_PROXY=1\$' '$P/portal/portal.env'"
 # Abweichender Netzname aus portal.env gilt auch für die Verwaltung (Zusatzdatei liest ihn aus deren .env)
+# Bestehende Installation ohne BACKUP_DB_PASSWORD (Stand vor der Agent-Rolle): wird nachgetragen, danach unveraendert
+grep -v '^BACKUP_DB_PASSWORD=' "$S/installations/alpha/.env" > "$TMP/e.tmp"; cp "$TMP/e.tmp" "$S/installations/alpha/.env"
+"$S/install.sh" --dir "$S" --software alpha --non-interactive --no-start --yes >/dev/null 2>&1 || true
+check "retrofit: BACKUP_DB_PASSWORD wird bei bestehender Installation nachgetragen" grep -Eq '^BACKUP_DB_PASSWORD=[0-9a-f]{32,}$' "$S/installations/alpha/.env"
+check "retrofit: Rechte bleiben 600" test "$(perm "$S/installations/alpha/.env")" = 600
+RF_BEFORE="$(cat "$S/installations/alpha/.env")"
+"$S/install.sh" --dir "$S" --software alpha --non-interactive --no-start --yes >/dev/null 2>&1 || true
+check "retrofit: zweiter Lauf aendert nichts" test "$RF_BEFORE" = "$(cat "$S/installations/alpha/.env")"
 NW="$TMP/netname"; stage "$NW"; mkdir -p "$NW/portal"; printf 'PORTAL_AUTH_NETWORK=mein-netz\n' > "$NW/portal/portal.env"
 check "sso: eigener Netzname wird in portal.env belassen und in die .env der Verwaltung übernommen" bash -c "'$NW/install.sh' --dir '$NW' --mode portal --software alpha --non-interactive --no-start --yes >/dev/null 2>&1 && grep -q '^PORTAL_AUTH_NETWORK=mein-netz\$' '$NW/installations/alpha/.env' && grep -q '^PORTAL_AUTH_NETWORK=mein-netz\$' '$NW/portal/portal.env' && grep -q '^COMPOSE_PROJECT_NAME=saas-instant-portal\$' '$NW/portal/portal.env'"
 # Bestandsinstallation ohne SSO: bleibt lokal, bis ausdrücklich umgestellt wird
@@ -158,7 +168,7 @@ check "legacy: portal enable --yes stellt sie um" env SAAS_INSTANT_ROOT="$L" "$L
 check "legacy: AUTH_MODE und Client-Secret stehen jetzt in der .env" bash -c "grep -q '^AUTH_MODE=portal\$' '$L/installations/alt/.env' && grep -Eq '^PORTAL_CLIENT_SECRET=[0-9a-f]{64}\$' '$L/installations/alt/.env'"
 check "legacy: portal enable ist idempotent (Secret bleibt)" bash -c "a=\$(cat '$L/installations/alt/.env'); SAAS_INSTANT_ROOT='$L' '$L/bin/saas-instant' portal enable alt --yes >/dev/null; [ \"\$a\" = \"\$(cat '$L/installations/alt/.env')\" ]"
 # Registry getrennt von portal.env: Mount nur auf portal/registry, Migration alter Installationen
-check "registry: Compose mountet nur portal/registry, nicht portal/" bash -c "grep -q -- '- ../../portal/registry:/srv/registry:ro' '$REPO/apps/portal/docker-compose.portal.yml' && ! grep -Eq -- '- ../../portal:' '$REPO/apps/portal/docker-compose.portal.yml'"
+check "registry: Compose mountet nur portal/registry (ueber PORTAL_REGISTRY_DIR), nicht portal/" bash -c "grep -qF -- '- \${PORTAL_REGISTRY_DIR:-../../portal/registry}:/srv/registry:ro' '$REPO/apps/portal/docker-compose.portal.yml' && ! grep -Eq -- '- ../../portal:' '$REPO/apps/portal/docker-compose.portal.yml'"
 check "registry: portal.env liegt nicht im Registry-Verzeichnis" bash -c "[ -f '$L/portal/portal.env' ] && [ ! -e '$L/portal/registry/portal.env' ] && [ -f '$L/portal/registry/registry.json' ] && [ ! -e '$L/portal/registry.json' ]"
 MG="$TMP/migrate"; stage "$MG"
 "$MG/install.sh" --dir "$MG" --mode portal --software alpha --non-interactive --no-start --yes >/dev/null 2>&1
@@ -215,6 +225,12 @@ check "start: emergency erinnert im Portalmodus an den Notzugang" bash -c "SAAS_
 SM="$TMP/singlemock"; stage "$SM"; : > "$CALLS"; rm -f "$MOCK_DIR/nets/"*
 check "single-start: läuft" "$SM/install.sh" --dir "$SM" --mode single --software alpha --non-interactive --yes
 check "single-start: nur ein docker compose up, ohne Netz-Datei, ohne Anmeldedienst" bash -c "[ \$(grep -c ' up -d' '$CALLS') -eq 1 ] && ! grep -q 'portal' '$CALLS' && ! grep -q 'network' '$CALLS'"
+# --dir abweichend vom Quellbaum: die Registry muss aus dem Installationsverzeichnis in den Portal-Nginx gemountet werden
+DS="$TMP/dirsrc"; stage "$DS"; DD="$TMP/dirdest"; rm -f "$MOCK_DIR/registry-dir.log"
+check "dir: Installation mit --dir ausserhalb des Quellbaums (Attrappe) läuft" bash -c "'$DS/install.sh' --dir '$DD' --mode portal --software alpha --non-interactive --yes >/dev/null 2>&1"
+check "dir: docker compose bekommt PORTAL_REGISTRY_DIR = <dir>/portal/registry" grep -qx "$DD/portal/registry" "$MOCK_DIR/registry-dir.log"
+check_not "dir: nie der Registry-Pfad des Quellbaums" grep -q "$DS" "$MOCK_DIR/registry-dir.log"
+check "dir: Registry dort nennt die Verwaltung" grep -q '"slug": "alpha"' "$DD/portal/registry/registry.json"
 PATH="$OLDPATH"
 
 # --- Compose-Dateien --------------------------------------------------------

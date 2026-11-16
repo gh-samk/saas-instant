@@ -22,7 +22,7 @@ export async function runBackupControl(ctx: JobContext, opts: { invoicesOnly?: b
   try {
     const file = await tmpFile(ctx, '.dump.age');
     spool.push(file);
-    const dump = ctx.controlDump();
+    const dump = ctx.controlDump(ctx.signal);
     const s = await encryptToFile(ctx, dump.stdout, file);
     await expectExit(ctx, dump, 'pg_dump der Verwaltung');
     await putFile(ctx, dumpKey, file);
@@ -50,9 +50,16 @@ export async function runBackupControl(ctx: JobContext, opts: { invoicesOnly?: b
   return result;
 }
 
-async function report(ctx: JobContext, kind: 'control' | 'invoices', key: string, size: number, sha: string) {
+async function report(ctx: JobContext, kind: 'control' | 'invoices', key: string | undefined, size: number, sha: string | undefined, runDate = false) {
   try {
-    await ctx.control.report({ kind, date: dateOfKey(key)!, sizeBytes: size, objectKey: key, sha256: sha });
+    await ctx.control.report({
+      kind,
+      // Bei einem Lauf ohne neue Dateien zaehlt das Datum des Laufs, nicht das des alten Archivs.
+      date: (!runDate && key ? dateOfKey(key) : null) ?? ctx.now().toISOString().slice(0, 10),
+      sizeBytes: size,
+      ...(key ? { objectKey: key } : {}),
+      ...(sha ? { sha256: sha } : {}),
+    });
   } catch (e) {
     ctx.log.warn('Meldung an die Verwaltung fehlgeschlagen', { error: safeMessage(ctx.redactor, e) });
   }
@@ -65,12 +72,20 @@ async function archiveInvoices(ctx: JobContext): Promise<void> {
     : undefined;
 
   const all = await src.fetchAll();
+  let reported = false;
+  // Neuestes bereits vorhandenes Archiv (fuer die Meldung eines Laufs ohne neue Dateien).
+  let latestExisting: { key: string; size: number; sha: string } | undefined;
   for (const year of [...all.keys()].sort()) {
     // Eintraege einsammeln; Hashliste bestimmt den Inhalt (und damit, ob sich etwas geaendert hat).
     const entries: { name: string; data: Buffer }[] = [];
     const hashLines: string[] = [];
+    const usedBases = new Set<string>();
     for (const inv of all.get(year) ?? []) {
-      const safe = inv.number.replace(/[^A-Za-z0-9._-]/g, '_');
+      let safe = inv.number.replace(/[^A-Za-z0-9._-]/g, '_');
+      // "RE/2026/1" und "RE_2026_1" ergaeben denselben Dateinamen; die zweite Rechnung wuerde im Archiv
+      // verschwinden. Die Reihenfolge ist stabil (nach Nummer sortiert), der Inhalt bleibt reproduzierbar.
+      for (let n = 2; usedBases.has(safe.toLowerCase()); n++) safe = `${inv.number.replace(/[^A-Za-z0-9._-]/g, '_')}__${n}`;
+      usedBases.add(safe.toLowerCase());
       const add = (suffix: string, data?: Buffer | null) => {
         if (!data || data.length === 0) return;
         const name = `invoices/${year}/${safe}${suffix}`;
@@ -93,7 +108,11 @@ async function archiveInvoices(ctx: JobContext): Promise<void> {
     const latest = existing[existing.length - 1];
     if (latest) {
       const m = await readMeta(ctx, latest);
-      if (m?.contentDigest === contentDigest) continue;
+      if (m?.contentDigest === contentDigest) {
+        const f = m.files[0];
+        if (f && (!latestExisting || latest > latestExisting.key)) latestExisting = { key: latest, size: f.sizeBytes, sha: f.sha256 };
+        continue;
+      }
     }
 
     const key = `${ctx.keyPrefix}invoices/${year}/${stamp(ctx.now())}.tar.age`;
@@ -116,8 +135,22 @@ async function archiveInvoices(ctx: JobContext): Promise<void> {
         retainUntil,
       );
       await report(ctx, 'invoices', key, s.size, s.sha256);
+      reported = true;
     } finally {
       await rmQuiet(file);
     }
   }
+  // Ein gelungener Lauf ohne neue Dateien ist trotzdem ein Lauf: ohne Meldung schluege die Aufgabe
+  // "Sicherung der Verwaltung ueberfaellig" bei einem unveraenderten Archiv (oder ganz ohne Rechnungen)
+  // dauerhaft an. Gemeldet wird das neueste vorhandene Archiv bzw. ein leerer Lauf.
+  // Hat die Verwaltung Belege uebersprungen, ist das Archiv UNVOLLSTAENDIG: Lauf als fehlgeschlagen
+  // verbuchen (keine Meldung "gelungen"); beim naechsten Lauf werden sie erneut angefragt, und ein
+  // geaendertes Archiv wird dann neu abgelegt (der Inhaltsvergleich erkennt es).
+  const skipped = src.skipped?.() ?? [];
+  if (skipped.length > 0) {
+    const list = skipped.slice(0, 10).map((x) => `${x.number} (${x.reason})`).join(', ');
+    ctx.log.error('Rechnungsarchiv unvollstaendig: Belege von der Verwaltung uebersprungen', { anzahl: skipped.length, belege: list });
+    throw new Error(`Rechnungsarchiv unvollstaendig: ${skipped.length} Beleg(e) nicht abrufbar (${list}); neuer Versuch beim naechsten Lauf`);
+  }
+  if (!reported) await report(ctx, 'invoices', latestExisting?.key, latestExisting?.size ?? 0, latestExisting?.sha, true);
 }

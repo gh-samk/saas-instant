@@ -629,6 +629,8 @@ model Backup {
   /// Schluessel des Objekts im Sicherungsziel (nie ein Geheimnis).
   objectKey  String?
   sha256     String?
+  /// SHA-256 des verschluesselten Uploads-Archivs (null: Altbestand oder Sicherung ohne Uploads).
+  uploadsSha256 String?
   status     String     @default("ok")
   verifiedAt DateTime?
 
@@ -857,6 +859,11 @@ model Invoice {
   servicePeriodFrom  DateTime @db.Date
   servicePeriodUntil DateTime @db.Date
   dueDate            DateTime @db.Date
+  /// [M16] Wurde die Fälligkeit von Hand gesetzt? `false` = aus Rechnungsdatum
+  /// plus Zahlungsziel abgeleitet; beim Festschreiben wird sie dann aus dem
+  /// dann geltenden Zahlungsziel neu gebildet. Vorgabe `true`: Bestandsentwürfe
+  /// behalten ihre Fälligkeit unverändert.
+  dueDateManual      Boolean  @default(true)
 
   status      InvoiceStatus @default(draft)
   paymentDate DateTime?     @db.Date
@@ -994,6 +1001,14 @@ model InvoiceLine {
   invoiceId String
   invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
 
+  /// Reihenfolge der Posten, ab 0, so wie sie im Formular eingegeben wurden.
+  /// Die Id ist eine UUIDv4 und taugt nicht zum Sortieren (M11).
+  ///
+  /// NULLBAR UND OHNE NACHTRAG: Der GoBD-Trigger lässt Posten festgeschriebener
+  /// Rechnungen nicht per UPDATE anfassen, und die Posten tragen keinen
+  /// Zeitstempel, aus dem sich eine Reihenfolge herleiten ließe. Altposten
+  /// behalten NULL und werden wie bisher nach Id sortiert (`LINE_ORDER`).
+  position     Int?
   label        String
   /// Mengeneinheit nach UN/ECE Rec. 20, z. B. `C62` (Stueck), `MON` (Monat),
   /// `HUR` (Stunde). Landet als `unitCode` im CII-XML (BT-130).

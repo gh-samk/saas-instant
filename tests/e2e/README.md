@@ -53,7 +53,7 @@ Echter Anmeldedienst `apps/portal-auth` (OIDC, Authorization Code + PKCE) und zw
 - **(4)** Step-up: Nachweis künstlich gealtert -> 401 `step_up_required`; falscher Faktor und normaler Durchlauf zählen nicht; frischer Faktor im Portal -> Firmendaten speichern gelingt.
 - **(5)** Logout im Portal beendet über den Front-Channel die Sitzungen in a und b (Aufruf mit fremdem `iss` nicht); die Sitzung von Y bleibt.
 - **(6)** Manipulierte Callbacks: falscher/verbrauchter state, fehlendes oder verfälschtes Cookie, Wiederholung des echten Callbacks; Code-Wiederholung, falscher Verifier und falscher Client am Portal; ID-Tokens eines Attrappen-Ausstellers mit falschem `aud`/`iss`, abgelaufen, falscher Signatur, falscher `nonce`, ohne/leerem `amr`, `alg=none`, `iat` in der Zukunft, ohne `sub` -> `sso_invalid`; ohne Rolle -> `no_access`; gültiges Token wird angenommen.
-- **(7)** Portal gestoppt: Notzugang (per `emergency password` markiert) meldet sich lokal an, das normale lokale Konto bekommt `local_login_disabled`.
+- **(7)** Portal gestoppt: Notzugang (per `emergency password` markiert) meldet sich lokal an, das normale lokale Konto bekommt (auch mit richtigem Passwort) dieselbe 401-Antwort `login_failed` wie bei falschem Passwort (kein Passwort-Orakel).
 - **(8)** Verwaltung im Modus `single`: lokale Anmeldung wie bisher, keine SSO-Routen (404), kein Step-up.
 - Die Wiederherstellungscodes des Portal-Kontos dienen als zweiter Faktor der Step-ups (ein TOTP-Code gilt je Konto nur einmal je Zeitfenster).
 - **Ports:** Portal 13400 (Vorderseite) und 13401 (Dienst), Verwaltungen 13410 (a), 13411 (b), 13412 (c, Attrappen-Aussteller 13413), 13414 (single); Datenbanken `e2e_sso_*`.

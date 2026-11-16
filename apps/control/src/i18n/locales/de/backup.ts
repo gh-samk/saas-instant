@@ -33,7 +33,7 @@ export default {
   locationNbg1: 'Nürnberg (nbg1)',
   locationHel1: 'Helsinki (hel1)',
   advancedTitle: 'Erweitert',
-  advancedHint: 'Präfix, Adressierung und Aufbewahrung. Die Voreinstellungen passen meistens.',
+  advancedHint: 'Präfix, Adressierung, Host-Fingerabdruck und Aufbewahrung. Die Voreinstellungen passen meistens.',
   s3Bucket: 'Bucket',
   s3Prefix: 'Präfix',
   s3PrefixHint: 'Optionaler Ordner im Bucket, z. B. saas-instant/',
@@ -61,6 +61,12 @@ export default {
   hostKeyHint:
     'Der Agent vertraut genau diesem Host-Key. Vergleiche ihn mit dem Fingerabdruck, den dein Anbieter angibt.',
   hostKeyUnknown: 'Noch nicht vom Agent gemeldet.',
+  hostKeyInput: 'Host-Fingerabdruck',
+  hostKeyInputHint:
+    'Optional, Form SHA256:… (z. B. aus „ssh-keygen -lf“ oder den Angaben deines Anbieters). Leer: Der Agent merkt sich den Schlüssel beim ersten Verbindungstest. Ohne festgehaltenen Schlüssel sichert der Agent nicht.',
+  errHostKey: 'Der Host-Fingerabdruck muss die Form SHA256:… haben (43 Zeichen, ohne Gleichheitszeichen).',
+  errSecretAgain:
+    'Das Ziel wurde geändert (Host, Port, Benutzer bzw. Endpunkt, Bucket): Gib die Zugangsdaten erneut ein, gespeicherte Werte werden nicht übernommen.',
   schedule: 'Zeitplan',
   scheduleDaily: 'Täglich',
   scheduleTwiceDaily: 'Zweimal täglich',

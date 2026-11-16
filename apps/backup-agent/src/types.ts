@@ -54,6 +54,8 @@ export interface JobResult {
   objectKey?: string;
   sizeBytes?: number;
   sha256?: string;
+  /** Hinweis an den Betreiber (z. B. uebersprungene Uploads bei der Wiederherstellung). */
+  note?: string;
 }
 
 /** `deferred`: bewusst verschoben (z. B. Verwaltung gesperrt), kein Fehler; wird beim naechsten Lauf erneut versucht. */
@@ -87,4 +89,6 @@ export interface BackupMeta {
   /** Nur Rechnungsarchive: Pruefsumme ueber die Klartext-Hashliste (Doppelungen vermeiden). */
   contentDigest?: string;
   year?: string;
+  /** Nur Instanzsicherungen: Datenbank gesichert, Uploads nicht (Teilerfolg). */
+  partial?: boolean;
 }

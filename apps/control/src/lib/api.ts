@@ -1641,6 +1641,8 @@ export interface Invoice {
   servicePeriodFrom: string;
   servicePeriodUntil: string;
   dueDate: string;
+  /** `true` = von Hand gesetzt, `false` = aus Rechnungsdatum + Zahlungsziel abgeleitet. */
+  dueDateManual?: boolean;
   /** Technischer Zeitstempel (ISO), kein fachliches Datum. */
   finalizedAt: string | null;
   createdAt: string;
@@ -1741,6 +1743,8 @@ export interface PriceSuggestion {
   subscriptionCalculableFrom: string | null;
   subscriptionCalculable: boolean;
   setupCalculable: boolean;
+  /** Die Einrichtung steht schon auf einer festgeschriebenen Rechnung — sie wird nicht erneut vorgeschlagen. */
+  setupInvoiced?: boolean;
   /**
    * Der Vertrag der Organisation (Stufe samt Preisen, Zahlungsweise).
    * Optional, weil Testdaten und ältere Antworten ihn nicht kennen; fehlt er,
@@ -1967,7 +1971,12 @@ export function sendPaymentReminder(
  */
 export function notePayment(
   id: string,
-  data: { paymentDate: string; paidAmountCent: number },
+  data: {
+    paymentDate: string;
+    paidAmountCent: number;
+    /** Der bisher angezeigte Gesamtstand in Cent (0 = noch nichts). Der Server antwortet 409, wenn er inzwischen ein anderer ist. */
+    expectedPaidCent: number;
+  },
   evidence?: SecondFactorEvidence,
 ): Promise<Invoice> {
   return apiFetch<Invoice>(
@@ -2709,6 +2718,8 @@ export interface BackupSettingsInput {
     authType: 'key' | 'password';
     privateKey?: string;
     password?: string;
+    /** SSH-Host-Key-Fingerabdruck (SHA256:…); weggelassen pinnt der Agent beim Verbindungstest. */
+    hostKeyFingerprint?: string;
   };
 }
 
@@ -2945,14 +2956,32 @@ export function fetchIssuer(): Promise<IssuerSettings> {
 }
 
 /** Speichert auch unvollständige Angaben; `missing` nennt, was für Rechnungen noch fehlt. */
-export function saveIssuer(body: {
-  profile: IssuerProfile;
-  accentColor: string;
-}): Promise<IssuerSettings> {
+export function saveIssuer(
+  body: {
+    profile: IssuerProfile;
+    accentColor: string;
+  },
+  evidence?: SecondFactorEvidence,
+): Promise<IssuerSettings> {
   return apiFetch<IssuerSettings>('/api/settings/issuer', {
     method: 'PUT',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...(evidence ?? {}) }),
   });
+}
+
+/**
+ * Der Nachweis für Routen ohne JSON-Body (Logo: rohes Bild bzw. `DELETE`) geht
+ * als Base64-JSON im Kopf `x-second-factor` mit; der Server liest ihn dort,
+ * wenn der Body keinen trägt.
+ */
+function evidenceHeaders(evidence?: SecondFactorEvidence): Record<string, string> {
+  if (!evidence) return {};
+  const bytes = new TextEncoder().encode(JSON.stringify(evidence));
+  let binary = '';
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return { 'x-second-factor': btoa(binary) };
 }
 
 /**
@@ -2961,16 +2990,25 @@ export function saveIssuer(body: {
  * Ein Formular käme dort als `multipart/form-data` mit Grenzzeilen an und
  * würde immer als „kein PNG oder JPEG“ abgelehnt.
  */
-export function uploadIssuerLogo(file: File): Promise<unknown> {
+export function uploadIssuerLogo(
+  file: File,
+  evidence?: SecondFactorEvidence,
+): Promise<unknown> {
   return apiFetch<unknown>('/api/settings/issuer/logo', {
     method: 'POST',
     body: file,
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      ...evidenceHeaders(evidence),
+    },
   });
 }
 
-export function deleteIssuerLogo(): Promise<unknown> {
-  return apiFetch<unknown>('/api/settings/issuer/logo', { method: 'DELETE' });
+export function deleteIssuerLogo(evidence?: SecondFactorEvidence): Promise<unknown> {
+  return apiFetch<unknown>('/api/settings/issuer/logo', {
+    method: 'DELETE',
+    headers: evidenceHeaders(evidence),
+  });
 }
 
 /** Öffentliche Logo-Adresse; `version` (z. B. der Hash) umgeht veraltete Browser-Zwischenspeicher. */
@@ -3047,6 +3085,22 @@ export function vaultChangePassphrase(
       body: JSON.stringify({ currentPassphrase, newPassphrase, ...evidence }),
     },
   );
+}
+
+/** Entzieht eine Passphrase (nicht den Wiederherstellungsschlüssel). Der letzte Zugang bleibt geschützt (409). */
+export function vaultRemovePassphrase(
+  id: string,
+  evidence?: SecondFactorEvidence,
+): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>(`/api/vault/passphrases/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    body: JSON.stringify(evidence ?? {}),
+  });
+}
+
+/** Belege und Protokolleinträge aus der Zeit vor dem Tresor, die unveränderlich im Klartext liegen. */
+export function fetchVaultLegacyPlaintext(): Promise<{ invoices: number; auditEntries: number }> {
+  return apiFetch<{ invoices: number; auditEntries: number }>('/api/vault/legacy-plaintext');
 }
 
 /** Erzeugt einen neuen Wiederherstellungsschlüssel; der alte wird ungültig. */

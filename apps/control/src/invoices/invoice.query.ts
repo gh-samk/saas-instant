@@ -32,6 +32,7 @@ export const HEADER_FIELDS = {
   servicePeriodFrom: true,
   servicePeriodUntil: true,
   dueDate: true,
+  dueDateManual: true,
   status: true,
   paymentDate: true,
   paidAmount: true,
@@ -89,10 +90,21 @@ export const HEADER_FIELDS = {
   createdAt: true,
 } satisfies Prisma.InvoiceSelect;
 
+/**
+ * Reihenfolge der Posten (M11): erst nach gespeicherter Position, Altposten
+ * ohne Position (NULL) zuletzt und untereinander wie bisher nach Id. Die Id
+ * ist eine UUIDv4 und gibt keine Eingabereihenfolge her; Posten festgeschriebener
+ * Rechnungen lassen sich per GoBD-Trigger nicht nachtragen.
+ */
+export const LINE_ORDER = [
+  { position: { sort: 'asc', nulls: 'last' } },
+  { id: 'asc' },
+] satisfies Prisma.InvoiceLineOrderByWithRelationInput[];
+
 /** Kopf plus Posten plus Rückverweis auf die Stornorechnung. */
 export const RESPONSE_FIELDS = {
   ...HEADER_FIELDS,
-  lines: true,
+  lines: { orderBy: LINE_ORDER },
   cancellationInvoice: { select: { id: true } },
   /**
    * Der NAME der Organisation, nicht nur ihre Kennung.

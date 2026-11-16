@@ -160,6 +160,10 @@ export default {
   logoErrEmpty: 'Die Datei ist leer.',
   logoUploadFailed: 'Das Logo konnte nicht hochgeladen werden.',
   logoRemoveFailed: 'Das Logo konnte nicht entfernt werden.',
+  logoEvidenceTitle: 'Logo ändern?',
+  logoEvidenceDeclaration: 'Das Logo steht auf jeder künftigen Rechnung. Bestätige deshalb noch einmal, dass du es bist.',
+  saveEvidenceTitle: 'Firmendaten speichern?',
+  saveEvidenceDeclaration: 'Die Angaben stehen unveränderlich auf jeder künftigen Rechnung. Bestätige deshalb noch einmal, dass du es bist.',
 
   // Akzentfarbe
   accentHeading: 'Akzentfarbe',

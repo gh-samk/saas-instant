@@ -62,7 +62,7 @@ export class DockerodeClient implements DockerClient {
     }
   }
 
-  exec(id: string, cmd: string[], opts?: { stdin?: Readable }): ExecHandle {
+  exec(id: string, cmd: string[], opts?: { stdin?: Readable; signal?: AbortSignal }): ExecHandle {
     const stdout = new PassThrough();
     const stderrParts: Buffer[] = [];
     let stderrLen = 0;
@@ -83,6 +83,8 @@ export class DockerodeClient implements DockerClient {
           Tty: false,
         });
         const stream = await exec.start({ hijack: !!opts?.stdin, stdin: !!opts?.stdin });
+        // Zeitlimit des Auftrags: Verbindung kappen (das Werkzeug im Container bekommt EOF bzw. SIGPIPE).
+        opts?.signal?.addEventListener('abort', () => stream.destroy(new Error('Abgebrochen (Zeitlimit)')), { once: true });
         this.docker.modem.demuxStream(stream, stdout, stderr);
         if (opts?.stdin) opts.stdin.pipe(stream);
         await new Promise<void>((resolve, reject) => {

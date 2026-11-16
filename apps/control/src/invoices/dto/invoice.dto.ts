@@ -221,6 +221,16 @@ export class PaymentDto {
   @Max(99_999_999)
   paidAmountCent!: number;
 
+  /**
+   * Der bisher gespeicherte Gesamtstand, von dem die Oberfläche ausging
+   * (0 = noch nichts erfasst). Weicht er vom aktuellen ab, antwortet der Server
+   * mit 409 statt eine zwischenzeitliche Änderung zu überschreiben [N8e].
+   */
+  @IsInt({ message: 'Der erwartete bisherige Stand muss in ganzen Cent angegeben werden.' })
+  @Min(-99_999_999)
+  @Max(99_999_999)
+  expectedPaidCent!: number;
+
   /** Nachweis für den ZweitfaktorGuard. Wird vom Guard aus dem Body gelesen. */
   @IsOptional()
   @IsString()
@@ -241,6 +251,11 @@ export class TransferDto {
   @IsString()
   @MaxLength(80)
   transferStatus!: string;
+
+  /** Nachweis für den ZweitfaktorGuard. Wird vom Guard aus dem Body gelesen. */
+  @IsOptional() @IsString() currentPassword?: string;
+
+  @IsOptional() @IsString() totpCode?: string;
 }
 
 /** Abfrage des Preisvorschlags. */

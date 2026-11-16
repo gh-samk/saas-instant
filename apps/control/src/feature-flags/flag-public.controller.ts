@@ -1,5 +1,6 @@
 import { Controller, Get, Header } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import type { PublicFlagState } from './feature-flag.service';
 import { FeatureFlagService } from './feature-flag.service';
 
@@ -22,6 +23,9 @@ import { FeatureFlagService } from './feature-flag.service';
 export class FlagPublicController {
   constructor(private readonly flag: FeatureFlagService) {}
 
+  @AllowWhileLocked(
+    'Liest nur die Tabelle FeatureFlag (Schlüssel und Wahrheitswert); keine Kundendaten.',
+  )
   @Get()
   @Header('Cache-Control', 'no-store')
   @Throttle({ default: { limit: 600, ttl: 60_000 } })

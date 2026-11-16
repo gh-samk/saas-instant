@@ -1,0 +1,76 @@
+# Eigene Allowlist fuer den docker-socket-proxy (Image tecnativa/docker-socket-proxy:0.3.0).
+#
+# WARUM EINE EIGENE DATEI: Die Schalter des Images (POST=1 zusammen mit CONTAINERS=1) lassen
+# jeden POST und jedes DELETE unter /containers zu, also auch /containers/create (neuer
+# Container mit Host-Mount = Root auf dem Host) und DELETE /containers/<id>. Hier steht
+# genau, was der Backup-Agent aufruft (apps/backup-agent/src/docker/dockerode.ts), und sonst nichts:
+#
+#   GET  /containers/json                  Container eines Compose-Projekts auflisten
+#   GET  /containers/<id>/json             eigenen Container ansehen (Compose-Projekt des Agenten)
+#   POST /containers/<id>/start            App-Container nach der Wiederherstellung starten
+#   POST /containers/<id>/stop             App-Container vor der Wiederherstellung anhalten
+#   POST /containers/<id>/exec             pg_dump, pg_restore, tar anlegen ...
+#   POST /exec/<id>/start                  ... und ausfuehren
+#   GET  /exec/<id>/json                   Exit-Code lesen
+#
+# Alles andere (create, kill, restart, DELETE, images, volumes, networks, system ...) bekommt 403.
+# Nicht ueber haproxy filterbar bleibt der Inhalt von POST .../exec: Wer den Agenten steuern kann,
+# kann in jedem Container Befehle ausfuehren. Das schuetzt die HMAC-Signatur der internen API.
+#
+# Das Image ersetzt ${BIND_CONFIG} beim Start (sed) und liest LOG_LEVEL und SOCKET_PATH
+# aus seiner Umgebung. Bei einer neueren Image-Version die Vorlage des Images vergleichen.
+
+global
+    log stdout format raw daemon "${LOG_LEVEL}"
+
+    pidfile /run/haproxy.pid
+    maxconn 4000
+
+    # Turn on stats unix socket
+    server-state-file /var/lib/haproxy/server-state
+
+defaults
+    mode http
+    log global
+    option httplog
+    option dontlognull
+    option http-server-close
+    option redispatch
+    retries 3
+    timeout http-request 10s
+    timeout queue 1m
+    timeout connect 10s
+    timeout client 10m
+    timeout server 10m
+    timeout http-keep-alive 10s
+    timeout check 10s
+    maxconn 3000
+
+    # Allow seamless reloads
+    load-server-state-from-file global
+
+    # Use provided example error pages
+    errorfile 400 /usr/local/etc/haproxy/errors/400.http
+    errorfile 403 /usr/local/etc/haproxy/errors/403.http
+    errorfile 408 /usr/local/etc/haproxy/errors/408.http
+    errorfile 500 /usr/local/etc/haproxy/errors/500.http
+    errorfile 502 /usr/local/etc/haproxy/errors/502.http
+    errorfile 503 /usr/local/etc/haproxy/errors/503.http
+    errorfile 504 /usr/local/etc/haproxy/errors/504.http
+
+backend dockerbackend
+    server dockersocket $SOCKET_PATH
+
+frontend dockerfrontend
+    bind ${BIND_CONFIG}
+
+    # Optionaler Versionsanteil (/v1.43/...) wie bei der Docker-API ueblich; der Pfad wird vor dem
+    # Vergleich URL-dekodiert. Container-Kennung: Hex-ID oder Name, nie "." oder "..".
+    http-request allow if METH_GET  { path,url_dec -m reg ^(/v[0-9]+(\.[0-9]+)?)?/containers/json$ }
+    http-request allow if METH_GET  { path,url_dec -m reg ^(/v[0-9]+(\.[0-9]+)?)?/containers/[a-zA-Z0-9][a-zA-Z0-9_.-]*/json$ }
+    http-request allow if METH_POST { path,url_dec -m reg ^(/v[0-9]+(\.[0-9]+)?)?/containers/[a-zA-Z0-9][a-zA-Z0-9_.-]*/(start|stop)$ }
+    http-request allow if METH_POST { path,url_dec -m reg ^(/v[0-9]+(\.[0-9]+)?)?/containers/[a-zA-Z0-9][a-zA-Z0-9_.-]*/exec$ }
+    http-request allow if METH_POST { path,url_dec -m reg ^(/v[0-9]+(\.[0-9]+)?)?/exec/[a-zA-Z0-9]+/start$ }
+    http-request allow if METH_GET  { path,url_dec -m reg ^(/v[0-9]+(\.[0-9]+)?)?/exec/[a-zA-Z0-9]+/json$ }
+    http-request deny
+    default_backend dockerbackend

@@ -48,24 +48,40 @@ export const invoiceOverdue: TaskSource = {
     const where = {
       dueDate: { lt: toDate(context.todayDay) },
       status: { in: OPEN_STATES },
+      // [H2] Eine Stornorechnung ist nie überfällig: Sie ist `finalized`, hat
+      // eine negative Summe und das Datum ihrer Ausstellung als Fälligkeit, es
+      // ist aber nichts zu zahlen. Ohne den Ausschluss meldete die Aufgabe am
+      // Folgetag „überfällig · -119,00 €".
+      cancelledInvoiceId: null,
     };
 
-    const [rows, total] = await Promise.all([
-      context.prisma.invoice.findMany({
-        where,
-        select: {
-          id: true,
-          invoiceNumber: true,
-          dueDate: true,
-          company: { select: { id: true, name: true, status: true } },
-          lines: { select: { grossAmount: true } },
-          paidAmount: true,
-        },
-        orderBy: { dueDate: 'asc' },
-        take: context.limit,
-      }),
-      context.prisma.invoice.count({ where }),
-    ]);
+    // OHNE `take` und OHNE `count`: Ob noch etwas offen ist, folgt aus den
+    // Postensummen, und die lassen sich in SQL nicht filtern. Überfällige,
+    // noch nicht bezahlte Rechnungen sind wenige; gekürzt wird erst unten.
+    const found = await context.prisma.invoice.findMany({
+      where,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        dueDate: true,
+        company: { select: { id: true, name: true, status: true } },
+        lines: { select: { grossAmount: true } },
+        paidAmount: true,
+      },
+      orderBy: { dueDate: 'asc' },
+    });
+    // [H2]/[N8a] Nur, wo wirklich noch Geld erwartet wird: Rechnungen über
+    // 0 € oder mit negativer Summe (Gutschrift) und bereits ausgeglichene
+    // Rechnungen sind nie überfällig.
+    const open = found.filter((row) => {
+      const grossCent = row.lines.reduce(
+        (sum, line) => sum + (decimalAsCent(line.grossAmount) ?? 0),
+        0,
+      );
+      return grossCent > 0 && grossCent - (decimalAsCent(row.paidAmount) ?? 0) > 0;
+    });
+    const total = open.length;
+    const rows = open.slice(0, context.limit);
 
     return {
       total,
@@ -78,7 +94,7 @@ export const invoiceOverdue: TaskSource = {
           0,
         );
         const openCent = grossCent - (decimalAsCent(row.paidAmount) ?? 0);
-        const open = (openCent / 100).toLocaleString('de-DE', {
+        const openText = (openCent / 100).toLocaleString('de-DE', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
@@ -103,7 +119,7 @@ export const invoiceOverdue: TaskSource = {
           // in den Titel geschrieben. Der immer gleiche Erklärsatz („Der
           // Zahlungseingang wird von Hand vermerkt …") steht einmal als
           // Hinweis über der Gruppe in der Oberfläche, nicht in jeder Zeile.
-          title: `Rechnung ${row.invoiceNumber ?? ''} überfällig · ${open} €`,
+          title: `Rechnung ${row.invoiceNumber ?? ''} überfällig · ${openText} €`,
           reason: `seit ${days} ${days === 1 ? 'Tag' : 'Tagen'}`,
           action: {
             kind: 'payment_check' as const,

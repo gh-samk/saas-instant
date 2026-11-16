@@ -83,6 +83,7 @@ function countPerState(
     status: InvoiceStatus;
     dueDate: Date;
     paidAmount: Prisma.Decimal | null;
+    cancelledInvoiceId?: string | null;
     lines: readonly { grossAmount: Prisma.Decimal }[];
   }[],
   todayDay: string,
@@ -108,6 +109,7 @@ import {
   getInvoice,
   withDocumentMarker,
   lockInvoice,
+  LINE_ORDER,
 } from './invoice.query';
 import type { InvoiceDraftDto } from './dto/invoice.dto';
 
@@ -283,9 +285,14 @@ export class InvoiceService {
    * nicht nach Zahldatum: Sonst wanderte eine Rechnung von 2026, die im
    * Januar 2027 bezahlt wird, in den Umsatz von 2027.
    *
-   * STORNOS ZAEHLEN MIT, mit ihrem negativen Betrag. Eine stornierte Rechnung
-   * und ihr Storno heben sich damit auf — das ist der Sinn der Sache, und ein
-   * Umsatz, der Stornos unterschlaegt, waere zu hoch.
+   * [H2] ORIGINAL UND STORNO FALLEN SYMMETRISCH HERAUS. Beide stehen im
+   * Zustand `cancelled` (siehe `paymentStateFrom`) und zaehlen weder als
+   * offen noch als ueberfaellig noch als bezahlter Umsatz. Der Umsatz der
+   * beiden ist zusammen null — sie auch einzeln wegzulassen liefert dieselbe
+   * Summe, ohne dass es auf den Vermerk der Erstattung ankommt. Vorher stand
+   * das Original (storniert, ausgeschlossen) allein gegen einen Storno mit
+   * negativem Betrag, und „Bezahlter Umsatz" wurde negativ, sobald dort die
+   * Erstattung vermerkt war.
    */
   async metrics(year?: number): Promise<InvoiceMetrics> {
     const todayDay = today();
@@ -305,6 +312,13 @@ export class InvoiceService {
 
     for (const row of rows) {
       const gross = sum(row.lines, 'grossAmount');
+      // [H2] Stornorechnungen (und jede andere negative Summe) tragen nichts
+      // zu Offen, Überfällig oder Umsatz bei: Ihr Original steht im Zustand
+      // `cancelled` und ist ebenfalls draußen — beide heben sich auf, und es
+      // kommt nicht darauf an, ob an der Stornorechnung eine Erstattung
+      // vermerkt wurde. Die Zeile hier gilt auch dann, wenn ein Aufrufer
+      // `cancelledInvoiceId` nicht mitgeladen hat.
+      if (gross < 0) continue;
       const state = paymentStateFrom(row, gross, todayDay);
       const paid = decimalAsCent(row.paidAmount) ?? 0;
 
@@ -544,6 +558,12 @@ export class InvoiceService {
             buyerReference: true,
             electronicAddress: true,
             electronicAddressScheme: true,
+            // [N8d] Zahlungsart und Mandat wie der übrige Schnappschuss
+            // FRISCH lesen: Ein Entwurf kann Wochen alt sein, und ein
+            // inzwischen widerrufenes Mandat darf nicht mehr als
+            // Vorabankündigung auf dem Beleg stehen (bzw. ein neues muss).
+            paymentMethod: true,
+            sepaMandateReference: true,
           },
         });
         if (!company) throw new CompanyNotFoundError();
@@ -597,11 +617,28 @@ export class InvoiceService {
         const year = Number(dateStringFromDate(draft.invoiceDate).slice(0, 4));
         const invoiceNumber = await assignNextNumber(tx, year);
 
+        // [M16] Eine aus dem Zahlungsziel abgeleitete Fälligkeit wird mit dem
+        // dann geltenden Ziel aus dem Rechnungsdatum neu gebildet; eine von
+        // Hand gesetzte bleibt. Danach die Plausibilitätsprüfung — auch für
+        // Entwürfe aus der Zeit vor der Prüfung beim Speichern.
+        const invoiceDay = dateStringFromDate(draft.invoiceDate);
+        const dueDay = draft.dueDateManual
+          ? dateStringFromDate(draft.dueDate)
+          : datePlusDays(invoiceDay, this.prices.read().paymentDueDays);
+        if (dueDay < invoiceDay) {
+          throw new InvoiceIncompleteError([
+            'Die Fälligkeit liegt vor dem Rechnungsdatum.',
+          ]);
+        }
+
         const finalizedAt = new Date();
         await tx.invoice.update({
           where: { id },
           data: {
             invoiceNumber,
+            dueDate: toDate(dueDay),
+            paymentMeansCode: paymentMeansCodeFor(company),
+            directDebitMandateReference: mandateReferenceFor(company),
             status: 'finalized',
             finalizedAt,
             // AUFBEWAHRUNG: Ende des Festschreibungsjahres + n Jahre
@@ -709,7 +746,9 @@ export class InvoiceService {
 
         const lines = await tx.invoiceLine.findMany({
           where: { invoiceId: id },
-          orderBy: { label: 'asc' },
+          // [M11] Die Stornorechnung übernimmt die Reihenfolge des Originals
+          // (vorher nach Bezeichnung, das mischte die Posten).
+          orderBy: LINE_ORDER,
         });
 
         const year = Number(todayDay.slice(0, 4));
@@ -772,11 +811,12 @@ export class InvoiceService {
         });
 
         await tx.invoiceLine.createMany({
-          data: lines.map((p) => {
+          data: lines.map((p, index) => {
             const netCent = -(decimalAsCent(p.netAmount) ?? 0);
             const taxCent = -(decimalAsCent(p.taxAmount) ?? 0);
             return {
               invoiceId: cancellation.id,
+              position: index,
               label: `Storno: ${p.label}`,
               // Einheit, Beschreibung und Zeitraum werden MITGENOMMEN: Ein
               // Storno nimmt dieselbe Leistung zurück, die berechnet wurde —
@@ -1018,9 +1058,16 @@ export class InvoiceService {
       return { key: tier.key, label: tier.label };
     });
 
-    const due =
-      dto.dueDate ??
-      datePlusDays(dto.invoiceDate, paymentDueDays);
+    // [M16] Von Hand gesetzte Fälligkeit gilt, sonst Rechnungsdatum + Ziel.
+    // Vor dem Rechnungsdatum ist sie nie sinnvoll (die Rechnung wäre mit
+    // Ausstellung überfällig) und wird hier wie beim Festschreiben abgewiesen.
+    const dueDateManual = dto.dueDate !== undefined;
+    const due = dto.dueDate ?? datePlusDays(dto.invoiceDate, paymentDueDays);
+    if (due < dto.invoiceDate) {
+      throw new InvoiceIncompleteError([
+        'Die Fälligkeit liegt vor dem Rechnungsdatum.',
+      ]);
+    }
 
     return {
       invoice: {
@@ -1028,6 +1075,7 @@ export class InvoiceService {
         servicePeriodFrom: toDate(dto.servicePeriodFrom),
         servicePeriodUntil: toDate(dto.servicePeriodUntil),
         dueDate: toDate(due),
+        dueDateManual,
         // Der Entwurf trägt den Schnappschuss bereits als VORSCHAU; die
         // Spalten sind nicht nullbar. Verbindlich wird er erst beim
         // Festschreiben, wo er frisch gelesen wird.
@@ -1037,19 +1085,12 @@ export class InvoiceService {
         // etwa nach einem Wechsel der Zahlungsart. Sie dann trotzdem auf den
         // Beleg zu schreiben hiesse, einen Einzug anzukündigen, der nicht
         // stattfindet.
-        directDebitMandateReference:
-          company.paymentMethod === 'direct_debit'
-            ? (company.sepaMandateReference?.trim() || null)
-            : null,
+        directDebitMandateReference: mandateReferenceFor(company),
         ...issuerSnapshot((await this.issuer.current()).issuer),
         // Zahlungsart nach UNTDID 4461: 59 = SEPA-Lastschrift (nur mit
         // Mandat), sonst 58 = SEPA-Überweisung. Währung: die der Preisliste
         // (Spaltenvorgabe EUR).
-        paymentMeansCode:
-          company.paymentMethod === 'direct_debit' &&
-          (company.sepaMandateReference?.trim() || null) !== null
-            ? '59'
-            : '58',
+        paymentMeansCode: paymentMeansCodeFor(company),
         // Die drei Texte des Bearbeiten-Screens. `null` statt `undefined`,
         // damit ein geleertes Feld auch wirklich geleert wird — bei einem
         // Entwurf ist Loeschen eine gueltige Aenderung.
@@ -1058,6 +1099,8 @@ export class InvoiceService {
         internalNote: dto.internalNote?.trim() || null,
       },
       lines: calculated.lines.map((p, index) => ({
+        // [M11] Eingabereihenfolge festhalten; ab 0.
+        position: index,
         label: p.label,
         priceTierKey: tierOfLine[index]?.key ?? null,
         priceTierLabel: tierOfLine[index]?.label ?? null,
@@ -1084,10 +1127,51 @@ export class InvoiceService {
   }
 }
 
+/** Zahlungsart nach UNTDID 4461: 59 nur mit Lastschrift UND Mandat, sonst 58. */
+function paymentMeansCodeFor(company: {
+  paymentMethod: string | null;
+  sepaMandateReference: string | null;
+}): '58' | '59' {
+  return company.paymentMethod === 'direct_debit' &&
+    (company.sepaMandateReference?.trim() || null) !== null
+    ? '59'
+    : '58';
+}
+
 /**
- * Ende der Aufbewahrungsfrist: 31.12. des Jahres der Festschreibung plus
- * `years` Jahre (Fachdatum, UTC-Mitternacht wie `@db.Date`).
+ * Die Mandatsreferenz nur, WENN AUCH EINGEZOGEN WIRD. Sie steht an der
+ * Organisation, auch wenn dort „Überweisung" eingetragen ist — sie dann auf den
+ * Beleg zu schreiben hieße, einen Einzug anzukündigen, der nicht stattfindet.
+ */
+function mandateReferenceFor(company: {
+  paymentMethod: string | null;
+  sepaMandateReference: string | null;
+}): string | null {
+  return company.paymentMethod === 'direct_debit'
+    ? company.sepaMandateReference?.trim() || null
+    : null;
+}
+
+/**
+ * Ende der Aufbewahrungsfrist: 31.12. des Jahres der Festschreibung (nach
+ * deutscher Zeit) plus `years` Jahre (Fachdatum, UTC-Mitternacht wie `@db.Date`).
  */
 export function retentionEnd(finalizedAt: Date, years: number): Date {
-  return new Date(Date.UTC(finalizedAt.getUTCFullYear() + years, 11, 31));
+  return new Date(Date.UTC(yearInBerlin(finalizedAt) + years, 11, 31));
+}
+
+/**
+ * Das Kalenderjahr eines Zeitpunkts in Europe/Berlin [N8b].
+ *
+ * Mit dem UTC-Jahr rutschte ein Festschreiben in der Silvesternacht
+ * (23:30 Uhr deutscher Zeit am 31.12. = 22:30 UTC, noch dasselbe Jahr, aber
+ * 00:30 Uhr am 1.1. = 23:30 UTC des Vortags) ins falsche Jahr und verkürzte
+ * die Aufbewahrungsfrist um ein Jahr. Maßgeblich ist der deutsche Kalender.
+ */
+export function yearInBerlin(at: Date): number {
+  const year = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+  }).format(at);
+  return Number(year);
 }

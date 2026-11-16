@@ -296,6 +296,52 @@ describe('BackupSettingsService', () => {
     );
   });
 
+  it('Geheimnis bleibt nur bei unveränderter Gegenstelle: Host, Port, Benutzer (Box) bzw. Endpunkt, Bucket (S3)', async () => {
+    const box = (over: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+      type: 'storagebox',
+      schedule: 'daily',
+      retentionDays: 14,
+      objectLock: false,
+      storagebox: { host: 'h.example', port: 23, username: 'u', path: '/b', authType: 'password', ...over, ...extra },
+    });
+    await service.update(dtoOf(box({}, { password: SECRETS[3] })), USER, SOURCE);
+    agent.targetReply = { type: 'storagebox', authType: 'password' };
+    for (const change of [{ host: 'fremd.example' }, { port: 2222 }, { username: 'anderer' }]) {
+      const before = agent.requests.filter((r) => r.method === 'PUT').length;
+      await expect(service.update(dtoOf(box(change)), USER, SOURCE)).rejects.toThrow(BackupSettingsInvalidError);
+      expect(agent.requests.filter((r) => r.method === 'PUT')).toHaveLength(before);
+    }
+    // Mit neu eingegebenem Passwort darf der Host wechseln.
+    await service.update(dtoOf(box({ host: 'neu.example' }, { password: 'neues-Passwort-1' })), USER, SOURCE);
+
+    // S3: Endpunkt geändert, Geheimnisse weggelassen.
+    const { accessKeyId: _a, secretAccessKey: _s, ...s3 } = s3Body().s3 as Record<string, unknown>;
+    await service.update(dtoOf(s3Body()), USER, SOURCE);
+    await expect(
+      service.update(dtoOf({ ...s3Body(), s3: { ...s3, endpoint: 'https://fremd.example.com' } }), USER, SOURCE),
+    ).rejects.toThrow(BackupSettingsInvalidError);
+    await expect(
+      service.update(dtoOf({ ...s3Body(), s3: { ...s3, bucket: 'anderer-bucket' } }), USER, SOURCE),
+    ).rejects.toThrow(BackupSettingsInvalidError);
+    await service.update(dtoOf({ ...s3Body(), s3 }), USER, SOURCE); // unverändert: geht
+  });
+
+  it('Host-Fingerabdruck wird geprüft und an den Agent weitergereicht', async () => {
+    const fp = 'SHA256:' + 'A'.repeat(43);
+    const body = (hostKeyFingerprint: string) => ({
+      type: 'storagebox',
+      schedule: 'daily',
+      retentionDays: 14,
+      objectLock: false,
+      storagebox: { host: 'h.example', port: 23, username: 'u', path: '/b', authType: 'password', password: 'x', hostKeyFingerprint },
+    });
+    expect((await validate(dtoOf(body('MD5:00:11')))).length).toBeGreaterThan(0);
+    expect(await validate(dtoOf(body(fp)))).toEqual([]);
+    await service.update(dtoOf(body(fp)), USER, SOURCE);
+    const puts = agent.requests.filter((r) => r.method === 'PUT');
+    expect(JSON.parse(puts[puts.length - 1]?.body ?? '{}').storagebox.hostKeyFingerprint).toBe(fp);
+  });
+
   it('Object Lock gibt es nur bei S3', async () => {
     const body = {
       type: 'storagebox',

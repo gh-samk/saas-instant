@@ -252,6 +252,11 @@ export function InvoicePriceSuggestion({
                   )}
               </>
             )}
+            {suggestion.setupInvoiced === true && (
+              <p className="mt-2 text-sm text-leise">
+                {t('components.invoicePriceSuggestion.setupDone')}
+              </p>
+            )}
           </div>
 
           {/* MESSUNG UND EINZELNE POSTEN: eingeklappt, wenn der Vertrag den

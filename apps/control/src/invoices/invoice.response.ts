@@ -93,6 +93,8 @@ export interface InvoiceResponse {
   servicePeriodFrom: string;
   servicePeriodUntil: string;
   dueDate: string;
+  /** Von Hand gesetzt (`true`) oder aus Rechnungsdatum + Zahlungsziel abgeleitet. */
+  dueDateManual: boolean;
   /** Technischer Zeitstempel (ISO), kein fachliches Datum. */
   finalizedAt: string | null;
   createdAt: string;
@@ -195,25 +197,40 @@ function centAsEuroText(cent: number): string {
  * Reihenfolge der Prüfungen ist wesentlich: `storniert` sticht alles — eine
  * stornierte Rechnung ist nicht überfällig, egal wie alt sie ist. Sonst
  * meldete das Dashboard genau die Rechnungen an, die schon erledigt sind.
+ *
+ * [H2] AUCH DIE STORNORECHNUNG SELBST IST `cancelled`. Sie ist `finalized`
+ * mit negativer Summe und dem Ausstellungstag als Fälligkeit, fordert aber
+ * nichts: Original und Storno heben sich auf. Beide stehen damit im selben
+ * Zustand und fallen GEMEINSAM aus Offen, Überfällig und Umsatz heraus — die
+ * Kennzahlen bleiben symmetrisch, ob die Erstattung vermerkt wurde oder nicht.
+ * Dafür wird `cancelledInvoiceId` gebraucht; wer nur Teilfelder lädt, muss es
+ * mitladen.
+ *
+ * [N8a] Eine Rechnung über 0 € ist ausgeglichen, nie überfällig, und eine
+ * negative Summe (Gutschrift) fordert nichts und kann nicht überfällig werden.
  */
 export function paymentStateFrom(
   invoice: {
     status: InvoiceStatus;
     dueDate: Date;
     paidAmount: Prisma.Decimal | null;
+    /** Gesetzt = die Rechnung IST eine Stornorechnung. */
+    cancelledInvoiceId?: string | null;
   },
   sumGrossCent: number,
   todayDay: string = today(),
 ): PaymentState {
   if (invoice.status === 'cancelled') return 'cancelled';
   if (invoice.status === 'draft') return 'draft';
+  if (invoice.cancelledInvoiceId != null) return 'cancelled';
 
   const paid = decimalAsCent(invoice.paidAmount) ?? 0;
+  if (sumGrossCent === 0) return 'paid';
   // Vollständig bezahlt heißt: mindestens der Bruttobetrag ist eingegangen.
   // Bei einer Gutschrift (negative Summe) gilt sie als ausgeglichen, sobald
   // der Betrag erstattet wurde.
-  if (sumGrossCent >= 0 ? paid >= sumGrossCent : paid <= sumGrossCent) {
-    if (sumGrossCent !== 0 || paid !== 0) return 'paid';
+  if (sumGrossCent > 0 ? paid >= sumGrossCent : paid <= sumGrossCent) {
+    return 'paid';
   }
   // TEILWEISE BEZAHLT GIBT ES NICHT MEHR.
   //
@@ -231,6 +248,10 @@ export function paymentStateFrom(
   // Der Enumwert bleibt im Schema stehen und wird hier nicht mehr erzeugt —
   // wie `ueberfaellig`, das aus demselben Grund unbenutzt dasteht. Im
   // Bestand kam er nie vor, nachgezaehlt.
+
+  // Eine Gutschrift ohne vermerkte Erstattung bleibt offen, wird aber nie
+  // überfällig — es ist nichts einzufordern.
+  if (sumGrossCent < 0) return 'open';
 
   return dateStringFromDate(invoice.dueDate) < todayDay
     ? 'overdue'
@@ -263,6 +284,7 @@ export function toInvoiceResponse(
     servicePeriodFrom: dateStringFromDate(invoice.servicePeriodFrom),
     servicePeriodUntil: dateStringFromDate(invoice.servicePeriodUntil),
     dueDate: dateStringFromDate(invoice.dueDate),
+    dueDateManual: invoice.dueDateManual,
     finalizedAt: invoice.finalizedAt?.toISOString() ?? null,
     createdAt: invoice.createdAt.toISOString(),
 

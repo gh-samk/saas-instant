@@ -35,3 +35,8 @@ export async function decryptBuffer(identity: string, data: Buffer): Promise<Buf
   dec.addIdentity(identity);
   return Buffer.from(await dec.decrypt(data));
 }
+
+/** Oeffentlicher Schluessel (Empfaenger) zu einem privaten age-Schluessel. */
+export async function recipientOf(identity: string): Promise<string> {
+  return identityToRecipient(identity);
+}

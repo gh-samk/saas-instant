@@ -413,11 +413,14 @@ export class SsoService {
       throw new SsoNoAccessError();
     }
 
-    // Rolle und Stammdaten bei JEDER Anmeldung aus dem Token übernehmen.
+    // Rolle und Stammdaten bei JEDER Anmeldung aus dem Token übernehmen. Ein
+    // Notzugangskonto behält seine Rolle: sie ist der Rückweg für den Fall, dass
+    // das Portal ausfällt oder falsch konfiguriert ist, und darf nicht von dem
+    // abhängen, was das Portal für dieselbe Adresse behauptet.
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        accessRole: role,
+        ...(user.emergency ? {} : { accessRole: role }),
         name: token.name,
         lastLoginAt: new Date(),
         failedAttempts: 0,
@@ -462,6 +465,7 @@ export class SsoService {
       username: true,
       ssoIssuer: true,
       deactivatedAt: true,
+      emergency: true,
     } as const;
     const bySubject = await this.prisma.user.findUnique({
       where: { ssoSubject: token.subject },
@@ -474,8 +478,24 @@ export class SsoService {
       return bySubject;
     }
 
+    // NOTZUGANGSKONTEN WERDEN NIE PER ADRESSE VERKNÜPFT. Das Konto ist der
+    // Rückweg bei Portalausfall und hat bewusst keinen Portal-Bezug. Würde es
+    // verknüpft, könnte jede Person, die im Portal ein Konto mit dieser Adresse
+    // hat, es übernehmen, und bei jeder Anmeldung würde seine Rolle aus dem
+    // Portal überschrieben (auch herabgesetzt). Gewählt ist "nie verknüpfen"
+    // statt "Rolle nie herabsetzen": letzteres ließe die Übernahme bestehen.
+    const emergencyAccount = await this.prisma.user.findFirst({
+      where: { email: token.email, emergency: true },
+      select: { id: true },
+    });
+    if (emergencyAccount) {
+      throw new SsoInvalidError(
+        'Adresse gehört einem Notzugangskonto, das nicht über das Portal angemeldet wird.',
+      );
+    }
+
     const local = await this.prisma.user.findFirst({
-      where: { email: token.email, ssoSubject: null },
+      where: { email: token.email, ssoSubject: null, emergency: false },
       select,
     });
     if (local) {

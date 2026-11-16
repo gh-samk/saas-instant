@@ -10,13 +10,17 @@ const MAX_PAGES = 100_000;
  * landet im unveraenderlichen Archiv). Gruppiert nach dem Jahr der Festschreibung (UTC).
  */
 export function controlInvoiceSource(control: ControlClient): InvoiceSource {
+  let skipped: { number: string; reason: string }[] = [];
   return {
+    skipped: () => skipped,
     async fetchAll() {
+      skipped = [];
       const byYear = new Map<string, InvoiceDoc[]>();
       const seen = new Set<string>();
       let after: string | undefined;
       for (let page = 0; page < MAX_PAGES; page++) {
         const res = await control.getInvoiceArchivePage(after);
+        for (const sk of res.skipped ?? []) skipped.push({ number: sk.number, reason: sk.reason });
         for (const item of res.items) {
           const t = new Date(item.finalizedAt);
           if (Number.isNaN(t.getTime())) throw new Error(`Rechnung ${item.number}: Festschreibedatum ungueltig`);

@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Inject, Post, Query, Req, Res } from '
 import type { Request, Response } from 'express';
 import { randomBytes } from 'crypto';
 import { cookieNames, clearCookie, readCookie } from '../common/cookies';
-import { RateLimit } from '../common/guards';
+import { RateLimit, WithoutCsrf } from '../common/guards';
 import { CONFIG, PortalConfig } from '../config';
 import { KeysService } from '../keys/keys.service';
 import { AuthorizeOutcome, OAuthError, OidcService } from './oidc.service';
@@ -65,6 +65,10 @@ export class OauthController {
     );
   }
 
+  @WithoutCsrf(
+    'Token-Endpunkt von OIDC: aufgerufen vom Server der Verwaltung (Back-Channel), ' +
+      'ohne Browser und ohne Cookie. Geschützt durch Client-Geheimnis, Code und PKCE.',
+  )
   @Post('token')
   @HttpCode(200)
   @RateLimit('token', 120)

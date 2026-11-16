@@ -31,7 +31,7 @@ export async function rmQuiet(file: string | undefined): Promise<void> {
 export async function encryptToFile(ctx: JobContext, plain: Readable, file: string): Promise<Spooled> {
   const enc = await encryptStream(ctx.recipient, plain);
   const m = meter();
-  await pipeline(enc, m.stream, createWriteStream(file, { mode: 0o600 }));
+  await pipeline(enc, m.stream, createWriteStream(file, { mode: 0o600 }), ctx.signal ? { signal: ctx.signal } : {});
   return { file, ...m.stats() };
 }
 

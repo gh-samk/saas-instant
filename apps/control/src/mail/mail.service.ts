@@ -489,6 +489,34 @@ export class MailService {
   }
 
   /**
+   * Hinweis an die Admins, dass die Verwaltung nach einem Neustart gesperrt ist.
+   *
+   * Enthält KEINE Kundendaten und keinen Schlüssel: nur den Anlass und den Link
+   * zur Entsperrseite. Darf deshalb bei gesperrtem Tresor versendet werden.
+   */
+  async sendVaultLockedNote(email: string, link: string): Promise<void> {
+    const text =
+      `Hallo,\n\n` +
+      `die ${displayName(mailBrand().name, '-')} wurde neu gestartet und ist ` +
+      `gesperrt: Die Kundendaten sind verschlüsselt, der Schlüssel liegt nur im ` +
+      `Arbeitsspeicher und ist beim Neustart verschwunden. Bis jemand mit der ` +
+      `Passphrase oder dem Wiederherstellungsschlüssel entsperrt, sind ` +
+      `Organisationen, Rechnungen, Postausgang und Zeitplan nicht erreichbar, ` +
+      `und neue Anfragen über die Webseite werden nicht angenommen.\n\n` +
+      `Zum Entsperren anmelden:\n\n    ${link}\n\n` +
+      `Kam der Neustart unerwartet, sieh im Betrieb nach, was ihn ausgelöst hat.\n`;
+    await this.send(
+      email,
+      `${displayName(mailBrand().name)} – gesperrt, bitte entsperren`,
+      text,
+      'Sperrhinweis',
+    );
+    if (!this.config.get<string>('SMTP_HOST')) {
+      this.logger.log(`[DEV-MAIL] Sperrhinweis an ${email}`);
+    }
+  }
+
+  /**
    * Warnt die BISHERIGE Zustelladresse, dass jemand die Adresse für
    * Anmeldecodes umstellen will ([W3]).
    *

@@ -37,19 +37,29 @@ die der Agent ohnehin ausführen würde“.
 Der Agent ist **ein** Container im Compose-Stapel der Verwaltung (`docker-compose.yml`):
 kein veröffentlichter Port, `read_only`, ohne Linux-Capabilities, mit
 `no-new-privileges`, Zustand in einem eigenen Volume (`backup-agent-state`, im
-Container `/state`). `install.sh` erzeugt die drei nötigen Geheimnisse:
+Container `/state`). `install.sh` erzeugt die vier nötigen Geheimnisse:
 
 | Variable | Zweck |
 |---|---|
 | `BACKUP_AGENT_SECRET` | Schlüssel der Anfragesignatur (HMAC) zwischen Verwaltung und Agent |
 | `AGENT_STATE_KEY` | verschlüsselt die Zugangsdaten im State-Volume des Agents (AES-256-GCM) |
 | `BACKUP_REPORT_KEY` | Schlüssel, mit dem der Agent bei der Verwaltung den Sicherungsplan abholt und Ergebnisse meldet (Header `x-backup-key`) |
+| `BACKUP_DB_PASSWORD` | Passwort der Datenbankrolle `backup_agent` (nur lesen, nur für `pg_dump`, siehe Abschnitt 2). Bei einer bestehenden Installation trägt `install.sh` es beim nächsten Aufruf nach |
 
 Die Verwaltung vergleicht `x-backup-key` mit ihrer Variable **`CONTROL_BACKUP_KEY`**.
 Diese muss denselben Wert wie `BACKUP_REPORT_KEY` haben. Tragen Sie ihn in
 `installations/<slug>/.env` ein, falls er dort nicht schon steht; ohne diesen Wert
 gibt es die beiden Wege `GET /api/internal/backup-plan` und `POST /api/backups` nicht
 (404), und der Agent bekommt weder einen Plan noch kann er melden.
+
+**Die Wege `/api/internal/…` gibt es nur im Compose-Netz.** Der Agent ruft die
+`control-api` direkt auf (`CONTROL_URL=http://control-api:3001`), nicht über das
+öffentliche `control-web`. Dessen nginx beantwortet `/api/internal` mit 404 und reicht
+den Header `x-backup-key` nie an die API weiter: Das Rechnungsarchiv liefert
+entschlüsselte Rechnungen allein gegen diesen statischen Schlüssel und gehört nicht
+an den Rand. Das gilt auch für `POST /api/backups` von außen. Wer die Wege von einem
+anderen Rechner aus nutzen will, braucht einen Zugang zum Compose-Netz (z. B. einen
+Tunnel), nicht die öffentliche Adresse.
 
 ### Wie die Verwaltung den Agent aufruft
 
@@ -74,7 +84,7 @@ keine Geheimnisse. Quelle: `apps/backup-agent/src/hmac.ts`, `app.ts`,
 |---|---|---|
 | Datenbank je Kundeninstanz | `pg_dump -Fc`, per `docker exec` im Datenbank-Container der Instanz, verschlüsselt | `<Präfix>/instances/<subdomain>/<JJJJ-MM-TT>T<HHMMSS>Z.dump.age` |
 | Uploads je Instanz | `tar czf` im Container, der das Volume einhängt, verschlüsselt (nur, wenn das Manifest `uploadsService` und `uploadsPath` nennt) | `….uploads.tar.age` |
-| Datenbank der Verwaltung | `pg_dump -Fc` über `CONTROL_DATABASE_URL`, verschlüsselt (age). **Der Dump enthält Chiffretext**, siehe unten | `<Präfix>/control/<Zeitstempel>.dump.age` |
+| Datenbank der Verwaltung | `pg_dump -Fc` über `CONTROL_DATABASE_URL` (Rolle `backup_agent`, siehe unten), verschlüsselt (age). **Der Dump enthält überwiegend Chiffretext**, siehe unten | `<Präfix>/control/<Zeitstempel>.dump.age` |
 | Rechnungsarchiv | je Jahr alle PDFs und XMLs plus `hashes.sha256`, verschlüsselt (age). Der Agent holt sie **über die Verwaltung**, nicht per SQL | `<Präfix>/invoices/<JJJJ>/<Zeitstempel>.tar.age` |
 
 Zu jeder Datei gehört eine `.meta.json` mit Größe und SHA-256. Die
@@ -84,13 +94,30 @@ welcher Dienst, steht im Manifest unter `provisioning.backup`
 ([manifest.md](../manifest.md)); **ohne diesen Abschnitt gibt es keinen
 Sicherungsplan** und die Verwaltung lehnt Sicherung und Wiederherstellung ab.
 
-**Der Dump der Verwaltung enthält Chiffretext.** Personenbezogene Felder und
-Rechnungsinhalte liegen in der Datenbank verschlüsselt (`enc:v1:…`); ein
-zurückgespielter Dump ist ohne den Tresorschlüssel in diesen Feldern unlesbar. Zur
-Wiederherstellung braucht es die **Passphrase** (oder eine weitere Passphrase) oder
-den **Wiederherstellungsschlüssel** aus der Einrichtung des Tresors. Ohne beides gibt
-es keinen Weg zurück, auch nicht für den Betreiber. Zusätzlich zum age-Schlüssel der
-Sicherungen (Abschnitt 4) gehören sie in Ihre eigene, getrennte Ablage.
+**Der Agent liest die Verwaltungsdatenbank mit einer eigenen, schreibgeschützten Rolle.**
+Der Dienst `control-db-roles` (ein Einmalauftrag in `docker-compose.yml`, Skript
+`ops/control-db/backup-agent-role.sql`) legt bei jedem Start die Rolle `backup_agent` an
+bzw. gleicht sie an: kein Superuser, `pg_read_all_data` (genau das, was `pg_dump` liest,
+auch für künftige Tabellen) und `default_transaction_read_only`. Auch ein
+kompromittierter Agent kann die Datenbank damit nicht ändern oder löschen. Das Passwort
+ist `BACKUP_DB_PASSWORD` aus der `.env`; `CONTROL_DATABASE_URL` des Agents baut darauf auf.
+
+**Teilweise gescheiterte Sicherungen.** Scheitert bei einer Instanz nur der Uploads-Teil
+(z. B. `tar`), bleibt der bereits hochgeladene Datenbank-Dump liegen: Seine Meta-Datei
+trägt `"partial": true` und nennt nur ihn, die Verwaltung bekommt die Meldung, der Auftrag
+steht aber als **fehlgeschlagen** („Teilweise gescheitert: …“) im Log des Agents. Es
+wird danach nicht aufgeräumt, damit der unvollständige Satz keinen vollständigen
+verdrängt. Eine Wiederherstellung daraus spielt nur die Datenbank ein.
+
+**Der Dump der Verwaltung enthält überwiegend Chiffretext.** Personenbezogene Felder und
+Rechnungsinhalte liegen verschlüsselt vor (`enc:v1:…`). Im Klartext bleiben festgeschriebene
+Rechnungen und Protokolleinträge aus der Zeit vor der Einrichtung des Tresors (per
+Datenbank-Trigger unveränderlich; Einstellungen → Sicherheit zeigt die Zahl),
+Protokolleinträge, die bei gesperrtem Tresor entstehen (Anmeldungen), und Mitarbeiterkonten. Zur Wiederherstellung der verschlüsselten Felder braucht es die
+**Passphrase** (oder eine weitere Passphrase) oder den **Wiederherstellungsschlüssel**
+aus der Einrichtung des Tresors. Ohne beides gibt es dafür keinen Weg zurück, auch nicht
+für den Betreiber. Zusätzlich zum age-Schlüssel der Sicherungen (Abschnitt 4) gehören sie
+in Ihre eigene, getrennte Ablage.
 
 **Das Rechnungsarchiv holt der Agent über die Verwaltung.** Er liest die Datenbank
 dafür nicht mehr selbst; `CONTROL_DATABASE_URL` dient nur noch dem `pg_dump`. Er ruft
@@ -102,14 +129,50 @@ Archiv), verschlüsselt mit age und legt wie bisher mit Object Lock ab. So bleib
 GoBD-Archiv **auch ohne die Verwaltung lesbar**: mit dem age-Schlüssel, ohne
 Tresor-Passphrase. Die Jahreszuordnung folgt dem Jahr der Festschreibung (UTC).
 
+**Was bei gesperrter Verwaltung weiterläuft.** Nach einem Neustart antwortet die
+Verwaltung bis zum Entsperren mit 423 (Tresor gesperrt), der Plan-Weg ist aber ausgenommen,
+und der Agent ist ohnehin auf Ausfälle vorbereitet:
+
+- **Instanzsicherungen laufen weiter.** Der Agent merkt sich den zuletzt gültigen Plan
+  (verschlüsselt im State-Volume, `plan.enc`). Ist der Plan nicht abrufbar (423, Netzfehler,
+  Neustart der Verwaltung), sichert er mit diesem Plan weiter und schreibt eine Warnung
+  („Sicherungsplan nicht abrufbar; es gilt der zuletzt gültige Plan …“). Instanzen, die seit
+  dem letzten erfolgreichen Abruf neu hinzukamen, fehlen bis zum nächsten Abruf. Gibt es noch
+  keinen gemerkten Plan, steht eine Fehlerzeile („Instanzen werden diesmal NICHT gesichert“).
+- **Die Datenbank der Verwaltung wird weiter gesichert** (der Agent liest sie selbst per
+  `pg_dump`, ohne die Verwaltung).
+- **Meldungen gehen nicht verloren.** Kann der Agent ein Ergebnis nicht an `POST /api/backups`
+  melden (423, Netz, 5xx), legt er die Meldung verschlüsselt im State-Volume ab
+  (`pending-reports.enc`, höchstens 500) und reicht sie nach: nach der nächsten erfolgreichen
+  Meldung bzw. Planabfrage und spätestens alle 10 Minuten. Eine von der Verwaltung endgültig
+  abgelehnte Meldung (4xx) wird verworfen und geloggt.
+- **Nur das Rechnungsarchiv wartet.** Es braucht die entsperrte Verwaltung (Klartext der
+  Dokumente), siehe unten. `GET /api/internal/backup-plan` und `POST /api/backups` sind bei
+  gesperrtem Tresor ausdrücklich erlaubt; der gemerkte Plan und die Meldungswarteschlange
+  sind der Rückfall bei Netz- und sonstigen Fehlern.
+- **Wiederherstellung** und **Einstellungen** gehen nur bei entsperrter Verwaltung; eine
+  Wiederherstellung braucht außerdem einen abrufbaren (oder gemerkten) Plan.
+
 Ist die Verwaltung gesperrt (HTTP 423, etwa nach einem Neustart bis zum Entsperren),
-meldet der Agent den Lauf als **`deferred`**. Das ist kein Fehler: Der Dump der
+meldet der Agent den Lauf des Rechnungsarchivs als **`deferred`**. Das ist kein Fehler: Der Dump der
 Verwaltung ist trotzdem gesichert, nur das Rechnungsarchiv steht noch aus. Der Agent
 versucht es danach alle 10 Minuten erneut (ohne neuen Dump), spätestens beim nächsten
 Planlauf. Wer eine Verwaltung nach einem Neustart nicht entsperrt, bekommt also kein
 neues Rechnungsarchiv.
 
-Das Rechnungsarchiv wird nur neu abgelegt, wenn sich sein Inhalt geändert hat.
+**Übersprungene Belege.** Kann die Verwaltung einzelne Rechnungen nicht ausliefern
+(`skipped` in der Antwort, z. B. nicht entschlüsselbar), legt der Agent den Rest ab, loggt
+die betroffenen Nummern und verbucht den Lauf als **fehlgeschlagen** (keine Erfolgsmeldung).
+Beim nächsten Lauf fragt er sie erneut an; sind sie dann verfügbar, wird das geänderte
+Archiv neu abgelegt.
+
+Das Rechnungsarchiv wird nur neu abgelegt, wenn sich sein Inhalt geändert hat. Ein
+gelungener Lauf **ohne neue Dateien** (oder ganz ohne Rechnungen) wird trotzdem als Lauf
+gemeldet (Art `invoices`, Datum des Laufs, bei unverändertem Archiv mit Schlüssel und
+Prüfsumme des neuesten vorhandenen), damit „Sicherung der Verwaltung überfällig“ nicht
+dauerhaft anschlägt, nur weil es keine neuen Rechnungen gibt. Die Verwaltung drosselt den
+Abruf (120 Anfragen je Minute); bei HTTP 429 wartet der Agent die Zeit aus `Retry-After`
+(sonst 2, 4, 8 … Sekunden, höchstens 2 Minuten) und versucht es bis zu achtmal erneut.
 Zusammenhang mit der GoBD: [gobd.md](gobd.md), Abschnitt 9.
 
 **Nicht gesichert wird:**
@@ -177,6 +240,22 @@ Gedacht für eine Storage Box (z. B. bei Hetzner), funktioniert mit jedem SFTP-Z
 | Benutzer | Unterkonto nur für die Sicherungen |
 | Anmeldeart | Schlüssel (empfohlen) oder Passwort; Schlüssel als privater Schlüssel im Formular |
 | Pfad | Verzeichnis für die Sicherungen, ohne `..` |
+| Host-Fingerabdruck (unter „Erweitert“) | optional, `SHA256:…` wie von `ssh-keygen -lf` oder vom Anbieter genannt |
+
+**Host-Key: ohne gepinnten Schlüssel keine Sicherung.** Der Agent verbindet sich nur mit
+einem SFTP-Server, dessen Host-Key er kennt (sonst könnte jemand im Netz Passwort und
+Sicherungen abgreifen). Tragen Sie den Fingerabdruck ein, oder lassen Sie das Feld leer
+und führen Sie „Verbindung testen“ aus: Nur dabei vertraut der Agent dem ersten gesehenen
+Schlüssel (Trust on first use) und hält ihn fest (er steht dann in der Anzeige; vergleichen
+Sie ihn mit dem Wert Ihres Anbieters). Ohne festgehaltenen Schlüssel scheitern Sicherung,
+Prüfung und Wiederherstellung mit der Meldung „SFTP-Host-Key ist nicht gepinnt“. Ändern Sie
+Host oder Port, entfällt der Pin; ein anderer Schlüssel am selben Host wird abgelehnt.
+
+**Gespeicherte Zugangsdaten gelten nur für dasselbe Ziel.** Ändern Sie Host, Port oder
+Benutzer (Box) bzw. Endpunkt, Bucket oder Zugangsschlüssel-ID (S3), übernimmt der Agent das
+gespeicherte Passwort bzw. den geheimen Schlüssel nicht: Sie müssen es erneut eingeben
+(„Gib das Passwort erneut ein“). Sonst ließe sich ein Ziel auf einen fremden Host
+umbiegen und mit dem alten Geheimnis anmelden.
 
 Bei einer Storage Box gibt es **kein Object Lock** durch den Agent. Schutz des
 Rechnungsarchivs entsteht dort durch ein Unterkonto, das nur der Agent nutzt,
@@ -185,7 +264,13 @@ und durch Snapshots, die Sie beim Anbieter einrichten.
 ### Zeitplan und Aufbewahrung
 
 - **Zeitplan:** täglich um 02:30 Uhr oder zusätzlich um 14:30 Uhr (Serverzeit des
-  Agents, Zeitzone aus `APP_TIMEZONE`). Zum Planen holt der Agent die Instanzliste
+  Agents, Zeitzone aus `APP_TIMEZONE`). Ein verpasster Slot wird beim nächsten Takt
+  nachgeholt (bis zu 6 Stunden danach), etwa am letzten Märzsonntag, an dem es 02:30 Uhr
+  nicht gibt. Nach einem Neustart des Agents läuft nichts sofort los.
+- **Zeitlimit und Log:** Jeder Auftrag hat ein Zeitlimit (`JOB_TIMEOUT_MINUTES`, Vorgabe 120);
+  danach wird er abgebrochen (Datenströme und `pg_dump` werden beendet) und als
+  fehlgeschlagen vermerkt. Jeder gescheiterte oder verschobene Lauf, auch ein geplanter,
+  steht mit Auftrag, Art und Grund im Log des Agents (`docker compose logs backup-agent`). Zum Planen holt der Agent die Instanzliste
   von der Verwaltung (`GET /api/internal/backup-plan`) und sichert jede Instanz,
   danach die Verwaltung (Datenbank und Rechnungsarchiv).
 - **Aufbewahrung** in Tagen (1 bis 3650): Der Agent räumt Sicherungssätze unter
@@ -251,9 +336,11 @@ Stille. Eigenschaften des Wegs:
 - höchstens 60 Anfragen je Minute.
 
 Meldungen für die **Verwaltungs-Datenbank** und das **Rechnungsarchiv** haben keine
-Instanz; sie landen nur im Audit-Log (`backup.reported`) und lösen keine Aufgabe aus.
-Überwachen Sie diese beiden deshalb selbst: Im Sicherungsziel muss unter `control/`
-täglich ein neuer Satz stehen.
+Instanz; sie landen im Audit-Log (`backup.reported`). Bleibt eine der beiden drei Tage
+aus (bei eingerichtetem Ziel), erzeugt die Verwaltung die Aufgabe „Sicherung der Verwaltung
+überfällig“. Auch ein Rechnungsarchiv-Lauf ohne neue Dateien zählt als Meldung (siehe
+Abschnitt 2). Prüfen Sie zusätzlich ab und zu selbst, dass im Sicherungsziel unter
+`control/` täglich ein neuer Satz steht.
 
 ## 6. Wiederherstellung in eine NEUE Instanz
 
@@ -291,10 +378,33 @@ wiederherstellen“; `POST /api/instances/:id/restores`):
 Agent für die Dauer des Auftrags, wird nie gespeichert, protokolliert oder
 zurückgegeben, und Fehlertexte werden davon gesäubert.
 
-**Der Agent stellt nur in einen fremden Stack zurück.** Er lehnt ab, wenn das
-Ziel der eigene Stack des Agents oder der Verwaltung ist, wenn er seinen eigenen
-Stack nicht ermitteln kann (er verweigert dann lieber) oder wenn der Container nicht
-das Compose-Projektlabel des Ziels trägt.
+**Der Agent stellt nur in einen neuen, fremden Stack zurück und prüft den Auftrag selbst.**
+Er vertraut dem signierten Aufruf nicht blind. Er lehnt ab, wenn
+
+- der **age-Schlüssel nicht zu diesem Sicherungsziel gehört** (der daraus berechnete
+  öffentliche Schlüssel muss dem Empfänger des Ziels entsprechen; sonst ließe sich mit
+  eigenem Schlüssel und eigenem Speicher Beliebiges einspielen),
+- das Ziel der eigene Stack des Agents oder der Verwaltung ist, oder wenn er seinen eigenen
+  Stack nicht ermitteln kann (er verweigert dann lieber),
+- das Ziel auf der **Sperrliste** steht: eingebaut `saas-instant-*` (Verwaltungen, Portal und
+  Anmeldedienst portal-auth, so benennt `install.sh` die Projekte), erweiterbar mit
+  `RESTORE_DENY_PROJECTS` (Namen oder Präfixe mit `*`, kommagetrennt). Ein Compose-Projektmuster
+  für Instanzen darf also nicht mit `saas-instant-` beginnen,
+- das Ziel eine **laufende Instanz laut Sicherungsplan** ist (es gibt keinen Weg, eine
+  bestehende Instanz zu überschreiben) oder der Plan weder abrufbar noch gemerkt ist,
+- der Container nicht das Compose-Projektlabel des Ziels trägt,
+- die **Prüfsumme der Sicherung** nicht stimmt: Die Verwaltung gibt im Auftrag die SHA-256
+  mit, die der Agent bei der Sicherung gemeldet hat. Der Agent vergleicht sie vor dem
+  Herunterladen und Entschlüsseln mit der Meta-Datei und beim Herunterladen mit der Datei. Wer nur
+  den Speicher beschreiben kann, kann Datei und Meta-Datei angleichen, nicht aber die
+  Meldung in der Verwaltung. Sicherungen ohne gemeldete Prüfsumme (Altbestand) lassen sich
+  daher nicht über die Oberfläche zurückspielen. Dasselbe gilt für die **Uploads-Datei**:
+  Ihre SHA-256 meldet der Agent mit (`Backup.uploadsSha256`), die Verwaltung gibt sie im
+  Auftrag mit, und der Agent prüft das Archiv vor dem Entpacken dagegen; bei Abweichung
+  bricht er ab. **Altbestand** ohne Uploads-Prüfsumme: Liegt ein Uploads-Archiv im Speicher,
+  wird es **nicht** eingespielt (nur die Datenbank); der Auftrag meldet das im Ergebnis
+  (`note`), im Log des Agents und im Hinweis der Wiederherstellung. Sicherungen ohne
+  Uploads sind davon nicht betroffen.
 
 **Prüfen Sie die neue Instanz**, bevor Sie übernehmen: unter der neuen Subdomain
 anmelden, Stichproben ansehen, das Datum der Sicherung bedenken (alles danach fehlt).
@@ -405,14 +515,17 @@ Gelöst ist das so, mit begrenztem Schaden:
   **`docker-socket-proxy`** (`tcp://docker-socket-proxy:2375`). Nur dieser Dienst
   mountet den Socket (lesend gemountet) und lauscht nur im internen Netz
   `docker-api`, an dem sonst nur der Agent hängt.
-- Die Allowlist des Proxys erlaubt `CONTAINERS`, `EXEC` und `POST` (für Starten,
-  Stoppen und `exec`); `IMAGES`, `NETWORKS`, `VOLUMES`, `SERVICES`, `SWARM`, `TASKS`,
-  `SECRETS`, `CONFIGS`, `BUILD`, `SYSTEM` und weitere sind gesperrt. Ein Test
-  (`tests/install.test.sh`) hält diese Zeilen fest.
+- Die Allowlist steht in `ops/docker-proxy/haproxy.cfg.template` (eigene Regeln, nicht die
+  Schalter des Images: `POST=1` mit `CONTAINERS=1` erlaubte auch `/containers/create` und
+  `DELETE`). Erlaubt sind genau sieben Aufrufe: `GET /containers/json`,
+  `GET /containers/<id>/json`, `POST /containers/<id>/start`, `…/stop`, `…/exec`,
+  `POST /exec/<id>/start` und `GET /exec/<id>/json`. Alles andere (Container anlegen,
+  beenden, löschen, Images, Volumes, Netze, System …) bekommt 403. Ein Test
+  (`tests/install.test.sh`) hält das fest.
 - Der Agent bedient nur Container mit dem erwarteten Compose-Label und startet und
   stoppt nur Container des Ziel-Stacks.
 
-**Was bleibt:** `CONTAINERS` plus `EXEC` erlauben im Prinzip, in **jedem** Container
+**Was bleibt:** `exec` und `start`/`stop` erlauben im Prinzip, in **jedem** Container
 auf dem Host Befehle auszuführen. Wer den Agent kompromittiert, kann das gesamte
 Docker-Host-System beeinflussen, auch wenn der Agent selbst es nie tut. Der
 Proxy begrenzt die Schnittstelle, er macht sie nicht harmlos. Deshalb: den Agent

@@ -5,6 +5,7 @@ import type { Request, Response } from 'express';
 import { sourceFrom } from '../common/inquiry-source';
 import { WithoutCsrf } from '../common/decorators/without-csrf.decorator';
 import { BusinessError } from '../common/errors/business-error';
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import { ConsentService } from './consent.service';
 import { page } from './pages';
 
@@ -136,6 +137,11 @@ export class ConsentPublicController {
   }
 
   /** Ein-Klick-Abmeldung, angeklickt von einem Menschen. */
+  @AllowWhileLocked(
+    'Schreibt nur Status, Abmeldezeitpunkt und Zustellstatus (unverschlüsselt); ' +
+      'der Token ist ein unverschlüsseltes Suchfeld. Ein Widerspruch darf nicht ' +
+      'warten, bis jemand den Tresor entsperrt.',
+  )
   @Get('unsubscribe/:token')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async unsubscribeClick(
@@ -161,6 +167,11 @@ export class ConsentPublicController {
       'CSRF-Cookie, und die Route wertet keine Sitzung aus — es gibt also ' +
       'keine fremde Sitzung, die sich missbrauchen liesse. An die Stelle des ' +
       'Tokens im Header tritt der 256-Bit-Token in der Adresse.',
+  )
+  @AllowWhileLocked(
+    'Schreibt nur Status, Abmeldezeitpunkt und Zustellstatus (unverschlüsselt); ' +
+      'der Token ist ein unverschlüsseltes Suchfeld. Ein Widerspruch darf nicht ' +
+      'warten, bis jemand den Tresor entsperrt.',
   )
   @Post('unsubscribe/:token')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })

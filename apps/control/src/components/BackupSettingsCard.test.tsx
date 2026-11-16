@@ -88,7 +88,8 @@ describe('BackupSettingsCard', () => {
     renderCard();
     await screen.findByLabelText('Bucket');
     expect(screen.getByText(/Leer lassen = unverändert/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Bucket'), { target: { value: 'neu' } });
+    // Region ändern: Endpunkt und Bucket bleiben, also dürfen die Geheimnisse leer bleiben.
+    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
     await waitFor(() => expect(saveBackupSettings).toHaveBeenCalledTimes(1));
     const sent = saveBackupSettings.mock.calls[0]?.[0] as { s3: Record<string, unknown> };
@@ -298,6 +299,30 @@ describe('BackupSettingsCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
     expect(screen.getByLabelText('Bucket')).toHaveValue('sicherung');
     expect(screen.queryByRole('button', { name: 'Speichern und testen' })).not.toBeInTheDocument();
+  });
+
+  it('validate: geänderte Gegenstelle übernimmt keine gespeicherten Geheimnisse (S3: Endpunkt, Bucket; Box: Host, Port, Benutzer)', () => {
+    const s3 = formFrom(CONFIGURED);
+    expect(validate(s3, t, CONFIGURED.target).problems).toEqual([]);
+    expect(validate({ ...s3, bucket: 'anderer' }, t, CONFIGURED.target).problems).toContain(t('backup.errSecretAgain'));
+    expect(validate({ ...s3, endpoint: 'https://fremd.example.com' }, t, CONFIGURED.target).problems).toContain(t('backup.errSecretAgain'));
+    expect(validate({ ...s3, bucket: 'anderer', accessKeyId: 'A', secretAccessKey: 'B' }, t, CONFIGURED.target).problems).toEqual([]);
+
+    const box = { ...CONFIGURED.target!, type: 'storagebox' as const, endpoint: null, bucket: null, region: null, host: 'u1.your-storagebox.de', port: 23, username: 'u1', path: '/b', prefix: null, pathStyle: null, authType: 'password' as const };
+    const form = { ...formFrom({ ...CONFIGURED, target: box }) };
+    expect(validate(form, t, box).problems).toEqual([]);
+    for (const change of [{ host: 'fremd.example.com' }, { port: '2222' }, { username: 'anderer' }]) {
+      expect(validate({ ...form, ...change }, t, box).problems).toContain(t('backup.errSecretAgain'));
+    }
+    expect(validate({ ...form, host: 'neu.example.com', password: 'neu' }, t, box).problems).toEqual([]);
+  });
+
+  it('validate: Host-Fingerabdruck optional, mit Formatprüfung, und wird mitgesendet', () => {
+    const form = { ...formFrom(null), type: 'storagebox' as const, host: 'box.example.com', username: 'u1', path: '/b', privateKey: 'KEY' };
+    const fp = 'SHA256:' + 'A'.repeat(43);
+    expect(validate(form, t).input?.storagebox).not.toHaveProperty('hostKeyFingerprint');
+    expect(validate({ ...form, hostKeyFingerprint: fp }, t).input?.storagebox?.hostKeyFingerprint).toBe(fp);
+    expect(validate({ ...form, hostKeyFingerprint: 'MD5:00' }, t).problems).toContain(t('backup.errHostKey'));
   });
 
   it('validate: Storage Box braucht den passenden Zugang', () => {

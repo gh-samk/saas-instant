@@ -1,3 +1,4 @@
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import {
   Controller,
   Get,
@@ -58,6 +59,7 @@ export class SsoController {
   }
 
   /** Schickt den Browser zur Anmeldeseite des Portals (bzw. zum Step-up). */
+  @AllowWhileLocked('Portal-Anmeldung ist Teil der Anmeldung vor dem Entsperren; nur Mitarbeiterkonten.')
   @Get('start')
   @Throttle(SSO_LIMIT)
   async start(
@@ -89,6 +91,7 @@ export class SsoController {
   }
 
   /** Die Rücksprungadresse des Portals. */
+  @AllowWhileLocked('Rücksprung der Portal-Anmeldung vor dem Entsperren; nur Mitarbeiterkonten.')
   @Get('callback')
   @Throttle(SSO_LIMIT)
   async callback(
@@ -169,6 +172,7 @@ export class SsoController {
    * Front-Channel-Logout: das Portal lädt diese Adresse in einem unsichtbaren
    * iframe, sobald die Portal-Sitzung endet.
    */
+  @AllowWhileLocked('Das Portal beendet Sitzungen auch bei gesperrtem Tresor.')
   @Get('frontchannel-logout')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   async frontChannelLogout(

@@ -341,13 +341,16 @@ try {
   await s.step('4 Instanz demo1 anlegen, "Jetzt sichern" -> Job succeeded -> Liste -> verschlüsselt in MinIO', async () => {
     const { CryptoService } = controlReq('./dist/crypto/crypto.service.js');
     const crypto = new CryptoService({ get: (k) => ctl.env[k] });
-    const company = await prisma.company.create({
-      data: {
-        name: 'E2E Demo GmbH', status: 'paying', street: 'Musterweg', houseNumber: '7', postalCode: '10115',
-        city: 'Berlin', country: 'Deutschland', billingEmail: 'buchhaltung@e2e-test.invalid',
-        contactName: 'Max Muster', contactEmail: 'max@e2e-test.invalid',
-      },
+    // Die Organisation läuft über die API (erweiterter Client, Felder verschlüsselt). Ein Anlegen per
+    // unerweitertem Prisma-Client schriebe Klartext in verschlüsselte Spalten; seit der strengen
+    // Klartext-Politik (N2) gilt das nach dem Einmal-Lauf als Befund und ist nicht mehr lesbar.
+    const created = await c.api('POST', '/api/companies', {
+      name: 'E2E Demo GmbH', status: 'paying', street: 'Musterweg', houseNumber: '7', postalCode: '10115',
+      city: 'Berlin', country: 'Deutschland', billingEmail: 'buchhaltung@e2e-test.invalid',
+      contactName: 'Max Muster', contactEmail: 'max@e2e-test.invalid',
     });
+    assert(created.status === 201 && created.body?.id, `Organisation anlegen: HTTP ${created.status} ${JSON.stringify(created.body).slice(0, 300)}`);
+    const company = { id: created.body.id };
     const instance = await prisma.instance.create({
       data: {
         companyId: company.id, subdomain: 'demo1', coolifyApplicationId: 'mock-demo1-uuid', status: 'active',
@@ -564,6 +567,7 @@ try {
     const sub = await agentCall('POST', '/v1/jobs', {
       kind: 'restore',
       objectKey: ctx.backup.objectKey,
+      sha256: ctx.backup.sha256,
       ageIdentity: ctx.ageIdentity,
       target: { subdomain: 'demo9', composeProject: AGENT_PROJECT, dbService: 'backup-agent', dbName: 'app', dbUser: 'app' },
     });
@@ -620,7 +624,7 @@ try {
     assert(!row.objectKey.startsWith(`${PREFIX}/`), 'SFTP-Schlüssel sollten ohne S3-Präfix sein');
     ctx.sftpBackup = row;
     const { SftpStorage } = await import(pathToFileURL(join(AGENT_DIR, 'dist', 'storage', 'sftp.js')).href);
-    ctx.sftp = new SftpStorage({ host: '127.0.0.1', port: SFTP_PORT, username: SFTP_USER, password: SECRETS.sftpPassword, path: '/upload', authType: 'password' });
+    ctx.sftp = new SftpStorage({ host: '127.0.0.1', port: SFTP_PORT, username: SFTP_USER, password: SECRETS.sftpPassword, path: '/upload', authType: 'password', hostKeyFingerprint: ctx.pinned });
     const stream = await ctx.sftp.get(row.objectKey);
     const chunks = [];
     for await (const ch of stream) chunks.push(Buffer.from(ch));

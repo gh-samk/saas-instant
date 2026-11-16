@@ -52,6 +52,7 @@ async function snapshot(context: TasksContext): Promise<Snapshot> {
 const FORMAT_LABEL = { pdf: 'PDF', xml: 'XML', xrechnung: 'XRechnung' } as const;
 const STATUS_LABEL = {
   mismatch: 'Prüfsumme stimmt nicht',
+  undecryptable: 'Beleg nicht lesbar – Inhalt wurde verändert oder ist beschädigt',
   missing_content: 'Dokument fehlt',
   missing_hash: 'keine Prüfsumme gespeichert',
   ok: 'in Ordnung',
@@ -81,7 +82,13 @@ export const documentTampered: TaskSource = {
     const tasks: Task[] = documents.findings.map((finding) => {
       const company = companyOf.get(finding.id);
       const detail = finding.formats
-        .map((f) => `${FORMAT_LABEL[f.format]}: ${STATUS_LABEL[f.status]}`)
+        .map((f) => {
+          // Unlesbare Dokumente liefert der Integritätsdienst als `mismatch`
+          // plus Feld `undecryptable`; hier bekommen sie ihren eigenen Text.
+          const unreadable = finding.undecryptable?.includes(f.format) === true;
+          const status = unreadable ? 'undecryptable' : f.status;
+          return `${FORMAT_LABEL[f.format]}: ${STATUS_LABEL[status]}`;
+        })
         .join('; ');
       return {
         kind: 'document_tampered',

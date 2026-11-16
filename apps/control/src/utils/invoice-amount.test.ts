@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { linesAmounts, roundCent, sums } from './invoice-amount';
+import { allocatedAmounts, linesAmounts, roundCent, sums } from './invoice-amount';
 
 describe('rundeCent', () => {
   it('rundet halbe Cent aufwärts — auch die, die Gleitkomma knapp verfehlt', () => {
@@ -89,5 +89,40 @@ describe('summen', () => {
         { quantity: '', unitPriceNet: '', taxRate: '19' },
       ]),
     ).toEqual({ netCent: 10000, taxCent: 1900, grossCent: 11900 });
+  });
+});
+
+// [M10] Dieselben Werte wie `invoice.amount.spec.ts` im Backend: Vorschau und
+// Speicherung müssen sich auf den Cent decken.
+describe('allocatedAmounts [M10]', () => {
+  const f = (price: string, rate = '19') => ({ quantity: '1', unitPriceNet: price, taxRate: rate });
+
+  it('2 × 12,50 € zu 19 % ergibt 4,75 € Steuer, nicht 4,76 €', () => {
+    const lines = [f('12.50'), f('12.50')];
+    expect(sums(lines)).toEqual({ netCent: 2500, taxCent: 475, grossCent: 2975 });
+    const a = allocatedAmounts(lines);
+    expect(a.reduce((s, p) => s + p.taxCent, 0)).toBe(475);
+    expect(a.reduce((s, p) => s + p.grossCent, 0)).toBe(2975);
+  });
+
+  it('drei Posten zu 3,33 €: zusammen 1,90 € wie die Gruppe', () => {
+    const lines = [f('3.33'), f('3.33'), f('3.33')];
+    const a = allocatedAmounts(lines);
+    expect(a.reduce((s, p) => s + p.taxCent, 0)).toBe(sums(lines).taxCent);
+    expect(sums(lines).taxCent).toBe(190);
+  });
+
+  it('verteilt je Satz getrennt und lässt unvollständige Posten unberührt', () => {
+    const lines = [f('12.50'), f('12.50', '7'), f('12.50'), { quantity: '', unitPriceNet: '', taxRate: '19' }];
+    const a = allocatedAmounts(lines);
+    expect(a[3]!.complete).toBe(false);
+    expect(a[0]!.taxCent + a[2]!.taxCent).toBe(475);
+    expect(a[1]!.taxCent).toBe(88);
+  });
+
+  it('spiegelt Stornoposten (negative Mengen)', () => {
+    const neg = (price: string) => ({ quantity: '-1', unitPriceNet: price, taxRate: '19' });
+    const a = allocatedAmounts([neg('12.50'), neg('12.50')]);
+    expect(a.reduce((s, p) => s + p.taxCent, 0)).toBe(-475);
   });
 });

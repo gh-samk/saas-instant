@@ -20,4 +20,6 @@ export interface Storage {
   delete(key: string): Promise<void>;
   /** Nur SFTP: Fingerabdruck des zuletzt gesehenen Host-Keys (fuer TOFU-Pinning). */
   observedHostKey?(): string | undefined;
+  /** Nur SFTP: liefert eine eigene Sicht, die fuer den Verbindungstest den ersten Kontakt ohne Pin erlaubt (TOFU); diese Instanz selbst verweigert ihn weiter. */
+  withTofu?(): Storage;
 }

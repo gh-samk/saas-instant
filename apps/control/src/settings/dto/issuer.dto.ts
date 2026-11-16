@@ -62,4 +62,14 @@ export class IssuerUpdateDto {
 
   /** `#rrggbb` oder `null` (Vorgabe des Renderers). */
   @IsOptional() @IsString() @MaxLength(7) accentColor?: string | null;
+
+  /**
+   * Nachweis für den `SecondFactorGuard`: Er liest ihn aus dem Body, und die
+   * globale `ValidationPipe` (`forbidNonWhitelisted`) lehnt jedes Feld ab, das
+   * in keinem DTO steht. Ohne diese Felder scheiterte jedes Speichern mit
+   * einer Sitzung über zehn Minuten mit 400, statt den Nachweis anzunehmen.
+   */
+  @IsOptional() @IsString() currentPassword?: string;
+
+  @IsOptional() @IsString() totpCode?: string;
 }

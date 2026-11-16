@@ -36,12 +36,49 @@ describe('SFTP Host-Key-Pinning', () => {
     expect(s.fp).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/);
   });
 
-  it('ohne Pin: Verbindung wird nicht am Host-Key abgelehnt, der Fingerabdruck wird gemerkt (TOFU)', async () => {
+  it('ohne Pin: jede Verbindung wird verweigert, es wird nicht einmal der Host kontaktiert', async () => {
     const s = await startServer();
     closers.push(s.close);
     const st = new SftpStorage(cfg(s.port));
-    await st.head('x').catch(() => undefined); // SFTP-Teil fehlt im Fake, egal
-    expect(st.observedHostKey()).toBe(s.fp);
+    await expect(st.head('x')).rejects.toThrow(/nicht gepinnt/);
+    await expect(st.put('x', Buffer.from('a'))).rejects.toThrow(/nicht gepinnt/);
+    await expect(st.get('x')).rejects.toThrow(/nicht gepinnt/);
+    expect(st.observedHostKey()).toBeUndefined();
+  });
+
+  it('nur im Verbindungstest (TOFU): der Fingerabdruck wird gemerkt, danach gilt wieder die Sperre', async () => {
+    const s = await startServer();
+    closers.push(s.close);
+    const st = new SftpStorage(cfg(s.port));
+    const t = st.withTofu();
+    await t.head('x').catch(() => undefined); // SFTP-Teil fehlt im Fake, egal
+    expect(t.observedHostKey()).toBe(s.fp);
+    await expect(st.head('x')).rejects.toThrow(/nicht gepinnt/);
+  });
+
+  it('TOFU gilt nur im Verbindungstest: gleichzeitige Verbindungen der urspruenglichen Instanz akzeptieren keinen ungepinnten Schluessel', async () => {
+    const s = await startServer();
+    closers.push(s.close);
+    const st = new SftpStorage(cfg(s.port));
+    const t = st.withTofu();
+    const [, , other] = await Promise.all([t.head('x').catch(() => undefined), t.head('y').catch(() => undefined), st.head('z').then(() => null, (e: Error) => e)]);
+    expect(other?.message).toMatch(/nicht gepinnt/);
+    expect(t.observedHostKey()).toBe(s.fp);
+    expect(st.observedHostKey()).toBeUndefined();
+  });
+
+  it('TOFU: der erste gesehene Schluessel bleibt fuer den Rest des Tests verbindlich (Wechsel mitten im Test wird abgelehnt)', async () => {
+    const a = await startServer();
+    closers.push(a.close);
+    const b = await startServer();
+    closers.push(b.close);
+    const base = new SftpStorage(cfg(a.port));
+    const st = base.withTofu();
+    await st.head('x').catch(() => undefined);
+    expect(st.observedHostKey()).toBe(a.fp);
+    // Dieselbe Instanz, nun spricht ein anderer Host (anderer Schluessel) am selben Ziel
+    (st as unknown as { cfg: { port: number } }).cfg = { ...(st as unknown as { cfg: object }).cfg, port: b.port } as never;
+    await expect(st.head('x')).rejects.toThrow(/Host-Key weicht/);
   });
 
   it('mit richtigem Pin: Host-Key wird akzeptiert', async () => {

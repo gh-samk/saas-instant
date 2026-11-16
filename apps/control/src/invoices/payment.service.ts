@@ -9,6 +9,7 @@ import { centAsDecimal, decimalAsCent } from './invoice.amount';
 import {
   InvoiceNotFoundError,
   InvoiceStatusMismatchError,
+  PaymentChangedMeanwhileError,
   PaymentImplausibleError,
 } from './invoice.errors';
 import type { Actor } from './invoice.service';
@@ -55,8 +56,14 @@ export class PaymentService {
    * Betrag. Der Grund: Ein Modell mit Einzelbuchungen bräuchte eine eigene
    * Tabelle und einen Weg, eine falsch erfasste Buchung zurückzunehmen — also
    * einen Löschpfad an einem Beleg. Ein kumulierter Stand lässt sich
-   * berichtigen, indem man ihn richtig hinschreibt, und jede Berichtigung
-   * steht im Audit-Log.
+   * berichtigen, indem man ihn richtig hinschreibt (auch auf 0 zurück), und
+   * jede Berichtigung steht im Audit-Log.
+   *
+   * [N8e] `expectedPaidCent` ist der Stand, von dem die Oberfläche ausging.
+   * Ist inzwischen etwas anderes gespeichert (zweiter Tab, zweite Person),
+   * wird nichts überschrieben, sondern mit 409 geantwortet: sonst gewänne
+   * stillschweigend der Letzte, und eine Teilzahlung ginge verloren. Ohne
+   * Angabe (direkter Dienstaufruf) wird nicht geprüft; die Route verlangt sie.
    */
   async note(
     id: string,
@@ -64,6 +71,7 @@ export class PaymentService {
     paidAmountCent: number,
     actor: Actor,
     source: InquirySource,
+    expectedPaidCent?: number,
   ): Promise<InvoiceResponse> {
     await this.prisma.$transaction(async (tx) => {
       await lockInvoice(tx, id);
@@ -79,6 +87,10 @@ export class PaymentService {
         },
       });
       if (!invoice) throw new InvoiceNotFoundError();
+      const currentPaidCent = decimalAsCent(invoice.paidAmount) ?? 0;
+      if (expectedPaidCent !== undefined && expectedPaidCent !== currentPaidCent) {
+        throw new PaymentChangedMeanwhileError(currentPaidCent);
+      }
       if (!PAYABLE.includes(invoice.status)) {
         // Ein Entwurf ist nie hinausgegangen, eine Stornorechnung hebt auf.
         // Bei beiden wäre ein Zahlungseingang ein Hinweis auf eine
@@ -124,10 +136,14 @@ export class PaymentService {
         throw new PaymentImplausibleError('Das Zahldatum liegt in der Zukunft.');
       }
 
+      // [N8a] Eine Rechnung über 0 € ist ausgeglichen (nichts zu zahlen) und
+      // nie „offen": sonst bliebe sie ewig unbezahlt und würde überfällig.
       const complete =
-        sumGrossCent >= 0
-          ? paidAmountCent >= sumGrossCent && sumGrossCent !== 0
-          : paidAmountCent <= sumGrossCent;
+        sumGrossCent === 0
+          ? true
+          : sumGrossCent > 0
+            ? paidAmountCent >= sumGrossCent
+            : paidAmountCent <= sumGrossCent;
       /**
        * NUR ZWEI ZUSTAENDE: bezahlt oder nicht.
        *
@@ -146,10 +162,31 @@ export class PaymentService {
        * Spalte weiter auf `teilweise_bezahlt`, waehrend `zahlungsstand`
        * „offen" sagt, widersprechen sich zwei Felder ueber denselben
        * Sachverhalt. Das faellt niemandem auf, bis es jemandem auffaellt.
+       *
+       * [M14] „NICHT BEZAHLT" HEISST NICHT „FESTGESCHRIEBEN": Eine versendete
+       * Rechnung blieb nach einer Teilzahlung nicht `sent`, sondern fiel auf
+       * `finalized` zurück und sah aus, als wäre sie nie hinausgegangen. Der
+       * bisherige Zustand bleibt deshalb erhalten. Nur aus `paid` (Berichtigung
+       * eines zu hoch erfassten Standes) geht es zurück — auf `sent`, wenn die
+       * Rechnung nachweislich versendet wurde (Audit-Eintrag des Versands),
+       * sonst auf `finalized`.
        */
-      const newStatus: InvoiceStatus = complete
-        ? 'paid'
-        : 'finalized';
+      let newStatus: InvoiceStatus;
+      if (complete) {
+        newStatus = 'paid';
+      } else if (invoice.status === 'paid') {
+        const wasSent = await tx.auditLog.findFirst({
+          where: {
+            action: AUDIT_ACTION.invoiceSent,
+            objectType: 'Invoice',
+            objectId: id,
+          },
+          select: { id: true },
+        });
+        newStatus = wasSent ? 'sent' : 'finalized';
+      } else {
+        newStatus = invoice.status;
+      }
 
       await tx.invoice.update({
         where: { id },
@@ -184,6 +221,10 @@ export class PaymentService {
             paidAmountCent,
             paymentDate: paidAmountCent === 0 ? null : paymentDate,
             sumGrossCent,
+            // [M13] Berichtigung eines schon erfassten Standes (auch auf 0)
+            // — im Nachweis erkennbar von einer weiteren Zahlung zu trennen.
+            correction:
+              currentPaidCent !== 0 && paidAmountCent < currentPaidCent,
           },
           ...source,
         },
@@ -207,28 +248,37 @@ export class PaymentService {
     actor: Actor,
     source: InquirySource,
   ): Promise<InvoiceResponse> {
-    const row = await this.prisma.invoice.findUnique({
-      where: { id },
-      select: { transferStatus: true, status: true },
-    });
-    if (!row) throw new InvoiceNotFoundError();
-    if (row.status === 'draft') {
-      throw new InvoiceStatusMismatchError('draft', 'finalized');
-    }
+    const value = transferStatus.trim();
+    // [N8c] Änderung und Audit-Eintrag in EINER Transaktion: Scheitert der
+    // Nachweis, bleibt auch der Vermerk ungesetzt — kein Vermerk ohne Spur.
+    await this.prisma.$transaction(async (tx) => {
+      await lockInvoice(tx, id);
+      const row = await tx.invoice.findUnique({
+        where: { id },
+        select: { transferStatus: true, status: true },
+      });
+      if (!row) throw new InvoiceNotFoundError();
+      if (row.status === 'draft') {
+        throw new InvoiceStatusMismatchError('draft', 'finalized');
+      }
 
-    await this.prisma.invoice.update({
-      where: { id },
-      data: { transferStatus: transferStatus.trim() },
-    });
-    await this.audit.log({
-      userId: actor.userId,
-      actor: actor.name,
-      action: AUDIT_ACTION.invoiceTransferNoted,
-      objectType: 'Invoice',
-      objectId: id,
-      beforeValue: { transferStatus: row.transferStatus },
-      afterValue: { transferStatus: transferStatus.trim() },
-      ...source,
+      await tx.invoice.update({
+        where: { id },
+        data: { transferStatus: value },
+      });
+      await this.audit.log(
+        {
+          userId: actor.userId,
+          actor: actor.name,
+          action: AUDIT_ACTION.invoiceTransferNoted,
+          objectType: 'Invoice',
+          objectId: id,
+          beforeValue: { transferStatus: row.transferStatus },
+          afterValue: { transferStatus: value },
+          ...source,
+        },
+        tx,
+      );
     });
     return this.get(id);
   }

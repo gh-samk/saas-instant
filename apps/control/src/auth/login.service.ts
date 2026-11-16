@@ -204,9 +204,14 @@ export class LoginService {
    * Im Modus `single` (und ohne Konfiguration) ändert sich nichts.
    */
   private assertLocalLoginAllowed(account: { emergency?: boolean }): void {
-    if (!this.config) return;
-    if (authModeFrom(envFrom(this.config)) !== 'portal') return;
-    if (account.emergency !== true) throw new LocalLoginDisabledError();
+    if (this.localLoginForbidden(account)) throw new LocalLoginDisabledError();
+  }
+
+  /** Gilt für dieses Konto "lokale Anmeldung ist abgeschaltet" (Modus `portal`, kein Notzugang)? */
+  private localLoginForbidden(account: { emergency?: boolean }): boolean {
+    if (!this.config) return false;
+    if (authModeFrom(envFrom(this.config)) !== 'portal') return false;
+    return account.emergency !== true;
   }
 
   /**
@@ -352,6 +357,24 @@ export class LoginService {
         false,
       );
     }
+    // PORTALBETRIEB OHNE NOTZUGANG: VOR der Passwortprüfung entscheiden und genau
+    // wie ein falsches Passwort antworten (401 `login_failed`, gleiche Rechenzeit
+    // durch den Scheinhash). Käme die Absage erst NACH dem Vergleich, wäre sie
+    // ein Orakel: "403" hieße "Passwort stimmt", und über diesen Weg ließen sich
+    // die Passwörter der Konten prüfen, die sich lokal gar nicht anmelden dürfen.
+    // Zählt nicht auf die Sperre (es wurde nichts geraten, und ein Angreifer
+    // könnte sonst fremde Konten sperren).
+    if (this.localLoginForbidden(account)) {
+      await verifyAgainstDummy(password);
+      throw await this.fail(
+        account,
+        account.username,
+        AUDIT_ACTION.loginPasswordError,
+        'Lokale Anmeldung ist im Portalbetrieb nur für Notzugänge erlaubt.',
+        source,
+        false,
+      );
+    }
     this.lockout.checkNotLocked(account);
     checkNotDeactivated(account);
 
@@ -379,8 +402,7 @@ export class LoginService {
       );
     }
 
-    // Richtiges Passwort, aber Portalbetrieb ohne Notzugang: gleich hier
-    // abweisen, statt erst einen zweiten Faktor zu verlangen.
+    // Zweite Absicherung (der Fall ist oben schon abgewiesen).
     this.assertLocalLoginAllowed(account);
 
     const device = await this.devices.recognizeAndRotate(trustedToken, account.id);

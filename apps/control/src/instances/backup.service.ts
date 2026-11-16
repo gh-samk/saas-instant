@@ -42,8 +42,9 @@ export class BackupService {
 
     const kind = dto.kind ?? 'instance';
     const extra = {
-      ...(dto.objectKey !== undefined ? { objectKey: dto.objectKey } : {}),
-      ...(dto.sha256 !== undefined ? { sha256: dto.sha256.toLowerCase() } : {}),
+      ...(dto.objectKey != null ? { objectKey: dto.objectKey } : {}),
+      ...(dto.sha256 != null ? { sha256: dto.sha256.toLowerCase() } : {}),
+      ...(dto.uploadsSha256 != null ? { uploadsSha256: dto.uploadsSha256.toLowerCase() } : {}),
     };
 
     if (kind !== 'instance') {
@@ -87,7 +88,9 @@ export class BackupService {
       sizeBytes: BigInt(dto.sizeBytes),
       ...extra,
       // Ein neues Objekt ist noch nicht geprüft.
-      ...(dto.objectKey !== undefined ? { verifiedAt: null } : {}),
+      ...(dto.objectKey != null ? { verifiedAt: null } : {}),
+      // Ein neuer Satz ersetzt den alten ganz: ohne gemeldete Uploads-Prüfsumme darf keine alte stehen bleiben.
+      ...(dto.objectKey != null && dto.uploadsSha256 == null ? { uploadsSha256: null } : {}),
     };
     // Zweimal täglich gesichert, eine Zeile je Tag: der zweite Lauf
     // berichtigt die Zeile des ersten, statt die Historie zu verdoppeln.

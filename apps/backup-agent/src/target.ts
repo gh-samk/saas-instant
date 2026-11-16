@@ -99,14 +99,16 @@ export class TargetService {
     if (!cur) return { ok: false, message: 'Kein Ziel eingerichtet' };
     const key = `${cur.keyPrefix}${TEST_PREFIX}${randomBytes(8).toString('hex')}.txt`;
     const payload = Buffer.from(`saas-instant backup-agent test ${randomBytes(8).toString('hex')}`);
+    // Nur hier darf eine Storage Box ohne gepinnten Host-Key kontaktiert werden (TOFU, siehe SftpStorage).
+    const st = cur.storage.withTofu?.() ?? cur.storage;
     try {
-      await cur.storage.put(key, payload);
-      const stream = await cur.storage.get(key);
+      await st.put(key, payload);
+      const stream = await st.get(key);
       const chunks: Buffer[] = [];
       for await (const c of stream) chunks.push(Buffer.from(c as Uint8Array));
       if (!Buffer.concat(chunks).equals(payload)) return { ok: false, message: 'Gelesene Daten weichen ab' };
-      await cur.storage.delete(key);
-      const pinned = await this.pinHostKey(cur);
+      await st.delete(key);
+      const pinned = await this.pinHostKey(cur, st);
       return {
         ok: true,
         message: 'Schreiben, Lesen, Vergleichen und Loeschen erfolgreich' + (pinned ? `; SFTP-Host-Key gepinnt (${pinned})` : ''),
@@ -117,10 +119,10 @@ export class TargetService {
   }
 
   /** TOFU: Beim ersten erfolgreichen Test wird der gesehene SFTP-Host-Key im Zustand gespeichert. */
-  private async pinHostKey(cur: CurrentTarget): Promise<string | undefined> {
+  private async pinHostKey(cur: CurrentTarget, st: Storage): Promise<string | undefined> {
     const b = cur.target.storagebox;
     if (cur.target.type !== 'storagebox' || !b || b.hostKeyFingerprint || !this.state) return undefined;
-    const seen = cur.storage.observedHostKey?.();
+    const seen = st.observedHostKey?.();
     if (!seen) return undefined;
     const target: TargetConfig = { ...cur.target, storagebox: { ...b, hostKeyFingerprint: seen } };
     const next: TargetState = { ...this.state, target };

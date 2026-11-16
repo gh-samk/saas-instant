@@ -65,6 +65,7 @@ describe('BackupAgentClient gegen eine Attrappe des Agents (node:http)', () => {
     const { jobId } = await client.startJob({
       kind: 'restore',
       objectKey: 'p/instances/x/2026-01-01T000000Z.dump.age',
+      sha256: 'c'.repeat(64),
       ageIdentity: AGE_KEY,
       target: { subdomain: 'x2', composeProject: 'x2', dbService: 'db', dbName: 'a', dbUser: 'a' },
     });
@@ -127,6 +128,7 @@ describe('BackupAgentClient gegen eine Attrappe des Agents (node:http)', () => {
       await client.startJob({
         kind: 'restore',
         objectKey: 'k',
+        sha256: 'c'.repeat(64),
         ageIdentity: AGE_KEY,
         target: { subdomain: 'x', composeProject: 'x', dbService: 'db', dbName: 'a', dbUser: 'a' },
       });

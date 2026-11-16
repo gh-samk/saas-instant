@@ -14,6 +14,8 @@ export interface InvoiceDoc {
 export interface InvoiceSource {
   /** Alle festgeschriebenen Rechnungen, nach Jahr gruppiert (Pruefsummen sind bereits geprueft). */
   fetchAll(): Promise<Map<string, InvoiceDoc[]>>;
+  /** Belege, die die Verwaltung beim letzten fetchAll uebersprungen hat (z. B. nicht entschluesselbar). */
+  skipped?(): { number: string; reason: string }[];
 }
 
 export interface JobContext {
@@ -29,8 +31,12 @@ export interface JobContext {
   now: () => Date;
   invoiceRetentionYears: number;
   /** pg_dump der Verwaltungsdatenbank (lokal im Agenten). */
-  controlDump: () => ExecHandle;
+  controlDump: (signal?: AbortSignal) => ExecHandle;
   invoices: () => InvoiceSource;
-  /** Compose-Projekte, die der Agent nie als Restore-Ziel akzeptiert. */
+  /** Compose-Projekte, die der Agent nie als Restore-Ziel akzeptiert (eigener Stack). */
   ownProjects: () => Promise<Set<string>>;
+  /** Sperrliste fuer Restore-Ziele: Namen oder Praefixe mit `*` am Ende (Verwaltung, Portal, portal-auth). */
+  deniedProjects: string[];
+  /** Wird beim Zeitlimit des Auftrags ausgeloest; Datenstroeme und Kindprozesse werden dann beendet. */
+  signal?: AbortSignal;
 }

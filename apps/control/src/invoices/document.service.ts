@@ -22,6 +22,7 @@ import {
   type InvoiceRenderer,
 } from './document/invoice-renderer.client';
 import { decimalAsCent } from './invoice.amount';
+import { LINE_ORDER } from './invoice.query';
 import {
   InvoiceNotFoundError,
   InvoiceStatusMismatchError,
@@ -473,7 +474,7 @@ export class InvoiceDocumentService {
     const r = await this.prisma.invoice.findUnique({
       where: { id },
       include: {
-        lines: { orderBy: { id: 'asc' } },
+        lines: { orderBy: LINE_ORDER },
         cancelledInvoice: { select: { invoiceNumber: true } },
       },
     });

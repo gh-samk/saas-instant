@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import type { ExecHandle } from './docker/types.js';
 
 /** Lokaler pg_dump der Verwaltungs-DB. Zugangsdaten gehen ueber die Umgebung, nicht ueber die Argumente. */
-export function localPgDump(connectionString: string): ExecHandle {
+export function localPgDump(connectionString: string, signal?: AbortSignal): ExecHandle {
   const u = new URL(connectionString);
   const env = {
     PATH: process.env['PATH'] ?? '/usr/bin:/bin',
@@ -13,7 +13,8 @@ export function localPgDump(connectionString: string): ExecHandle {
     PGPASSWORD: decodeURIComponent(u.password),
     PGDATABASE: decodeURIComponent(u.pathname.replace(/^\//, '')),
   };
-  const child = spawn('pg_dump', ['-Fc'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // `signal`: beim Zeitlimit des Auftrags wird der Kindprozess beendet (SIGTERM).
+  const child = spawn('pg_dump', ['-Fc'], { env, stdio: ['ignore', 'pipe', 'pipe'], ...(signal ? { signal } : {}) });
   const stdout = new PassThrough();
   child.stdout.pipe(stdout);
   let stderr = '';

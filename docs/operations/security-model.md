@@ -100,8 +100,14 @@ Sicherheitsannahmen:
 - **Step-up.** Wo ein zweiter Faktor verlangt wird, braucht eine Portal-Sitzung einen
   frischen Durchlauf mit zweitem Faktor (höchstens 5 Minuten alt).
 - **Notzugang ohne Portal nur für markierte Konten.** Lokal anmelden darf nur
-  `emergency=true` (`403 local_login_disabled` sonst); gesetzt wird das nur durch die
-  Notfallkommandos im Container.
+  `emergency=true`; gesetzt wird das nur durch die Notfallkommandos im Container. Die
+  Absage für alle anderen fällt **vor** der Passwortprüfung und lautet wie ein falsches
+  Passwort (`401 login_failed`, gleiche Rechenzeit durch einen Scheinhash, kein
+  Fehlversuch auf dem Konto): käme sie erst nach dem Vergleich, verriete sie ein
+  richtiges Passwort. **Notzugangskonten werden nie per E-Mail-Adresse mit einem
+  Portal-Konto verknüpft** und behalten bei einer Portal-Anmeldung ihre Rolle; sonst
+  könnte, wer im Portal ein Konto mit derselben Adresse hat, den Rückweg übernehmen
+  oder herabstufen.
 - **Sitzungen** einer Portal-Anmeldung gelten höchstens 12 Stunden; die
   Front-Channel-Abmeldung beendet alle Sitzungen einer Portal-Sitzung.
 - **Geheimnisse des Portals:** `PORTAL_KEY_SECRET` (verschlüsselt Signaturschlüssel und
@@ -190,11 +196,94 @@ Fehler, es gibt kein stilles `null`, das als „kein TOTP eingerichtet“ durchg
 **Wird der Schlüssel getauscht, sind diese Werte unlesbar**, TOTP muss neu
 eingerichtet werden, Instanz-Tokens müssen neu gesetzt werden.
 
-**Was nicht anwendungsseitig verschlüsselt ist:** Kundenstammdaten und Bankdaten
-(IBAN, BIC, Mandat) liegen als normale Datenbankfelder. Der Schutz ist die
-Zugriffskontrolle (zweiter Faktor, Audit) und die Verschlüsselung außerhalb der
-Anwendung: verschlüsselter Datenträger des Servers und verschlüsselte, asymmetrisch
-gesicherte Backups. Das ist Aufgabe des Betreibers.
+**Kundendaten: Feldverschlüsselung mit Tresor.** Personenbezogene und
+geschäftliche Felder der Datenbank (Organisationen, Notizen, Rechnungsinhalte und
+-dokumente, Postausgang, Einwilligungen, Details im Audit-Log; die Liste steht an
+einer Stelle in `crypto/encrypted-fields.ts`) werden anwendungsseitig mit
+**AES-256-GCM** verschlüsselt (`enc:v1:…` bzw. `ENC1…`). Die Kennung der Zeile und
+des Felds gehen als zusätzliche authentisierte Daten ein: ein Chiffretext lässt sich
+nicht in eine andere Zeile oder ein anderes Feld kopieren. Der Datenschlüssel (DEK,
+256 Bit) wird beim Einrichten zufällig erzeugt und **nie im Klartext gespeichert**;
+gespeichert wird er je Admin-Passphrase und einmal mit dem Wiederherstellungsschlüssel
+„eingepackt“ (argon2id, mindestens 64 MiB, t = 3). Nach **jedem Start ist die
+Verwaltung gesperrt**; der Schlüssel liegt nur im Arbeitsspeicher. Umpacken
+(Passphrase ändern, weitere hinzufügen, **entziehen**, Wiederherstellungsschlüssel
+neu erzeugen) ändert nie den DEK und verlangt den zweiten Faktor; ein laufendes
+Umpacken arbeitet mit einer Kopie des Schlüssels und bricht mit 423 ab, wenn
+währenddessen gesperrt wird.
+
+*Gesperrt heißt:* Jede Route antwortet 423 `vault_locked`, **außer** sie ist am
+Handler mit `@AllowWhileLocked(Begründung)` markiert. Entschieden wird an der von
+Nest gefundenen Route, nicht an der URL (`/API/…`, absolute Anfrage-URL und
+Doppelschrägstrich umgehen die Sperre damit nicht); eine neue Route ist ohne Zutun
+gesperrt. Bewusst erreichbar bleiben nur Routen, die nachweislich keine
+verschlüsselten Felder lesen oder schreiben: Health und Version, `public-config` und
+das öffentliche Logo, Anmeldung und Sitzung (`auth`, `access`, `auth/sso`), der Tresor
+selbst (Status, Entsperren, Einrichten), `GET /api/internal/backup-plan` und
+`POST /api/backups` (Meldung des Backup-Agents), `GET /api/flags` und die
+Ein-Klick-Abmeldung vom Newsletter (`GET`/`POST /api/consent/unsubscribe/:token`; sie
+schreibt nur Status und Zeitstempel und trägt bei gesperrtem Tresor weder IP noch
+User-Agent ins Audit-Log ein). Gesperrt bleiben die öffentlichen Formulare (Anfrage,
+Newsletter-Eintragung, Aufnahme, Bestätigung): sie schreiben Kundendaten, und die
+gehören nicht unverschlüsselt in die Datenbank; die Webseite sieht dort 423/503.
+Der Archivweg des Agents (`/api/internal/invoice-archive`) braucht den Schlüssel
+und ist gesperrt. Beim Start mit gesperrtem Tresor geht eine Mail an alle aktiven
+Admin-Konten (nicht an Notzugänge) mit dem Link zur Entsperrseite; sie enthält keine
+Kundendaten. Zusätzlich meldet `/api/health` den Zustand (`locked`) für das
+Monitoring.
+
+*Nicht entschlüsselbar ist ein Befund, kein Absturz.* Lässt sich ein Wert nicht
+entschlüsseln (Chiffretext verändert oder in eine andere Zeile kopiert), wirft die
+Erweiterung einen `FieldDecryptError` (Modell, Feld, Zeilen-Kennung; nie ein Wert).
+Der Integritätslauf und die Einzelprüfung einer Rechnung lesen dann Zeile für Zeile
+und melden den Befund `undecryptable` (Audit `invoice.integrity_failed`, Aufgabe „Beleg
+manipuliert“); das Rechnungsarchiv liefert die übrigen Belege und nennt die
+übersprungene unter `skipped`. Listen (Organisationsliste, Suchindex) lesen
+ausdrücklich nachsichtig: ein beschädigtes Feld erscheint leer
+(„(nicht lesbar)“) und steht im Log. Nachsichtig ist **nicht** der Standard, weil ein
+gelesenes `null` beim Zurückschreiben den beweiskräftigen Chiffretext überschriebe.
+
+*Klartext im verschlüsselten Feld.* Werte ohne Chiffre-Kennung gelten bis zum ersten
+abgeschlossenen Einmal-Lauf nach dem Entsperren als Altbestand. Danach (Zustand nur im
+Prozess; jedes Entsperren führt den Lauf erneut aus) ist ein Klartext im
+verschlüsselten Feld ein Befund (`FieldDecryptError`): wer per SQL einen Wert
+unterschiebt, wird nicht stillschweigend akzeptiert. Ausgenommen sind nur die
+Altbereiche, die sich nicht nachträglich verschlüsseln lassen: das Audit-Log
+(append-only, dazu Anmeldeereignisse, die bei gesperrtem Tresor entstehen),
+Rechnungsposten und festgeschriebene Rechnungen.
+
+**Altbestand im Klartext (Grenze).** Festgeschriebene Rechnungen und das Audit-Log
+sind per Datenbank-Trigger unveränderlich (R2). Der Einmal-Lauf verschlüsselt sie
+deshalb **nicht** nachträglich und umgeht die Trigger nicht. Wer vor der Einrichtung
+des Tresors Rechnungen festgeschrieben hat, hat diese Belege und die Protokolleinträge
+aus jener Zeit weiterhin im Klartext in Datenbank, Dumps und Sicherungen; erst
+Belege und Einträge ab der Einrichtung sind verschlüsselt. Einstellungen →
+Sicherheit zeigt die Zahlen („n Belege und m Protokolleinträge aus der Zeit vor dem
+Tresor sind unverschlüsselt“), gezählt serverseitig am fehlenden Chiffre-Präfix.
+Unverschlüsselt bleiben außerdem Mitarbeiterkonten (die Anmeldung muss vor dem
+Entsperren gehen), Bezeichner, Status, Beträge, Daten und Rechnungsnummern.
+
+**Passphrase entziehen.** Einstellungen → Sicherheit kann eine Passphrase entziehen
+(zweiter Faktor, Audit `vault.passphrase.removed`); der letzte verbleibende Zugang ist
+geschützt (409), der Wiederherstellungsschlüssel lässt sich nur neu erzeugen. **Grenze:**
+Das verhindert das künftige Entsperren, nicht den Zugriff über eine Kopie der Datenbank,
+die schon mit dieser Passphrase entsperrt werden konnte. Dagegen hilft nur ein Wechsel
+des Datenschlüssels selbst (neu verschlüsseln); den kennt diese Version nicht.
+
+**Ruhende Geheimnisse (Konfigurationsschlüssel):** TOTP-Geheimnisse und die Tokens der
+Instanzen (Setup, Kennzahlen) werden mit **AES-256-GCM** unter einem Schlüssel aus
+`CONTROL_CONFIG_KEY` verschlüsselt (scrypt, fester Salt, damit er über Neustarts stabil
+bleibt). Jeder Wert bekommt einen frischen Initialisierungsvektor. Entschlüsseln wirft
+bei falschem Schlüssel oder manipuliertem Wert einen Fehler, es gibt kein stilles
+`null`, das als „kein TOTP eingerichtet“ durchginge. **Wird der Schlüssel getauscht,
+sind diese Werte unlesbar**, TOTP muss neu eingerichtet werden, Instanz-Tokens müssen
+neu gesetzt werden.
+
+**Was darüber hinaus Aufgabe des Betreibers bleibt:** Die Verschlüsselung schützt
+Datenbank, Dumps und Sicherungen, nicht einen entsperrten, laufenden Server gegen
+Root-Zugriff (der Schlüssel liegt dann im Arbeitsspeicher), und Mails sowie der
+Rechnungsdienst erhalten Klartext. Dazu kommen verschlüsselter Datenträger des Servers
+und verschlüsselte, asymmetrisch gesicherte Backups.
 
 **Transport:**
 
@@ -254,7 +343,7 @@ Sicherungsspeicher und mit Docker-Zugriff. Aufbau und Betrieb:
 | Sicherungen sind nur mit dem Betreiberschlüssel lesbar | Verschlüsselung mit **age** (nur der öffentliche Schlüssel im Agent); der private Schlüssel wird einmal angezeigt und nirgends gespeichert; bei der Wiederherstellung kommt er write-only, nur im Arbeitsspeicher |
 | Wiederherstellung nur in neue, fremde Stacks | Zielprojekt muss das Compose-Label tragen und darf weder der Stack des Agents noch der der Verwaltung sein; nicht ermittelbarer eigener Stack bedeutet Ablehnung |
 | Der Dump enthält keinen Klartext sensibler Felder | die Verwaltungs-Datenbank hält Chiffretext; wer den Dump hat, braucht zum Lesen Passphrase oder Wiederherstellungsschlüssel (Tresor). Das Rechnungsarchiv ist davon getrennt und mit age lesbar |
-| Der Agent hat keinen SQL-Zugriff auf Rechnungen | er holt das Archiv über `GET /api/internal/invoice-archive` (nur mit `x-backup-key`, nur im entsperrten Zustand, sonst 423), prüft je Dokument die SHA-256 und verschlüsselt mit age; bei 423 meldet er den Lauf als `deferred` und versucht es erneut. `CONTROL_DATABASE_URL` dient nur dem `pg_dump` |
+| Der Agent hat keinen SQL-Zugriff auf Rechnungen | er holt das Archiv über `GET /api/internal/invoice-archive` (nur mit `x-backup-key`, nur im entsperrten Zustand, sonst 423; Plan und Meldung gehen auch gesperrt), prüft je Dokument die SHA-256 und verschlüsselt mit age; bei 423 meldet er den Lauf als `deferred` und versucht es erneut. `CONTROL_DATABASE_URL` dient nur dem `pg_dump` |
 | Rechnungsarchive bleiben | der Agent löscht nie unter `invoices/`; bei S3 mit Object Lock (GOVERNANCE) versehen |
 
 **Das Restrisiko:** Auch durch den Proxy bleibt `EXEC` auf Containern des Hosts ein

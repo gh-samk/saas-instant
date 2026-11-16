@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
+import { Logger } from '@nestjs/common';
 import { Prisma } from '.prisma/control-client';
 import type { PrismaClient } from '.prisma/control-client';
 import {
@@ -16,6 +18,10 @@ import {
   encryptBytes,
   encryptField,
   encryptJson,
+  FieldDecryptError,
+  isEncryptedBytes,
+  isEncryptedText,
+  plaintextPolicy,
 } from '../crypto/field-crypto';
 import { keyring } from '../crypto/keyring';
 
@@ -88,6 +94,40 @@ const RAW_CLIENTS = new WeakMap<object, PrismaClient>();
 /** Der unerweiterte Client hinter einem mit `withFieldEncryption` erzeugten (für den Einmal-Lauf). */
 export function rawClientOf(client: object): PrismaClient | undefined {
   return RAW_CLIENTS.get(client);
+}
+
+// ---------------------------------------------------------------------------
+// Nachsichtiges Lesen (nur auf ausdrücklichen Wunsch des Aufrufers)
+// ---------------------------------------------------------------------------
+
+const lenientScope = new AsyncLocalStorage<true>();
+const unreadable = new WeakMap<object, string[]>();
+const lenientLogger = new Logger('FieldEncryption');
+
+/**
+ * Führt `work` im NACHSICHTIGEN Lesemodus aus: ein Feld, das sich nicht
+ * entschlüsseln lässt (`FieldDecryptError`), wird `null` und in der Zeile
+ * vermerkt (`unreadableFieldsOf`), statt die ganze Abfrage zu kippen.
+ *
+ * ABWÄGUNG, warum das NICHT der Standard ist: Ein stillschweigendes `null` ist
+ * für Anzeigen (Listen, Suchindex) richtig — ein beschädigter Wert soll nicht
+ * die ganze Organisationsliste in einen 500 verwandeln. Für alles, was die Zeile
+ * danach zurückschreibt, wäre es gefährlich: `update` mit dem gelesenen `null`
+ * überschriebe den (beschädigten, aber beweiskräftigen) Chiffretext. Und für
+ * Integritätsprüfung, Archiv und Export muss der Fehler sichtbar bleiben. Deshalb
+ * schaltet jeder Lesepfad den Modus selbst und ausdrücklich ein.
+ *
+ * Jeder Fall wird protokolliert (Modell, Feld, id; nie ein Wert).
+ */
+export function readLenient<T>(work: () => Promise<T>): Promise<T> {
+  // `await` im Bereich: Prisma-Abfragen starten erst beim `then`, das muss noch
+  // INNERHALB des Bereichs geschehen, sonst ist der Modus beim Entschlüsseln weg.
+  return lenientScope.run(true, async () => await work());
+}
+
+/** Die Felder dieser Zeile, die im nachsichtigen Modus nicht lesbar waren. */
+export function unreadableFieldsOf(row: unknown): readonly string[] {
+  return typeof row === 'object' && row !== null ? (unreadable.get(row) ?? []) : [];
 }
 
 const lowerFirst = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
@@ -352,6 +392,8 @@ function encryptNested(model: string, ops: Obj, mode: 'create' | 'update'): Obj 
 
 interface Plan {
   addedId?: boolean;
+  /** `finalizedAt` wurde für die Klartext-Prüfung zusätzlich geladen (Invoice). */
+  addedFinalizedAt?: boolean;
   rel: Record<string, Plan>;
 }
 
@@ -381,11 +423,35 @@ function prepareSelection(model: string, args: unknown): { args: unknown; plan: 
       sel.id = true;
       plan.addedId = true;
     }
+    if (model === 'Invoice' && !sel.finalizedAt) {
+      sel.finalizedAt = true;
+      plan.addedFinalizedAt = true;
+    }
     out.select = sel;
   } else if (isObj(args.include)) {
     out.include = walk(args.include);
   }
   return { args: out, plan };
+}
+
+/**
+ * Darf dieses Feld im Strikt-Modus noch Klartext sein? NUR die dokumentierten
+ * Altbereiche, in denen sich Klartext nicht nachträglich verschlüsseln lässt:
+ *  - AuditLog: append-only (Trigger); dazu Zeilen, die bei gesperrtem Tresor
+ *    geschrieben wurden (Anmeldeereignisse).
+ *  - InvoiceLine: Posten festgeschriebener Rechnungen sind per Trigger gesperrt.
+ *  - Invoice: nur festgeschriebene Rechnungen (gleicher Grund).
+ * Alles andere ist nach dem Einmal-Lauf verschlüsselt; Klartext dort ist ein Befund.
+ */
+function isLegacyPlaintextAllowed(model: string, row: Obj): boolean {
+  if (model === 'AuditLog' || model === 'InvoiceLine') return true;
+  if (model === 'Invoice') return row.finalizedAt !== null && row.finalizedAt !== undefined;
+  return false;
+}
+
+function looksEncrypted(kind: FieldKind, value: unknown): boolean {
+  if (kind === 'bytes') return value instanceof Uint8Array && isEncryptedBytes(value);
+  return isEncryptedText(value);
 }
 
 function decryptRow(model: string, row: Obj, plan: Plan | undefined): Obj {
@@ -401,19 +467,41 @@ function decryptRow(model: string, row: Obj, plan: Plan | undefined): Obj {
           `${model}.${key}: Entschlüsselung braucht die id der Zeile im Ergebnis.`,
         );
       }
+      if (
+        plaintextPolicy.strict &&
+        !isLegacyPlaintextAllowed(model, row) &&
+        !looksEncrypted(kind, value)
+      ) {
+        // Klartext in einem verschlüsselten Feld nach dem Einmal-Lauf: nicht
+        // stillschweigend annehmen (Downgrade per SQL), sondern als Befund melden.
+        const error = new FieldDecryptError(model, key, row.id);
+        if (!lenientScope.getStore()) throw error;
+        out[key] = null;
+        unreadable.set(out, [...(unreadable.get(out) ?? []), key]);
+        lenientLogger.warn(`${model}.${key} (id ${row.id}) liegt im Klartext vor, als leer geliefert.`);
+        continue;
+      }
       const aad = aadFor(model, key, row.id);
-      if (kind === 'text') {
-        out[key] = typeof value === 'string' ? decryptField(value, aad) : value;
-      } else if (kind === 'bytes') {
-        out[key] = value instanceof Uint8Array ? decryptBytes(value, aad) : value;
-      } else {
-        out[key] = decryptJson(value, aad);
+      try {
+        if (kind === 'text') {
+          out[key] = typeof value === 'string' ? decryptField(value, aad) : value;
+        } else if (kind === 'bytes') {
+          out[key] = value instanceof Uint8Array ? decryptBytes(value, aad) : value;
+        } else {
+          out[key] = decryptJson(value, aad);
+        }
+      } catch (error) {
+        if (!(error instanceof FieldDecryptError) || !lenientScope.getStore()) throw error;
+        out[key] = null;
+        unreadable.set(out, [...(unreadable.get(out) ?? []), key]);
+        lenientLogger.warn(`${model}.${key} (id ${row.id}) nicht lesbar, als leer geliefert.`);
       }
     } else if (meta?.relations.has(key) && value !== null && typeof value === 'object') {
       out[key] = decryptResult(meta.relations.get(key)!, value, plan?.rel[key]);
     }
   }
   if (plan?.addedId) delete out.id;
+  if (plan?.addedFinalizedAt) delete out.finalizedAt;
   return out;
 }
 

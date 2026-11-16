@@ -27,6 +27,7 @@ import { InstanceProvisioningService } from './instance-provisioning.service';
 import { InstanceRestoreService, type RestoreView } from './instance-restore.service';
 import {
   AdoptStopFailedError,
+  BackupNotRestorableError,
   RestoreConfirmationError,
   RestoreInProgressError,
   RestoreNotAdoptableError,
@@ -137,7 +138,7 @@ async function withInstanceAndBackup(coolify: CoolifyMock) {
   });
   const objectKey = `si/instances/${subdomain}/2026-11-14T023000Z.dump.age`;
   await new BackupService(prisma, audit).report(
-    { subdomain, kind: 'instance', date: today(), sizeBytes: 12345, objectKey, sha256: 'b'.repeat(64) },
+    { subdomain, kind: 'instance', date: today(), sizeBytes: 12345, objectKey, sha256: 'b'.repeat(64), uploadsSha256: 'c'.repeat(64) },
     null,
   );
   const backup = await prisma.backup.findFirstOrThrow({ where: { instanceId: instance.id } });
@@ -239,7 +240,7 @@ describe('Meldeweg und Sicherungsplan', () => {
   it('speichert kind, objectKey und sha256; control/invoices stehen nur im Audit-Log', async () => {
     const { coolify } = build();
     const { backup, objectKey, instance } = await withInstanceAndBackup(coolify);
-    expect(backup).toMatchObject({ kind: 'instance', objectKey, sha256: 'b'.repeat(64), status: 'ok', verifiedAt: null });
+    expect(backup).toMatchObject({ kind: 'instance', objectKey, sha256: 'b'.repeat(64), uploadsSha256: 'c'.repeat(64), status: 'ok', verifiedAt: null });
 
     const service = new BackupService(prisma, audit);
     await service.report({ kind: 'control', date: today(), sizeBytes: 5, objectKey: 'si/control/x.dump.age' }, null);
@@ -360,8 +361,11 @@ describe('Wiederherstellung als NEUE Instanz', () => {
 
     // Der Agent bekam genau den Auftrag mit Schlüssel, Objekt und Ziel-Stapel ...
     const job = agent.jobBodies('restore').at(-1) as Record<string, unknown>;
+    // und den bei der Sicherung gemeldeten Prüfsummen (Dump und Uploads) (der Agent belegt damit die Echtheit) ...
     expect(job).toMatchObject({
       objectKey,
+      sha256: 'b'.repeat(64),
+      uploadsSha256: 'c'.repeat(64),
       ageIdentity: AGE_IDENTITY,
       target: { subdomain: input.newSubdomain, composeProject: `proj-${row.coolifyApplicationId}`, dbName: 'app' },
     });
@@ -383,6 +387,17 @@ describe('Wiederherstellung als NEUE Instanz', () => {
     expect(everything).not.toContain(AGE_IDENTITY);
     expect(everything).not.toContain(OLD_TOKENS.metrics);
     expect(row.message).not.toMatch(/AGE-SECRET/);
+  });
+
+  it('eine Sicherung ohne gemeldete Prüfsumme lässt sich nicht wiederherstellen — nichts wird angelegt', async () => {
+    const { coolify, restores } = build();
+    const { instance, backup } = await withInstanceAndBackup(coolify);
+    await prisma.backup.update({ where: { id: backup.id }, data: { sha256: null } });
+    await expect(restores.start(instance.id, dto(backup.id, instance.subdomain), ACTOR, SOURCE)).rejects.toBeInstanceOf(
+      BackupNotRestorableError,
+    );
+    expect(await prisma.instanceRestore.count({ where: { instanceId: instance.id } })).toBe(0);
+    expect(coolify.calls.filter((c) => c === 'createApplication')).toHaveLength(0);
   });
 
   it('verlangt den eingetippten Instanznamen — sonst passiert NICHTS', async () => {

@@ -14,15 +14,38 @@ import { ApiError, forbidden, unauthenticated } from './errors';
 import { cookieNames, readCookie } from './cookies';
 import { RateLimiter } from './rate-limiter';
 
-/** Double-Submit-CSRF für alle schreibenden Anfragen unter /api, dazu Origin-Prüfung. */
+export const WITHOUT_CSRF = 'portal:withoutCsrf';
+/**
+ * Nimmt eine schreibende Route AUSDRÜCKLICH vom CSRF-Schutz aus, mit Begründung.
+ * Zulässig nur für Server-zu-Server-Wege ohne Browser-Cookie (z. B. der
+ * Token-Endpunkt von OIDC). Ohne Markierung ist jede schreibende Route geschützt.
+ */
+export const WithoutCsrf = (reason: string) => SetMetadata(WITHOUT_CSRF, reason);
+
+/**
+ * Double-Submit-CSRF für ALLE schreibenden Anfragen, dazu Origin-Prüfung.
+ *
+ * Die Entscheidung hängt an der gefundenen Route (`@WithoutCsrf`), nicht an der
+ * URL: eine Pfadprüfung wie `startsWith('/api/')` sieht `/API/me/...` oder eine
+ * absolute Anfrage-URL anders als das Express-Routing, das beides derselben
+ * Route zuordnet, und ließ die Prüfung entfallen.
+ */
 @Injectable()
 export class CsrfGuard implements CanActivate {
-  constructor(@Inject(CONFIG) private readonly config: PortalConfig) {}
+  constructor(
+    @Inject(CONFIG) private readonly config: PortalConfig,
+    private readonly reflector: Reflector,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
+    if (context.getType() !== 'http') return true;
     const req = context.switchToHttp().getRequest<Request>();
-    if (!req.path.startsWith('/api/')) return true;
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return true;
+    const exempt = this.reflector.getAllAndOverride<string | undefined>(WITHOUT_CSRF, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (typeof exempt === 'string' && exempt.length > 0) return true;
     const origin = req.headers.origin;
     if (origin && origin !== this.config.origin) {
       throw new ApiError(403, 'csrf_origin', 'Anfrage von fremder Herkunft abgelehnt.');

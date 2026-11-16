@@ -14,7 +14,11 @@ const fetchVaultEntries = vi.fn();
 const vaultAddPassphrase = vi.fn();
 const vaultChangePassphrase = vi.fn();
 const vaultRegenerateRecovery = vi.fn();
+const vaultRemovePassphrase = vi.fn();
+const fetchVaultLegacyPlaintext = vi.fn();
 vi.mock('../lib/api', () => ({
+  vaultRemovePassphrase: (...a: unknown[]) => vaultRemovePassphrase(...a),
+  fetchVaultLegacyPlaintext: (...a: unknown[]) => fetchVaultLegacyPlaintext(...a),
   fetchVaultEntries: (...a: unknown[]) => fetchVaultEntries(...a),
   vaultAddPassphrase: (...a: unknown[]) => vaultAddPassphrase(...a),
   vaultChangePassphrase: (...a: unknown[]) => vaultChangePassphrase(...a),
@@ -48,6 +52,8 @@ describe('VaultSecurityCard', () => {
     vaultAddPassphrase.mockReset();
     vaultChangePassphrase.mockReset();
     vaultRegenerateRecovery.mockReset();
+    vaultRemovePassphrase.mockReset();
+    fetchVaultLegacyPlaintext.mockReset().mockResolvedValue({ invoices: 0, auditEntries: 0 });
   });
 
   it('zeigt Status, Passphrasen und Wiederherstellungsschlüssel mit Aktionen', async () => {
@@ -163,5 +169,52 @@ describe('VaultSecurityCard', () => {
     const { container } = renderCard();
     await screen.findByText('Passphrase von Alex');
     expect(await axe(container)).toHaveNoViolations();
+  });
+  it('entfernt eine Passphrase nach Bestätigung und mit zweitem Faktor', async () => {
+    vaultRemovePassphrase.mockRejectedValueOnce(NEED_EVIDENCE()).mockResolvedValueOnce({ ok: true });
+    renderCard();
+    fireEvent.click(await screen.findByRole('button', { name: 'Passphrase von Alex entfernen' }));
+    const dialog = screen.getByRole('dialog', { name: 'Passphrase entfernen' });
+    expect(within(dialog).getByText(/Passphrase von Alex entsperrt die Verwaltung danach nicht mehr/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Wechsel des Datenschlüssels/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Entfernen' }));
+
+    fireEvent.change(await screen.findByLabelText('Aktuelles Passwort'), { target: { value: 'mein-passwort' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }));
+    await waitFor(() =>
+      expect(vaultRemovePassphrase).toHaveBeenLastCalledWith('p1', { currentPassword: 'mein-passwort' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('der Wiederherstellungsschlüssel hat keinen Entfernen-Knopf', async () => {
+    renderCard();
+    await screen.findByText('Passphrase von Alex');
+    expect(screen.getAllByRole('button', { name: /entfernen/i })).toHaveLength(1);
+  });
+
+  it('nennt den geschützten letzten Zugang verständlich', async () => {
+    vaultRemovePassphrase.mockRejectedValue(
+      new ApiError({ code: 'vault_last_entry', message: 'technisch' }, 409),
+    );
+    renderCard();
+    fireEvent.click(await screen.findByRole('button', { name: 'Passphrase von Alex entfernen' }));
+    const dialog = screen.getByRole('dialog', { name: 'Passphrase entfernen' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Entfernen' }));
+    expect(await within(dialog).findByText(/letzte Zugang zum Tresor/)).toBeInTheDocument();
+  });
+
+  it('zeigt, wie viele Belege und Protokolleinträge aus der Zeit vor dem Tresor unverschlüsselt sind', async () => {
+    fetchVaultLegacyPlaintext.mockResolvedValue({ invoices: 12, auditEntries: 1 });
+    renderCard();
+    expect(
+      await screen.findByText('12 Belege und 1 Protokolleintrag aus der Zeit vor dem Tresor sind unverschlüsselt.'),
+    ).toBeInTheDocument();
+  });
+
+  it('zeigt keinen Hinweis, wenn nichts im Klartext liegt', async () => {
+    renderCard();
+    await screen.findByText('Passphrase von Alex');
+    expect(screen.queryByText(/vor dem Tresor/)).toBeNull();
   });
 });

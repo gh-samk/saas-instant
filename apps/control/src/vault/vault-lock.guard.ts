@@ -5,60 +5,55 @@ import {
   HttpStatus,
   Injectable,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import { Reflector } from '@nestjs/core';
+import { ALLOW_WHILE_LOCKED, ALLOW_WHILE_UNINITIALIZED } from './allow-while-locked.decorator';
 import { VaultService } from './vault.service';
 
-interface Rule {
-  /** Leer = jede Methode. */
-  methods?: string[];
-  path: RegExp;
-}
-
 /**
- * Was bei gesperrtem Tresor erreichbar bleibt — und nur das.
+ * Bei gesperrtem Tresor antwortet JEDE Route mit 423, außer sie ist am Handler
+ * (oder am Controller) mit `@AllowWhileLocked(begründung)` markiert.
  *
- * - Health (mit Tresor-Zustand) und Version: Betrieb und Monitoring.
- * - public-config und das öffentliche Logo: die Anmeldeseite braucht beides.
- * - auth/** und access/**: Anmeldung, Sitzung, Abmeldung, zweiter Faktor. Ohne
- *   sie käme niemand zur Entsperrseite.
- * - vault/status, vault/unlock, vault/setup: der Tresor selbst. Weitere
- *   Tresor-Routen (Einträge, Umpacken) brauchen den entsperrten Tresor.
+ * Standard ist also "gesperrt": eine neue Route ist ohne Zutun geschützt, und
+ * die Entscheidung beruht auf der von Nest gefundenen Route, nicht auf einem
+ * Vergleich der URL (Groß-/Kleinschreibung, absolute Anfrage-URL, Doppelschrägstrich).
  *
- * Jede andere Route antwortet 423. Das schließt auch die öffentlichen
- * Formulare (Anfrage, Newsletter, Aufnahme): sie schreiben Kundendaten, und
- * die gehören nicht unverschlüsselt in die Datenbank.
+ * Erreichbar bleiben (jeweils begründet am Handler): Health und Version,
+ * public-config und das öffentliche Logo, Anmeldung, Sitzung und Abmeldung (auth,
+ * sso; Kontopflege unter access bleibt gesperrt), der Tresor selbst (status, unlock, setup), der Sicherungsplan und die
+ * Sicherungsmeldung des Agenten, der Stand der Funktionsschalter und die
+ * Ein-Klick-Abmeldung aus dem Newsletter.
+ *
+ * Die öffentlichen Formulare (Anfrage, Newsletter-Eintragung, Aufnahme) bleiben
+ * gesperrt: sie schreiben Kundendaten, und die gehören nicht unverschlüsselt in
+ * die Datenbank.
  */
-const ALLOWED: Rule[] = [
-  { methods: ['GET', 'HEAD'], path: /^\/api\/health\/?$/ },
-  { methods: ['GET', 'HEAD'], path: /^\/api\/version\/?$/ },
-  { methods: ['GET', 'HEAD'], path: /^\/api\/public-config\/?$/ },
-  { methods: ['GET', 'HEAD'], path: /^\/api\/public\/logo\/?$/ },
-  { path: /^\/api\/auth(\/|$)/ },
-  { path: /^\/api\/access(\/|$)/ },
-  { methods: ['GET', 'HEAD'], path: /^\/api\/vault\/status\/?$/ },
-  { methods: ['POST'], path: /^\/api\/vault\/(unlock|setup)\/?$/ },
-];
-
-/** Reine Entscheidung (ohne Nest) — für Tests. */
-export function isAllowedWhileLocked(method: string, rawUrl: string): boolean {
-  const path = rawUrl.split('?')[0] ?? '';
-  // Alles außerhalb von /api (z. B. /robots.txt) ist zustandslos und anonym.
-  if (!path.startsWith('/api/') && path !== '/api') return true;
-  const m = method.toUpperCase();
-  return ALLOWED.some(
-    (rule) => (!rule.methods || rule.methods.includes(m)) && rule.path.test(path),
-  );
-}
-
 @Injectable()
 export class VaultLockGuard implements CanActivate {
-  constructor(private readonly vault: VaultService) {}
+  constructor(
+    private readonly vault: VaultService,
+    private readonly reflector: Reflector,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') return true;
     if (this.vault.isReady()) return true;
-    const req = context.switchToHttp().getRequest<Request>();
-    if (isAllowedWhileLocked(req.method, req.originalUrl ?? req.url)) return true;
+    const allowed = this.reflector.getAllAndOverride<string | undefined>(
+      ALLOW_WHILE_LOCKED,
+      [context.getHandler(), context.getClass()],
+    );
+    if (typeof allowed === 'string' && allowed.length > 0) return true;
+    // Ersteinrichtung des ersten Kontos: nur solange es noch keinen Tresor gibt.
+    const uninitialized = this.reflector.getAllAndOverride<string | undefined>(
+      ALLOW_WHILE_UNINITIALIZED,
+      [context.getHandler(), context.getClass()],
+    );
+    if (
+      typeof uninitialized === 'string' &&
+      uninitialized.length > 0 &&
+      (await this.vault.state()) === 'uninitialized'
+    ) {
+      return true;
+    }
     throw new HttpException(
       {
         errorCode: 'vault_locked',

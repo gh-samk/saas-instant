@@ -1198,7 +1198,7 @@ export function SettingsPage() {
       {tabs === 'features' && <FeatureFlagManagement />}
 
       {/* ============================================ Reiter „Firmendaten" */}
-      {tabs === 'company' && <IssuerProfileCard />}
+      {tabs === 'company' && <IssuerProfileCard totpPossible={state?.totpSetUp ?? false} />}
 
       {/* ================================================ Reiter „Preise" */}
       {tabs === 'prices' && <PricesCard totpPossible={state?.totpSetUp ?? false} />}

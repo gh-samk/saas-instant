@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Dialog, InputField, Button } from '@saas-instant/ui';
 import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
-import { ApiError, errorText } from '../lib/api-client';
+import { errorText } from '../lib/api-client';
+import { useSecondFactorEvidence } from '../lib/second-factor';
 import {
   noteTransfer,
   type Invoice,
@@ -47,15 +48,16 @@ export function TransferNoteDialog({
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const [dialogError, setDialogError] = useState<string>();
+  // [M12] Der Nachweis läuft über denselben Ablauf wie überall (`ZweitfaktorGuard`
+  // lehnt ohne ihn ab, und der Server kennt die Felder jetzt im DTO).
+  const evidenceState = useSecondFactorEvidence();
 
   useEffect(() => {
     if (!open) return;
     setNote(invoice.transferStatus ?? '');
     setError(null);
-    setEvidenceOpen(false);
-    setDialogError(undefined);
+    evidenceState.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, invoice.transferStatus]);
 
   async function record(evidence?: SecondFactorEvidence) {
@@ -67,22 +69,11 @@ export function TransferNoteDialog({
         note.trim(),
         evidence,
       );
-      setEvidenceOpen(false);
+      evidenceState.close();
       onNoted(updated);
     } catch (f) {
-      if (f instanceof ApiError && f.status === 401) {
-        if (evidence) {
-          setDialogError(
-            evidence.totpCode !== undefined
-              ? t('components.transferNoteDialog.text')
-              : t('components.transferNoteDialog.text2'),
-          );
-        } else {
-          setDialogError(undefined);
-          setEvidenceOpen(true);
-        }
-        return;
-      }
+      if (evidenceState.handle(f, evidence)) return;
+      evidenceState.close();
       setError(errorText(f, t('components.transferNoteDialog.text3')));
     } finally {
       setLoading(false);
@@ -142,16 +133,13 @@ export function TransferNoteDialog({
       </Dialog>
 
       <SecondFactorEvidenceDialog
-        open={evidenceOpen}
+        open={evidenceState.open}
         title={t('components.transferNoteDialog.title')}
         declaration={t('components.transferNoteDialog.declaration')}
         totpPossible={totpPossible}
         loading={loading}
-        error={dialogError}
-        onCancel={() => {
-          setEvidenceOpen(false);
-          setDialogError(undefined);
-        }}
+        error={evidenceState.error}
+        onCancel={evidenceState.close}
         onConfirm={(evidence) => void record(evidence)}
       />
     </>

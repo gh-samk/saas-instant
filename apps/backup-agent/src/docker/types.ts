@@ -22,7 +22,7 @@ export interface ExecHandle {
 export interface DockerClient {
   findContainer(project: string, service: string): Promise<ContainerRef | null>;
   listProject(project: string): Promise<ContainerRef[]>;
-  exec(containerId: string, cmd: string[], opts?: { stdin?: Readable }): ExecHandle;
+  exec(containerId: string, cmd: string[], opts?: { stdin?: Readable; signal?: AbortSignal }): ExecHandle;
   start(containerId: string): Promise<void>;
   stop(containerId: string): Promise<void>;
   /** Compose-Projekt des eigenen Containers (oder null, wenn nicht ermittelbar). */

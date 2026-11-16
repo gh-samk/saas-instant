@@ -266,7 +266,9 @@ function setFetchReady(options: Options = {}) {
       if ((options.paymentNeeds2fa ?? true) && !withEvidence) {
         return new Response(
           JSON.stringify({
-            error: { code: 'evidence_required', message: 'Nachweis erforderlich.' },
+            // Der echte Code des `SecondFactorGuard` (nicht ein erfundener): die
+            // Oberfläche entscheidet am Code, nicht am Status.
+            error: { code: 'login_failed', message: 'Nachweis erforderlich.' },
           }),
           { status: 401 },
         );

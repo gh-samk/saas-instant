@@ -22,8 +22,8 @@ import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../context/AuthContext';
 import { useProduct } from '../context/ProductContext';
 import { useMediaQuery } from '../lib/use-media-query';
-import { fetchCompany, fetchNavigationCounters, type NavigationCounters } from '../lib/api';
-import { rememberCompany } from '../lib/recent-companies';
+import { fetchNavigationCounters, type NavigationCounters } from '../lib/api';
+import { rememberCompanyId } from '../lib/recent-companies';
 import { t, useT } from '../i18n';
 
 /** Welcher Zähler an einem Ziel hängt — und in welcher Farbe. */
@@ -244,10 +244,11 @@ export function AppShell() {
 
   /**
    * ZULETZT GEÖFFNETE ORGANISATIONEN für die Palette: Wer unter
-   * `/companies/<id>…` steht, wird (einmal je Organisation und Besuch) mit
-   * Namen gemerkt. Der Name kommt vom Server, weil die Route nur die Kennung
-   * trägt; schlägt das fehl, fehlt der Eintrag eben.
+   * `/companies/<id>…` steht, wird (einmal je Organisation und Besuch) mit der
+   * KENNUNG gemerkt, je Benutzer. Namen werden nicht gespeichert; die Palette holt
+   * sie beim Öffnen vom Server.
    */
+  const userId = state?.user.id ?? null;
   useEffect(() => {
     const match = /^\/companies\/([^/]+)/.exec(city.pathname);
     const id = match?.[1];
@@ -257,12 +258,8 @@ export function AppShell() {
     }
     if (lastRemembered.current === id) return;
     lastRemembered.current = id;
-    fetchCompany(id)
-      .then((company) => {
-        if (typeof company?.name === 'string') rememberCompany({ id, name: company.name });
-      })
-      .catch(() => {});
-  }, [city.pathname]);
+    rememberCompanyId(userId, id);
+  }, [city.pathname, userId]);
 
   // ⌘K bzw. Strg+K öffnet die Palette (und schließt sie wieder).
   // `preventDefault`, weil Firefox damit sonst seine eigene Schnellsuche öffnet.

@@ -8,9 +8,14 @@ import { ToastProvider } from '@saas-instant/ui';
 import { renderWithI18n as render } from '../test-support/render-with-i18n';
 import type { IssuerSettings } from '../lib/api';
 import { LEGAL_FORM_ORDER, requiredPaths } from '../lib/issuer-fields';
+import { ApiError } from '../lib/api-client';
 import { IssuerProfileCard } from './IssuerProfileCard';
 
 expect.extend(matchers);
+
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ reload: vi.fn().mockResolvedValue(undefined), state: { totpSetUp: false } }),
+}));
 
 const fetchIssuer = vi.fn();
 const saveIssuer = vi.fn();
@@ -540,5 +545,49 @@ describe('Barrierefreiheit', () => {
   it('hat keine axe-Verstöße (GmbH & Co. KG)', async () => {
     const { container } = await renderCard(emptyIssuerProfile('gmbh_co_kg'));
     expect(await axe(container)).toHaveNoViolations();
+  });
+});
+
+/**
+ * [M12] Speichern und Logo stehen serverseitig hinter dem zweiten Faktor.
+ * Ohne frische Sitzung antwortet der Server mit 401 `login_failed`; die
+ * Oberfläche fragt dann nach und wiederholt MIT Nachweis.
+ */
+describe('Zweiter Faktor [M12]', () => {
+  const required = () =>
+    new ApiError({ code: 'login_failed', message: 'Nachweis nötig.' }, 401);
+
+  async function confirmEvidence() {
+    const input = await screen.findByLabelText('Aktuelles Passwort');
+    fireEvent.change(input, { target: { value: 'geheim' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }));
+  }
+
+  it('speichert erst ohne Nachweis, fragt bei 401 nach und wiederholt mit Passwort', async () => {
+    const result = settings({ ...emptyIssuerProfile('gmbh'), name: 'Beispiel GmbH' });
+    saveIssuer.mockRejectedValueOnce(required()).mockResolvedValue(result);
+    await renderCard(emptyIssuerProfile('gmbh'));
+    fireEvent.change(screen.getByLabelText(/^Firma \/ Name/), { target: { value: 'Beispiel GmbH' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    await confirmEvidence();
+    await waitFor(() => expect(saveIssuer).toHaveBeenCalledTimes(2));
+    expect(saveIssuer.mock.calls[0]?.[1]).toBeUndefined();
+    expect(saveIssuer.mock.calls[1]?.[1]).toEqual({ currentPassword: 'geheim' });
+  });
+
+  it('lädt ein Logo erst ohne Nachweis hoch und wiederholt dieselbe Datei mit Nachweis', async () => {
+    uploadIssuerLogo.mockRejectedValueOnce(required()).mockResolvedValue(null);
+    await renderCard();
+    openBranding();
+    const file = new File(['x'], 'logo.png', { type: 'image/png' });
+    fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [file] },
+    });
+    await confirmEvidence();
+    await waitFor(() => expect(uploadIssuerLogo).toHaveBeenCalledTimes(2));
+    expect(uploadIssuerLogo.mock.calls[0]?.[1]).toBeUndefined();
+    expect(uploadIssuerLogo.mock.calls[1]?.[0]).toBe(file);
+    expect(uploadIssuerLogo.mock.calls[1]?.[1]).toEqual({ currentPassword: 'geheim' });
   });
 });

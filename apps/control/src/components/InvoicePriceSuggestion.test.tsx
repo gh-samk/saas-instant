@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen } from '@testing-library/react';
 import { renderWithI18n as render } from '../test-support/render-with-i18n';
 import type { PriceSuggestion } from '../lib/api';
-import { InvoicePriceSuggestion } from './InvoicePriceSuggestion';
+import { InvoicePriceSuggestion, contractLines } from './InvoicePriceSuggestion';
 
 /**
  * Der Vorschlag rechnet mit der Stufe aus der Preisliste (DB): Betrag UND
@@ -176,5 +176,32 @@ describe('InvoicePriceSuggestion: Posten aus Vertrag', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Posten aus Vertrag übernehmen' })).toBeNull();
+  });
+});
+
+describe('Einrichtung wird nur einmal vorgeschlagen [N8f]', () => {
+  const INVOICED: PriceSuggestion = {
+    ...SUGGESTION,
+    setupCalculable: false,
+    setupInvoiced: true,
+    contract: {
+      tierKey: 'mittel',
+      tier: SUGGESTION.tier,
+      paymentInterval: 'yearly',
+    },
+  } as PriceSuggestion;
+
+  it('bietet den Einrichtungsknopf nach der ersten Rechnung nicht mehr an und sagt warum', () => {
+    render(<InvoicePriceSuggestion suggestion={INVOICED} loadError={null} companyId="c1" onAdopt={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /Einrichtungspauschale/ })).toBeNull();
+    expect(screen.getByText(/Einrichtung ist bereits berechnet/)).toBeInTheDocument();
+  });
+
+  it('übernimmt aus dem Vertrag keinen Einrichtungsposten mehr (Abo noch nicht berechenbar)', () => {
+    const young = { ...INVOICED, subscriptionCalculable: false };
+    expect(contractLines(young).lines).toEqual([]);
+    // Gegenprobe: ohne die Rechnung bleibt es beim Einrichtungsposten.
+    const fresh = { ...young, setupCalculable: true, setupInvoiced: false };
+    expect(contractLines(fresh).lines).toHaveLength(1);
   });
 });

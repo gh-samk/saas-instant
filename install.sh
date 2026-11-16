@@ -352,11 +352,16 @@ else
     printf 'BACKUP_AGENT_SECRET=%s\n' "$(secret 32)"
     printf 'AGENT_STATE_KEY=%s\n' "$(secret 32)"
     printf 'BACKUP_REPORT_KEY=%s\n' "$(secret 32)"
+    printf '# Passwort der schreibgeschützten Datenbankrolle des Backup-Agents (nur pg_dump).\n'
+    printf 'BACKUP_DB_PASSWORD=%s\n' "$(secret 32)"
     printf 'MANIFEST_FILE=%s\n' "$TARGET/saas-instant.manifest.yaml"
   } > "$TARGET/.env"
   chmod 600 "$TARGET/.env"
   info "Angelegt: $TARGET/.env (Rechte 600, Port $PORT)"
 fi
+
+# Bestehende Installationen bekommen das Passwort der Agent-Rolle nachträglich (vorhandene Werte bleiben).
+env_add "$TARGET/.env" BACKUP_DB_PASSWORD "$(secret 32)"
 
 if [ ! -f "$TARGET/saas-instant.manifest.yaml" ]; then
   EXAMPLE="$SRC_DIR/saas-instant.manifest.example.yaml"
@@ -483,7 +488,8 @@ fi
 PORTAL_COMPOSE="$SRC_DIR/apps/portal/docker-compose.portal.yml"
 [ -f "$PORTAL_COMPOSE" ] || PORTAL_COMPOSE="$ROOT_DIR/apps/portal/docker-compose.portal.yml"
 AUTH_NET="$(env_get "$PORTAL_DIR/portal.env" PORTAL_AUTH_NETWORK)"; AUTH_NET="${AUTH_NET:-saas-instant-portal-auth}"
-pdc() { docker compose --env-file "$PORTAL_DIR/portal.env" -f "$PORTAL_COMPOSE" "$@"; }
+# PORTAL_REGISTRY_DIR: die Registry liegt im Installationsverzeichnis (--dir), nicht zwingend im Quellbaum.
+pdc() { PORTAL_REGISTRY_DIR="$PORTAL_DIR/registry" docker compose --env-file "$PORTAL_DIR/portal.env" -f "$PORTAL_COMPOSE" "$@"; }
 
 docker network inspect "$AUTH_NET" >/dev/null 2>&1 || docker network create "$AUTH_NET" >/dev/null
 pdc up -d --build

@@ -363,3 +363,36 @@ describe('InvoiceDraftForm: stabile Posten-IDs', () => {
     expect(after).toEqual(before);
   });
 });
+
+describe('InvoiceDraftForm: Fälligkeit wandert mit dem Rechnungsdatum [M16]', () => {
+  beforeEach(() => {
+    updateInvoiceDraft.mockReset();
+    createInvoiceDraft.mockReset();
+  });
+
+  async function saved(invoice: Invoice | null) {
+    updateInvoiceDraft.mockResolvedValue(draft('C62'));
+    createInvoiceDraft.mockResolvedValue(draft('C62'));
+    show(invoice);
+    fireEvent.change(screen.getByLabelText('Rechnungsdatum'), { target: { value: '2026-09-15' } });
+    fireEvent.click(screen.getByRole('button', { name: invoice === null ? 'Als Entwurf speichern' : 'Speichern' }));
+    const mock = invoice === null ? createInvoiceDraft : updateInvoiceDraft;
+    await waitFor(() => expect(mock).toHaveBeenCalled());
+    return mock.mock.calls[0]?.[invoice === null ? 1 : 1] as { dueDate?: string };
+  }
+
+  it('schickt eine vom Server abgeleitete Fälligkeit NICHT zurück', async () => {
+    const body = await saved({ ...draft('C62'), dueDateManual: false } as Invoice);
+    expect(body.dueDate).toBeUndefined();
+  });
+
+  it('schickt eine von Hand gesetzte Fälligkeit weiter mit', async () => {
+    const body = await saved({ ...draft('C62'), dueDateManual: true } as Invoice);
+    expect(body.dueDate).toBe('2026-09-14');
+  });
+
+  it('behandelt einen Entwurf ohne Angabe wie bisher als von Hand gesetzt', async () => {
+    const body = await saved(draft('C62'));
+    expect(body.dueDate).toBe('2026-09-14');
+  });
+});

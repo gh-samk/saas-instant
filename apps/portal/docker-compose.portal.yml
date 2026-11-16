@@ -24,7 +24,11 @@ services:
       # Nur das Registry-Unterverzeichnis (nicht portal/ mit portal.env und den
       # Geheimnissen). Verzeichnis statt Einzeldatei: install.sh ersetzt
       # registry.json atomar.
-      - ../../portal/registry:/srv/registry:ro
+      # PORTAL_REGISTRY_DIR setzen install.sh und bin/saas-instant auf das Verzeichnis
+      # der Installation (--dir bzw. SAAS_INSTANT_ROOT). Ohne die Variable gilt der
+      # Pfad im Quellbaum; bei abweichendem --dir wuerde sonst ein leeres bzw.
+      # veraltetes Verzeichnis eingebunden und das Portal listete keine Verwaltung.
+      - ${PORTAL_REGISTRY_DIR:-../../portal/registry}:/srv/registry:ro
     read_only: true
     tmpfs:
       - /tmp

@@ -2,7 +2,12 @@
 import { randomUUID } from 'crypto';
 import { Prisma } from '.prisma/control-client';
 import { AuditService } from '../audit/audit.service';
-import { blindIndex, consentEmailIndex } from '../crypto/field-crypto';
+import {
+  FieldDecryptError,
+  blindIndex,
+  consentEmailIndex,
+  plaintextPolicy,
+} from '../crypto/field-crypto';
 import {
   cleanUp,
   cleanUpConsents,
@@ -12,7 +17,12 @@ import {
 } from '../test-support/company-provisioning';
 import { unlockTestVault } from '../test-support/vault';
 import { EncryptExistingService } from '../vault/encrypt-existing.service';
-import { EncryptedFieldQueryError, rawClientOf } from './field-encryption';
+import {
+  EncryptedFieldQueryError,
+  rawClientOf,
+  readLenient,
+  unreadableFieldsOf,
+} from './field-encryption';
 
 jest.setTimeout(120_000);
 
@@ -347,5 +357,85 @@ describe('encrypt-existing', () => {
     expect(second.Company).toBe(0);
     expect(second.Consent).toBe(0);
     expect(second.Invoice).toBe(0);
+  });
+});
+
+/**
+ * N2: Nach dem Einmal-Lauf ist Klartext in einem verschlüsselten Feld kein
+ * Altbestand mehr, sondern ein Befund. (Läuft nach `encrypt-existing`, das den
+ * strengen Modus einschaltet.)
+ */
+describe('Klartext nach dem Einmal-Lauf (N2)', () => {
+  it('der Einmal-Lauf schaltet den strengen Modus ein', () => {
+    expect(plaintextPolicy.strict).toBe(true);
+  });
+
+  it('Company: ein per SQL untergeschobener Klartext wird NICHT angenommen', async () => {
+    const company = await prisma.company.create({ data: { name: `${PREFIX} Downgrade`, iban: 'DE001' } });
+    await (prisma as any).$executeRawUnsafe('UPDATE "Company" SET "iban" = $1 WHERE "id" = $2', 'DE00ANGREIFER', company.id);
+
+    const error = await prisma.company
+      .findUniqueOrThrow({ where: { id: company.id }, select: { iban: true } })
+      .then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(FieldDecryptError);
+    expect(error).toMatchObject({ model: 'Company', field: 'iban', id: company.id });
+  });
+
+  it('Entwurf einer Rechnung: Klartext im Feld wird nicht angenommen, festgeschriebene Altrechnung schon', async () => {
+    const company = await prisma.company.create({ data: { name: `${PREFIX} Rechnungen` } });
+    const draftId = randomUUID();
+    const finalId = randomUUID();
+    await prisma.invoice.create({ data: { id: draftId, ...invoiceData(company.id) } as any });
+    // Altbestand: festgeschrieben, Klartext (nur an der Rohschnittstelle anlegbar).
+    await (raw as any).invoice.create({
+      data: { id: finalId, ...invoiceData(company.id, { finalizedAt: new Date(), invoiceNumber: `${PREFIX}-N2`, status: 'finalized' }) },
+    });
+    await (prisma as any).$executeRawUnsafe('UPDATE "Invoice" SET "recipientName" = $1 WHERE "id" = $2', 'Klartext-Entwurf', draftId);
+
+    await expect(
+      prisma.invoice.findUniqueOrThrow({ where: { id: draftId }, select: { recipientName: true } }),
+    ).rejects.toBeInstanceOf(FieldDecryptError);
+    // Auch OHNE finalizedAt im select entscheidet die Festschreibung (wird intern nachgeladen und wieder entfernt).
+    const legacy = await prisma.invoice.findUniqueOrThrow({ where: { id: finalId }, select: { recipientName: true } });
+    expect(legacy).toEqual({ recipientName: `${PREFIX} Empfänger` });
+  });
+
+  it('AuditLog-Altzeilen im Klartext bleiben lesbar (append-only, dokumentierter Altbereich)', async () => {
+    const id = randomUUID();
+    await (raw as any).auditLog.create({
+      data: { id, actor: PREFIX, action: 'test.legacy', objectType: 'Test', ip: '203.0.113.9', afterValue: { a: 1 } },
+    });
+    const row = await prisma.auditLog.findUniqueOrThrow({ where: { id } });
+    expect(row).toMatchObject({ ip: '203.0.113.9', afterValue: { a: 1 } });
+  });
+});
+
+describe('Nachsichtiges Lesen (readLenient)', () => {
+  it('ein beschädigter Wert macht die Abfrage normalerweise zum Fehler, im nachsichtigen Modus zu null mit Vermerk', async () => {
+    const good = await prisma.company.create({ data: { name: `${PREFIX} Gut` } });
+    const bad = await prisma.company.create({ data: { name: `${PREFIX} Kaputt` } });
+    const stored = (await (raw as any).company.findUniqueOrThrow({ where: { id: bad.id } })).name as string;
+    // Ein Zeichen im Chiffretext kippen.
+    const flipped = stored.slice(0, -2) + (stored.slice(-2, -1) === 'A' ? 'B' : 'A') + stored.slice(-1);
+    await (prisma as any).$executeRawUnsafe('UPDATE "Company" SET "name" = $1 WHERE "id" = $2', flipped, bad.id);
+
+    const select = { id: true, name: true };
+    await expect(prisma.company.findMany({ where: { id: { in: [good.id, bad.id] } }, select })).rejects.toBeInstanceOf(
+      FieldDecryptError,
+    );
+
+    try {
+      const rows = await readLenient(() =>
+        prisma.company.findMany({ where: { id: { in: [good.id, bad.id] } }, select, orderBy: { id: 'asc' } }),
+      );
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      expect(byId.get(good.id)?.name).toBe(`${PREFIX} Gut`);
+      expect(byId.get(bad.id)?.name).toBeNull();
+      expect(unreadableFieldsOf(byId.get(bad.id))).toEqual(['name']);
+      expect(unreadableFieldsOf(byId.get(good.id))).toEqual([]);
+    } finally {
+      // Den Wert zurückschreiben, damit das Aufräumen am Ende wieder lesen kann.
+      await (prisma as any).$executeRawUnsafe('UPDATE "Company" SET "name" = $1 WHERE "id" = $2', stored, bad.id);
+    }
   });
 });

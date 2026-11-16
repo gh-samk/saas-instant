@@ -8,7 +8,13 @@ import {
 } from '@saas-instant/shared';
 import { Button, Card, Skeleton, useToast } from '@saas-instant/ui';
 import { CheckCircle2, ListChecks } from 'lucide-react';
-import { fetchIssuer, saveIssuer, type IssuerSettings } from '../lib/api';
+import {
+  fetchIssuer,
+  saveIssuer,
+  type IssuerSettings,
+  type SecondFactorEvidence,
+} from '../lib/api';
+import { useSecondFactorEvidence } from '../lib/second-factor';
 import { errorText } from '../lib/api-client';
 import { DEFAULT_ACCENT } from '../lib/accent';
 import {
@@ -28,6 +34,7 @@ import { useT } from '../i18n';
 import { FieldRow, FormSection, IssuerField } from './IssuerFormParts';
 import { SelectField } from './FormFields';
 import { StickySaveBar } from './StickySaveBar';
+import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
 import { IssuerBranding, accentCheck } from './IssuerBranding';
 
 /** Ergänzt fehlende Teile einer Serverantwort mit den Vorgaben, damit das Formular nie auf `undefined` trifft. */
@@ -72,8 +79,12 @@ export function focusField(path: string): void {
  * sofort beim Hochladen oder Entfernen gespeichert (eigene Schnittstelle) und
  * ist deshalb nicht Teil davon.
  */
-export function IssuerProfileCard() {
+export function IssuerProfileCard({ totpPossible = false }: { totpPossible?: boolean }) {
   const t = useT();
+  // [M12] Speichern steht serverseitig hinter dem zweiten Faktor (die Angaben
+  // stehen unveränderlich auf jeder künftigen Rechnung). Erst ohne Nachweis
+  // rufen; verlangt der Server ihn, fragt der Dialog (Muster PricesCard).
+  const evidenceState = useSecondFactorEvidence();
   const toast = useToast();
   const product = useProduct();
   const [saved, setSaved] = useState<IssuerSettings | null>(null);
@@ -131,18 +142,24 @@ export function IssuerProfileCard() {
     setAfterSave(null);
   }, []);
 
-  async function save() {
+  async function save(evidence?: SecondFactorEvidence) {
     if (!profile || !check.valid) return;
     setSaving(true);
     setError(null);
     try {
-      const result = await saveIssuer({ profile, accentColor: accent.toLowerCase() });
+      const result = await saveIssuer(
+        { profile, accentColor: accent.toLowerCase() },
+        evidence,
+      );
+      evidenceState.close();
       adopt(result);
       setShowErrors(true);
       setAfterSave(result.missing.length);
       toast.show(t('firma.saved'));
       product.refresh();
     } catch (f) {
+      if (evidenceState.handle(f, evidence)) return;
+      evidenceState.close();
       setError(errorText(f, t('firma.saveFailed')));
     } finally {
       setSaving(false);
@@ -347,6 +364,7 @@ export function IssuerProfileCard() {
               setError(null);
             }}
             onLogoChanged={refreshLogo}
+            totpPossible={totpPossible}
           />
         </FormSection>
       </div>
@@ -358,8 +376,19 @@ export function IssuerProfileCard() {
         saving={saving}
         error={error ?? (!check.valid ? t('firma.accentBlocked') : null)}
         label={t('firma.saveRegion')}
-        onSave={save}
+        onSave={() => void save()}
         onDiscard={discard}
+      />
+
+      <SecondFactorEvidenceDialog
+        open={evidenceState.open}
+        title={t('firma.saveEvidenceTitle')}
+        declaration={t('firma.saveEvidenceDeclaration')}
+        totpPossible={totpPossible}
+        loading={saving}
+        error={evidenceState.error}
+        onCancel={evidenceState.close}
+        onConfirm={(evidence) => void save(evidence)}
       />
     </div>
   );

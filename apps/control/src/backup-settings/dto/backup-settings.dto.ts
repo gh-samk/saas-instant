@@ -91,6 +91,18 @@ export class BackupStorageBoxDto {
   @IsOptional() @IsString() @MaxLength(16384) privateKey?: string;
 
   @IsOptional() @IsString() @MaxLength(512) password?: string;
+
+  /**
+   * Fingerabdruck des SSH-Host-Keys im OpenSSH-Format (`SHA256:` + 43 Zeichen Base64), z. B. aus
+   * `ssh-keygen -lf`. Leer: der Agent pinnt den Schlüssel beim Verbindungstest (erster Kontakt).
+   * Ohne gepinnten Schlüssel sichert der Agent nicht.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^SHA256:[A-Za-z0-9+/]{43}$/, {
+    message: 'Der Host-Fingerabdruck muss die Form SHA256:… haben (43 Zeichen Base64, ohne Gleichheitszeichen).',
+  })
+  hostKeyFingerprint?: string;
 }
 
 /** PUT /api/settings/backup. */

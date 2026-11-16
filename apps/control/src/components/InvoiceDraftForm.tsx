@@ -34,8 +34,9 @@ import {
 } from '../lib/api';
 import { centAsFieldValue, centFromInput, formatAmountCent } from '../utils/amount';
 import { decimalFieldValue } from '../utils/decimal';
+import { formatDate } from '../utils/date';
 import { servicePeriodSuggestion } from '../utils/service-period';
-import { linesAmounts, sums } from '../utils/invoice-amount';
+import { allocatedAmounts, sums } from '../utils/invoice-amount';
 import { t, useT } from '../i18n';
 
 /** Ein Posten, wie das Formular ihn führt: alles als Text. */
@@ -226,6 +227,14 @@ function targetFor(issue: ValidationIssue, lines: LinesDraft[]): FieldTarget | n
     : { key: head.key, focusId: head.focusId, expand: head.expand, rank: head.rank };
 }
 
+/** Die von Hand gesetzte Fälligkeit eines Entwurfs; `''`, wenn sie abgeleitet ist. */
+function manualDueDate(invoice: Invoice | null): string {
+  if (invoice === null) return '';
+  // Ohne Angabe (ältere Antwort) gilt sie als von Hand gesetzt: so bleibt der
+  // gespeicherte Wert unverändert.
+  return invoice.dueDateManual === false ? '' : invoice.dueDate;
+}
+
 /** Was ein Entwurf bearbeitbar macht — Grundlage des Änderungsstands (ohne React-Schlüssel). */
 interface DraftSnapshot {
   invoiceDate: string;
@@ -310,12 +319,12 @@ export function InvoiceDraftForm({
           until: invoice.servicePeriodUntil,
         },
   );
-  // Beim Entwurf hat der Server bereits gerechnet; das Feld zeigt den
-  // gerechneten Wert und lässt sich überschreiben. Bei der Neuanlage bleibt es
-  // leer, damit der Server rechnet.
-  const [dueDate, setDueDate] = useState(
-    () => invoice?.dueDate ?? '',
-  );
+  // [M16] Das Feld hält NUR eine von Hand gesetzte Fälligkeit; leer heißt:
+  // der Server rechnet Rechnungsdatum + Zahlungsziel (und beim Festschreiben
+  // erneut). Früher stand hier der vom Server gerechnete Wert und wurde beim
+  // nächsten Speichern als „von Hand" zurückgeschickt — die Fälligkeit wanderte
+  // dann nicht mehr mit dem Rechnungsdatum.
+  const [dueDate, setDueDate] = useState(() => manualDueDate(invoice));
   // Die drei Texte des Bearbeiten-Screens. Einleitung und Zahlungshinweis
   // stehen auf dem BELEG und werden mit dem Festschreiben unveraenderlich;
   // die interne Notiz steht auf keinem Beleg und geht in keine Mail.
@@ -384,13 +393,13 @@ export function InvoiceDraftForm({
       from: invoice.servicePeriodFrom,
       until: invoice.servicePeriodUntil,
     });
-    setDueDate(invoice.dueDate);
+    setDueDate(manualDueDate(invoice));
     // Der Server kann Werte gerechnet haben: Sie gelten als gespeicherter Stand.
     markSaved((current) => ({
       ...current,
       invoiceDate: invoice.invoiceDate,
       period: { from: invoice.servicePeriodFrom, until: invoice.servicePeriodUntil },
-      dueDate: invoice.dueDate,
+      dueDate: manualDueDate(invoice),
     }));
   }, [invoice, markSaved]);
 
@@ -722,6 +731,8 @@ export function InvoiceDraftForm({
   }
 
   const total = sums(lines);
+  // Die Postensteuern, so verteilt wie beim Speichern (summieren sich auf `total`).
+  const lineAmounts = allocatedAmounts(lines);
   // HINWEIS, WOHER DIE VORBELEGUNG KOMMT — nur solange sie unverändert steht.
   // Wer den Zeitraum ändert, hat entschieden; ein Hinweis auf „aus dem Vertrag"
   // wäre dann falsch.
@@ -802,7 +813,7 @@ export function InvoiceDraftForm({
               {t('components.invoiceDraftForm.heading')}</h2>
 
             {lines.map((p, i) => {
-              const amounts = linesAmounts(p);
+              const amounts = lineAmounts[i]!;
               const open = expanded.has(weitereKey(p.key));
               const periodOpen = expanded.has(periodKey(p.key));
               return (
@@ -1160,7 +1171,16 @@ export function InvoiceDraftForm({
               label={t('components.invoiceDraftForm.label20')}
               value={dueDate}
               onChange={setDueDate}
-              helperText={t('components.invoiceDraftForm.helperText3')}
+              helperText={
+                dueDate === '' &&
+                invoice !== null &&
+                invoice.dueDateManual === false &&
+                invoice.invoiceDate === invoiceDate
+                  ? t('components.invoiceDraftForm.dueAuto', {
+                      date: formatDate(invoice.dueDate),
+                    })
+                  : t('components.invoiceDraftForm.helperText3')
+              }
               error={fieldError['rechnung-faelligkeit']}
             />
 

@@ -204,6 +204,19 @@ export class BackupSettingsService {
     };
     const existing = await this.readTarget(null);
     const sameType = existing !== null && existing.type === dto.type;
+    // Gespeicherte Geheimnisse bleiben nur, wenn sich die Gegenstelle nicht ändert; der Agent prüft
+    // dasselbe. Sonst ließe sich ein Ziel auf einen fremden Host umstellen und mit dem alten Passwort anmelden.
+    const sameS3Endpoint =
+      sameType &&
+      dto.type === 's3' &&
+      existing?.endpoint === dto.s3?.endpoint &&
+      existing?.bucket === dto.s3?.bucket;
+    const sameBoxEndpoint =
+      sameType &&
+      dto.type === 'storagebox' &&
+      existing?.host === dto.storagebox?.host &&
+      existing?.port === dto.storagebox?.port &&
+      existing?.username === dto.storagebox?.username;
 
     if (dto.type === 's3' && dto.s3) {
       const accessKeyId = nonEmpty(dto.s3.accessKeyId);
@@ -212,6 +225,8 @@ export class BackupSettingsService {
         problems.push('Zugangskennung und geheimer Zugangsschlüssel gehören zusammen: entweder beide oder keines von beiden angeben.');
       } else if (accessKeyId === undefined && !sameType) {
         problems.push('Die Zugangskennung und der geheime Zugangsschlüssel fehlen.');
+      } else if (accessKeyId === undefined && !sameS3Endpoint) {
+        problems.push('Endpunkt oder Bucket wurden geändert: Gib die Zugangskennung und den geheimen Zugangsschlüssel erneut ein.');
       }
       update.s3 = {
         endpoint: dto.s3.endpoint,
@@ -234,7 +249,13 @@ export class BackupSettingsService {
           const current = await this.agent.getTarget();
           keepable = current.authType === b.authType;
         }
-        if (!keepable) {
+        if (keepable && !sameBoxEndpoint) {
+          problems.push(
+            b.authType === 'key'
+              ? 'Host, Port oder Benutzer wurden geändert: Gib den privaten Schlüssel erneut ein.'
+              : 'Host, Port oder Benutzer wurden geändert: Gib das Passwort erneut ein.',
+          );
+        } else if (!keepable) {
           problems.push(
             b.authType === 'key'
               ? 'Für die Anmeldung per Schlüssel fehlt der private Schlüssel.'
@@ -253,6 +274,7 @@ export class BackupSettingsService {
           : b.authType === 'key'
             ? { privateKey: secret }
             : { password: secret }),
+        ...(nonEmpty(b.hostKeyFingerprint) !== undefined ? { hostKeyFingerprint: nonEmpty(b.hostKeyFingerprint) } : {}),
       };
     }
     if (dto.objectLock && dto.type !== 's3') {

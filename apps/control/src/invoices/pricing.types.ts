@@ -112,6 +112,8 @@ export interface PriceSuggestion {
    * Aufsetzen der Instanz erbracht, das Abo erst nach der Pilotphase.
    */
   setupCalculable: boolean;
+  /** Steht ein Einrichtungsposten schon auf einer gültigen festgeschriebenen Rechnung? Dann ist `setupCalculable` falsch. */
+  setupInvoiced: boolean;
   /** Der Vertrag der Organisation — Grundlage für „Posten aus Vertrag übernehmen". */
   contract: ContractTerms;
 }

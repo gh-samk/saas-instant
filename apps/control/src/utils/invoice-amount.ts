@@ -19,7 +19,9 @@ import { centFromInput } from './amount';
  *    genau eine Steueraufteilung je Satz; die Summe der einzeln gerundeten
  *    Postensteuern wäre bei Rundung nicht dieselbe Zahl. Der Steuerbetrag am
  *    einzelnen Posten wird trotzdem geführt und angezeigt — er ist
- *    nachrichtlich.
+ *    nachrichtlich. [M10] Damit die angezeigten Postensteuern zusammen genau
+ *    die Gruppensteuer ergeben (wie die gespeicherten), verteilt
+ *    `allocatedAmounts` die Rundungsdifferenz wie `allocateTax` im Backend.
  */
 
 /** Kaufmännisch auf ganze Cent runden (halbe Cent aufwärts, auch negativ). */
@@ -100,4 +102,49 @@ export function sums(lines: LinesFields[]): Sums {
   }
 
   return { netCent, taxCent, grossCent: netCent + taxCent };
+}
+
+
+/**
+ * Die Beträge ALLER Posten, mit der Steuer je Satz so verteilt, dass die
+ * Postensteuern zusammen genau `sums(...).taxCent` ergeben [M10].
+ *
+ * Spiegel von `allocateTax` in `invoices/invoice.amount.ts` (Verfahren des
+ * größten Rests, bei Gleichstand gewinnt der frühere Posten). Unvollständige
+ * Posten bleiben unvollständig und zählen nicht mit.
+ */
+export function allocatedAmounts(lines: LinesFields[]): LinesAmounts[] {
+  const singles = lines.map((p) => linesAmounts(p));
+  const groups = new Map<number, number[]>();
+  singles.forEach((single, index) => {
+    if (!single.complete) return;
+    const rate = numberFrom(lines[index]!.taxRate) ?? 0;
+    groups.set(rate, [...(groups.get(rate) ?? []), index]);
+  });
+  const taxOf = singles.map((single) => single.taxCent);
+  for (const [rate, indexes] of groups) {
+    const basis = indexes.reduce((s, i) => s + singles[i]!.netCent, 0);
+    let rest =
+      roundCent((basis * rate) / 100) -
+      indexes.reduce((s, i) => s + taxOf[i]!, 0);
+    if (rest === 0) continue;
+    const direction = rest > 0 ? 1 : -1;
+    const exact = (i: number) => (singles[i]!.netCent * rate) / 100;
+    const order = [...indexes].sort(
+      (a, b) =>
+        direction * (exact(b) - taxOf[b]!) - direction * (exact(a) - taxOf[a]!) ||
+        a - b,
+    );
+    let round = 0;
+    while (rest !== 0) {
+      taxOf[order[round % order.length]!]! += direction;
+      rest -= direction;
+      round += 1;
+    }
+  }
+  return singles.map((single, i) =>
+    single.complete
+      ? { ...single, taxCent: taxOf[i]!, grossCent: single.netCent + taxOf[i]! }
+      : single,
+  );
 }

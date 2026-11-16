@@ -140,4 +140,35 @@ describe('invoiceOverdue', () => {
     const result = await invoiceOverdue.collect(context);
     expect(result.tasks[0]?.reason).toBe('seit 1 Tag');
   });
+
+  /**
+   * [H2] EINE STORNORECHNUNG IST NIE ÜBERFÄLLIG. Sie ist `finalized`, trägt
+   * das Ausstellungsdatum als Fälligkeit und eine negative Summe — am Folgetag
+   * stand sonst „überfällig · -119,00 €" auf dem Dashboard.
+   */
+  it('schließt Stornorechnungen in der Abfrage aus', async () => {
+    const { context, calls } = contextWith([]);
+    await invoiceOverdue.collect(context);
+    expect(calls[0]?.where).toMatchObject({ cancelledInvoiceId: null });
+  });
+
+  it('meldet weder 0-€-Rechnungen noch negative Summen noch Ausgeglichenes', async () => {
+    const { context } = contextWith([
+      Row,
+      { ...Row, id: 'null', lines: [{ grossAmount: new Prisma.Decimal('0.00') }] },
+      { ...Row, id: 'storno', lines: [{ grossAmount: new Prisma.Decimal('-119.00') }] },
+      { ...Row, id: 'paid', paidAmount: new Prisma.Decimal('458.15') },
+    ]);
+    const result = await invoiceOverdue.collect(context);
+    expect(result.total).toBe(1);
+    expect(result.tasks.map((t) => t.invoiceId)).toEqual(['r1']);
+  });
+
+  it('kürzt auf das Limit, zählt aber alle offenen', async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => ({ ...Row, id: `r${i}` }));
+    const { context } = contextWith(rows);
+    const result = await invoiceOverdue.collect({ ...context, limit: 2 });
+    expect(result.total).toBe(3);
+    expect(result.tasks).toHaveLength(2);
+  });
 });

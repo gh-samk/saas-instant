@@ -1,5 +1,6 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import { BackupKeyGuard } from './backup-key.guard';
 import { BackupPlanService, type BackupPlanResponse } from './backup-plan.service';
 
@@ -15,6 +16,11 @@ import { BackupPlanService, type BackupPlanResponse } from './backup-plan.servic
 export class InternalBackupPlanController {
   constructor(private readonly plan: BackupPlanService) {}
 
+  @AllowWhileLocked(
+    'Liest nur Instance.subdomain und Instance.coolifyApplicationId sowie das ' +
+      'Manifest; beides ist unverschlüsselt. Ohne diese Route sicherte der Agent ' +
+      'nach einem Neustart nichts, bis jemand entsperrt.',
+  )
   @Get()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async get(): Promise<BackupPlanResponse> {

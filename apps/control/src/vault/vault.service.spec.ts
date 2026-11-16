@@ -268,6 +268,123 @@ describe('VaultService', () => {
     });
   });
 
+  describe('Sperren während eines laufenden Umpackens (N3)', () => {
+    it('addPassphrase: lock() mitten im Vorgang schreibt nichts (423) statt einen Nullschlüssel einzupacken', async () => {
+      const { service, rows } = build();
+      await service.initialize(PASS, ACTOR);
+      const before = rows.length;
+
+      const pending = statusOf(
+        service.addPassphrase('zweite-admin-passphrase', 'x', null, ACTOR),
+      );
+      await service.lock();
+
+      expect(await pending).toBe(423);
+      expect(rows).toHaveLength(before);
+    });
+
+    it('changePassphrase und regenerateRecovery brechen bei zwischenzeitlichem Sperren ebenfalls ab', async () => {
+      const { service, rows } = build();
+      await service.initialize(PASS, ACTOR);
+      const entry = rows.find((r) => r.kind === 'passphrase')!;
+      const snapshot = rows.map((r) => r.id).sort();
+
+      const change = statusOf(
+        service.changePassphrase(entry.id, PASS, 'neue-lange-passphrase-1', ACTOR),
+      );
+      await service.lock();
+      expect(await change).toBe(423);
+
+      await service.unlock(PASS, ACTOR);
+      const recovery = statusOf(service.regenerateRecovery(ACTOR));
+      await service.lock();
+      expect(await recovery).toBe(423);
+
+      expect(rows.map((r) => r.id).sort()).toEqual(snapshot);
+    });
+
+    it('sperren und sofort wieder entsperren zählt ebenfalls: der alte Vorgang schreibt nicht', async () => {
+      const { service, rows } = build();
+      await service.initialize(PASS, ACTOR);
+      const before = rows.length;
+      const outcome = statusOf(
+        service.addPassphrase('zweite-admin-passphrase', 'x', null, ACTOR),
+      );
+      await service.lock();
+      await service.unlock(PASS, ACTOR);
+      expect(await outcome).toBe(423);
+      expect(rows).toHaveLength(before);
+    });
+
+    it('ohne Sperren funktioniert der Vorgang weiter und der Schlüssel im Dienst bleibt unversehrt', async () => {
+      const { service } = build();
+      await service.initialize(PASS, ACTOR);
+      const aad = aadFor('Company', 'name', 'id');
+      const stored = encryptField('Muster', aad);
+      await service.addPassphrase('zweite-admin-passphrase', 'x', null, ACTOR);
+      expect(decryptField(stored, aad)).toBe('Muster');
+      await service.lock();
+      await service.unlock('zweite-admin-passphrase', ACTOR);
+      expect(decryptField(stored, aad)).toBe('Muster');
+    });
+  });
+
+  describe('Passphrase entziehen (M2)', () => {
+    it('entzieht eine weitere Passphrase: sie entsperrt nicht mehr, die andere schon; Audit ohne Geheimnis', async () => {
+      const { service, rows, entries } = build();
+      await service.initialize(PASS, ACTOR);
+      const second = await service.addPassphrase('zweite-admin-passphrase', 'Zweite Person', null, ACTOR);
+      entries.length = 0;
+
+      await service.removePassphrase(second.id, ACTOR);
+
+      expect(rows.find((r) => r.id === second.id)).toBeUndefined();
+      expect(entries.map((e) => e.action)).toEqual(['vault.passphrase.removed']);
+      expect(JSON.stringify(entries)).not.toContain('zweite-admin-passphrase');
+      await service.lock();
+      expect(await statusOf(service.unlock('zweite-admin-passphrase', ACTOR, 'a'))).toBe(401);
+      await service.unlock(PASS, ACTOR, 'b');
+      expect(service.isUnlocked()).toBe(true);
+    });
+
+    it('der letzte verbleibende Zugang ist geschützt (409), es bleibt unverändert', async () => {
+      const { service, rows } = build();
+      await service.initialize(PASS, ACTOR);
+      // Wiederherstellungsschlüssel ist weg (z. B. Altbestand): die Passphrase ist der einzige Zugang.
+      rows.splice(rows.findIndex((r) => r.kind === 'recovery'), 1);
+      const only = rows[0];
+      expect(await statusOf(service.removePassphrase(only.id, ACTOR))).toBe(409);
+      expect(rows).toHaveLength(1);
+    });
+
+    it('mit Wiederherstellungsschlüssel als Rest darf die letzte Passphrase gehen', async () => {
+      const { service, rows } = build();
+      const { recoveryKey } = await service.initialize(PASS, ACTOR);
+      const only = rows.find((r) => r.kind === 'passphrase')!;
+      await service.removePassphrase(only.id, ACTOR);
+      await service.lock();
+      await service.unlock(recoveryKey, ACTOR);
+      expect(service.isUnlocked()).toBe(true);
+    });
+
+    it('den Wiederherstellungsschlüssel und unbekannte Einträge entzieht die Route nicht (404)', async () => {
+      const { service, rows } = build();
+      await service.initialize(PASS, ACTOR);
+      const recovery = rows.find((r) => r.kind === 'recovery')!;
+      expect(await statusOf(service.removePassphrase(recovery.id, ACTOR))).toBe(404);
+      expect(await statusOf(service.removePassphrase('gibt-es-nicht', ACTOR))).toBe(404);
+      expect(rows).toHaveLength(2);
+    });
+
+    it('bei gesperrtem Tresor 423', async () => {
+      const { service, rows } = build();
+      await service.initialize(PASS, ACTOR);
+      const id = rows.find((r) => r.kind === 'passphrase')!.id;
+      await service.lock();
+      expect(await statusOf(service.removePassphrase(id, ACTOR))).toBe(423);
+    });
+  });
+
   it('status() zählt Einträge je Art', async () => {
     const { service } = build();
     await service.initialize(PASS, ACTOR);

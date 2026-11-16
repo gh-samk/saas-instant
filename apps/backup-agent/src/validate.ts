@@ -30,13 +30,22 @@ function str(o: Record<string, unknown>, field: string, re?: RegExp, optional = 
 }
 
 /**
- * Geheimfeld: optional, wenn schon ein Ziel gleichen Typs gespeichert ist
- * (dann bleibt der alte Wert). Sonst klare Meldung (nur Feldname).
+ * Geheimfeld: optional, wenn schon ein Ziel gleichen Typs gespeichert ist UND sich die Gegenstelle
+ * nicht geaendert hat (`sameEndpoint`); dann bleibt der alte Wert. Wer das Ziel auf einen anderen Host
+ * zeigt, koennte sonst das gespeicherte Passwort an eine fremde Stelle schicken lassen, ohne es zu kennen.
  */
-function secret(o: Record<string, unknown>, field: string, label: string, old: string | undefined): string {
+function secret(
+  o: Record<string, unknown>,
+  field: string,
+  label: string,
+  old: string | undefined,
+  sameEndpoint: boolean,
+  again: string,
+): string {
   const v = str(o, field, undefined, true);
   if (v !== undefined) return v;
-  if (old) return old;
+  if (old && sameEndpoint) return old;
+  if (old) throw new ValidationError(`Geheimfeld ${label} fehlt: ${again} (Ziel geaendert, der gespeicherte Wert wird nicht uebernommen)`);
   throw new ValidationError(
     `Geheimfeld ${label} fehlt: Es ist noch kein Ziel gleichen Typs gespeichert, dessen Wert beibehalten werden koennte`,
   );
@@ -78,6 +87,11 @@ export function parseAgeIdentity(v: unknown): string {
   return v.trim();
 }
 
+export function parseSha256(v: unknown): string {
+  if (typeof v !== 'string' || !/^[0-9a-fA-F]{64}$/.test(v)) throw new ValidationError('Feld sha256 ist ungueltig');
+  return v.toLowerCase();
+}
+
 export function parseSubdomain(v: string): string {
   if (!SUBDOMAIN.test(v)) throw new ValidationError('Feld subdomain ist ungueltig');
   return v;
@@ -116,8 +130,12 @@ export function parseTarget(v: unknown, existing?: TargetConfig): TargetConfig {
     if (typeof s['pathStyle'] !== 'boolean') throw new ValidationError('Feld s3.pathStyle ist ungueltig');
     const prefix = (str(s, 'prefix', /^[A-Za-z0-9_./-]*$/, true) ?? '').replace(/^\/+|\/+$/g, '');
     noDotDot('s3.prefix', prefix);
-    const accessKeyId = secret(s, 'accessKeyId', 's3.accessKeyId', old?.accessKeyId);
-    const secretAccessKey = secret(s, 'secretAccessKey', 's3.secretAccessKey', old?.secretAccessKey);
+    // Gespeicherte Werte nur bei gleichem Endpunkt und Bucket weiterverwenden.
+    const sameS3 = !!old && old.endpoint === endpoint && old.bucket === (s['bucket'] as unknown);
+    const accessKeyId = secret(s, 'accessKeyId', 's3.accessKeyId', old?.accessKeyId, sameS3, 'Gib die Zugangskennung erneut ein');
+    // Das Geheimnis haengt an der Kennung: eine neue Kennung ohne neues Geheimnis wird nie mit dem alten gepaart.
+    const sameKeyId = sameS3 && accessKeyId === old?.accessKeyId;
+    const secretAccessKey = secret(s, 'secretAccessKey', 's3.secretAccessKey', old?.secretAccessKey, sameKeyId, 'Gib den geheimen Zugangsschluessel erneut ein');
     const cfg: S3Config = {
       endpoint,
       region: str(s, 'region', /^[A-Za-z0-9-]{1,40}$/)!,
@@ -148,10 +166,12 @@ export function parseTarget(v: unknown, existing?: TargetConfig): TargetConfig {
     path,
     authType,
   };
+  // Passwort/Schluessel nur bei unveraendertem Host, Port und Benutzer weiterverwenden.
+  const sameBox = !!old && old.host === cfg.host && old.port === cfg.port && old.username === cfg.username;
   if (authType === 'key') {
-    cfg.privateKey = secret(b, 'privateKey', 'storagebox.privateKey', old?.privateKey);
+    cfg.privateKey = secret(b, 'privateKey', 'storagebox.privateKey', old?.privateKey, sameBox, 'Gib den privaten Schluessel erneut ein');
   } else {
-    cfg.password = secret(b, 'password', 'storagebox.password', old?.password);
+    cfg.password = secret(b, 'password', 'storagebox.password', old?.password, sameBox, 'Gib das Passwort erneut ein');
   }
   // Host-Key: vorgegeben (Pflichtvergleich ab dem ersten Kontakt) oder, bei
   // unveraendertem Host/Port, der bereits gepinnte Wert. Anderer Host = neues TOFU.

@@ -73,6 +73,7 @@ export class NavigationService {
         status: true,
         dueDate: true,
         paidAmount: true,
+        cancelledInvoiceId: true,
         lines: { select: { grossAmount: true } },
       },
     });

@@ -96,7 +96,15 @@ export const invoiceDue: TaskSource = {
 
       const periodsStart =
         coveredUntil === null ? aboFrom : datePlusDays(coveredUntil, 1);
-      const months = row.paymentInterval === 'monthly' ? 1 : 12;
+      // [H3] Halbjährlich ist ein eigener Rhythmus (6 Monate); mit dem früheren
+      // „monatlich sonst 12" wurde der Zeitraum einer halbjährlich zahlenden
+      // Organisation erst nach einem Jahr als abgelaufen gemeldet.
+      const months =
+        row.paymentInterval === 'monthly'
+          ? 1
+          : row.paymentInterval === 'half_yearly'
+            ? 6
+            : 12;
       const periodsEnd = datePlusDays(
         datePlusMonths(periodsStart, months),
         -1,

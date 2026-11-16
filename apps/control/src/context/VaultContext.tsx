@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { fetchVaultStatus, type VaultState } from '../lib/api';
 import { setVaultLockedHandler } from '../lib/api-client';
+import { clearRecentCompanies } from '../lib/recent-companies';
 
 /** `unknown`, solange der Zustand noch nicht abgefragt ist. */
 export type VaultStatus = 'unknown' | VaultState;
@@ -33,10 +34,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<VaultStatus>('unknown');
 
   useEffect(() => {
-    setVaultLockedHandler(() =>
+    setVaultLockedHandler(() => {
+      // Gesperrt heißt: nichts Kundenbezogenes darf im Browser liegen bleiben.
+      clearRecentCompanies();
       // Vor der Einrichtung gibt es nichts zu entsperren.
-      setStatus((current) => (current === 'uninitialized' ? current : 'locked')),
-    );
+      setStatus((current) => (current === 'uninitialized' ? current : 'locked'));
+    });
     return () => setVaultLockedHandler(null);
   }, []);
 

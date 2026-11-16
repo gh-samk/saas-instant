@@ -77,6 +77,7 @@ export const SECURITY_ACTIONS: readonly string[] = [
   'vault.locked',
   'vault.passphrase.added',
   'vault.passphrase.changed',
+  'vault.passphrase.removed',
   'vault.recovery.regenerated',
   // Sperren.
   'account.locked',
@@ -173,6 +174,7 @@ export const SECURITY_TEXTS: Record<string, string> = {
   'vault.locked': 'Datenverschlüsselung gesperrt',
   'vault.passphrase.added': 'Weitere Passphrase hinzugefügt',
   'vault.passphrase.changed': 'Passphrase geändert',
+  'vault.passphrase.removed': 'Passphrase entzogen',
   'vault.recovery.regenerated': 'Wiederherstellungsschlüssel neu erzeugt',
   'vault.encrypt_existing': 'Bestehende Daten verschlüsselt',
 };

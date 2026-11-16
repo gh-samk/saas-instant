@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { decryptBuffer } from '../src/age.js';
@@ -73,7 +74,7 @@ describe('Backup, Liste, Pruefung, Restore', () => {
 
     // Meldung an die Verwaltung
     expect(h.control.reports).toEqual([
-      expect.objectContaining({ subdomain: 'kunde1', kind: 'instance', date: '2026-11-15', objectKey: b.result.objectKey, sha256: b.result.sha256 }),
+      expect.objectContaining({ subdomain: 'kunde1', kind: 'instance', date: '2026-11-15', objectKey: b.result.objectKey, sha256: b.result.sha256, uploadsSha256: expect.stringMatching(/^[0-9a-f]{64}$/) }),
     ]);
 
     const list = await h.call('GET', '/v1/backups?kind=instance&subdomain=kunde1');
@@ -84,7 +85,7 @@ describe('Backup, Liste, Pruefung, Restore', () => {
     const v = await job({ kind: 'verify', objectKey: b.result.objectKey });
     expect(v.status).toBe('succeeded');
 
-    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu', subdomain: 'kunde1-neu' }) });
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, uploadsSha256: h.control.reports[0]!.uploadsSha256, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu', subdomain: 'kunde1-neu' }) });
     expect(r.status).toBe('succeeded');
     const nd = h.docker.containers.find((c) => c.id === 'new-db')!;
     const nw = h.docker.containers.find((c) => c.id === 'new-web')!;
@@ -112,7 +113,7 @@ describe('Backup, Liste, Pruefung, Restore', () => {
   it('lehnt Restore in den eigenen Stack ab und ruehrt nichts an', async () => {
     const b = await job({ kind: 'backup', instance: instance() });
     h.docker.calls.length = 0;
-    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, ageIdentity: identity, target: instance({ composeProject: 'saas-instant-main', dbService: 'control-db', subdomain: 'x' }) });
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'saas-instant-main', dbService: 'control-db', subdomain: 'x' }) });
     expect(r.status).toBe('failed');
     expect(h.docker.calls).toEqual([]);
     expect(h.docker.containers.find((c) => c.id === 'own-db')!.db).toBe('VERWALTUNG');
@@ -121,14 +122,14 @@ describe('Backup, Liste, Pruefung, Restore', () => {
   it('lehnt Restore ab, wenn der eigene Stack nicht ermittelbar ist (fail closed)', async () => {
     const b = await job({ kind: 'backup', instance: instance() });
     h.docker.own = null;
-    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
     expect(r.status).toBe('failed');
     expect(h.docker.containers.find((c) => c.id === 'new-db')!.db).toBe('LEER');
   });
 
   it('lehnt ein unbekanntes Projekt ab', async () => {
     const b = await job({ kind: 'backup', instance: instance() });
-    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, ageIdentity: identity, target: instance({ composeProject: 'fremdes-projekt' }) });
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'fremdes-projekt' }) });
     expect(r.status).toBe('failed');
   });
 
@@ -136,19 +137,96 @@ describe('Backup, Liste, Pruefung, Restore', () => {
     const b = await job({ kind: 'backup', instance: instance() });
     const other = (await (await import('../src/age.js')).newKeyPair()).identity;
     h.docker.calls.length = 0;
-    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, ageIdentity: other, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: other, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
     expect(r.status).toBe('failed');
     expect(h.docker.calls.some((c) => c.startsWith('stop:'))).toBe(false);
     expect(h.docker.containers.find((c) => c.id === 'new-db')!.db).toBe('LEER');
   });
 
+  it('nicht leere Ziel-Datenbank: abgelehnt, nichts angehalten, nichts veraendert', async () => {
+    const b = await job({ kind: 'backup', instance: instance() });
+    h.docker.containers.find((c) => c.id === 'new-db')!.tables = 3;
+    h.docker.calls.length = 0;
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
+    expect(r.status).toBe('failed');
+    expect(r.message).toMatch(/nicht leer/);
+    expect(h.docker.calls.some((c) => c.startsWith('stop:') || c.includes('pg_restore'))).toBe(false);
+    expect(h.docker.containers.find((c) => c.id === 'new-db')!.db).toBe('LEER');
+  });
+
+  it('nicht leere Ziel-Datenbank: eine vom Agenten gestartete DB wird wieder gestoppt, eine laufende bleibt', async () => {
+    const b = await job({ kind: 'backup', instance: instance() });
+    const nd = h.docker.containers.find((c) => c.id === 'new-db')!;
+    nd.tables = 3;
+    nd.running = false;
+    const body = { kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) };
+    expect((await job(body)).status).toBe('failed');
+    expect(nd.running).toBe(false);
+    h.docker.calls.length = 0;
+    nd.running = true;
+    expect((await job(body)).status).toBe('failed');
+    expect(nd.running).toBe(true);
+    expect(h.docker.calls).not.toContain('stop:new-db');
+  });
+
+  it('psql-Ausgabe nicht numerisch: Abbruch ohne Aenderung', async () => {
+    const b = await job({ kind: 'backup', instance: instance() });
+    h.docker.containers.find((c) => c.id === 'new-db')!.psqlOut = 'FEHLER';
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
+    expect(r.status).toBe('failed');
+    expect(r.message).toMatch(/nicht geprueft/);
+    expect(h.docker.calls.some((c) => c.startsWith('stop:') || c.includes('pg_restore'))).toBe(false);
+  });
+
   it('pg_restore-Fehler: App-Container werden wieder gestartet, Fehlertext ohne Geheimnisse', async () => {
     const b = await job({ kind: 'backup', instance: instance() });
     h.docker.failRestore = true;
-    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
+    const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: instance({ composeProject: 'coolify-kunde1-neu' }) });
     expect(r.status).toBe('failed');
     expect(h.docker.containers.find((c) => c.id === 'new-web')!.running).toBe(true);
     expect(r.message).not.toContain(identity);
+  });
+
+  describe('Uploads-Pruefsumme der Verwaltung', () => {
+    const target = () => instance({ composeProject: 'coolify-kunde1-neu', subdomain: 'kunde1-neu' });
+    const metaKey = (objectKey: string) => objectKey.replace(/\.dump\.age$/, '.meta.json');
+
+    it('ausgetauschte Uploads samt angepasster Meta-Datei: Abbruch vor jeder Aenderung', async () => {
+      const b = await job({ kind: 'backup', instance: instance() });
+      const uploadsSha256 = h.control.reports[0]!.uploadsSha256;
+      const upKey = b.result.objectKey.replace(/\.dump\.age$/, '.uploads.tar.age');
+      const fake = Buffer.from('FREMDE-UPLOADS');
+      h.storage.objects.get(upKey)!.data = fake;
+      const mk = metaKey(b.result.objectKey);
+      const meta = JSON.parse(h.storage.objects.get(mk)!.data.toString());
+      const e = meta.files.find((f: { name: string }) => f.name.endsWith('.uploads.tar.age'));
+      e.sizeBytes = fake.length;
+      e.sha256 = createHash('sha256').update(fake).digest('hex');
+      h.storage.objects.get(mk)!.data = Buffer.from(JSON.stringify(meta));
+      h.docker.calls.length = 0;
+      const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, uploadsSha256, ageIdentity: identity, target: target() });
+      expect(r.status).toBe('failed');
+      expect(r.message).toMatch(/Uploads/);
+      expect(h.docker.calls.some((c) => c.startsWith('stop:') || c.includes('pg_restore'))).toBe(false);
+      expect(h.docker.containers.find((c) => c.id === 'new-web')!.uploads).toBe('LEER');
+    });
+
+    it('Altbestand ohne Uploads-Pruefsumme: nur Datenbank, Uploads uebersprungen mit Hinweis', async () => {
+      const b = await job({ kind: 'backup', instance: instance() });
+      const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: target() });
+      expect(r.status).toBe('succeeded');
+      expect(r.result.note).toMatch(/Uploads NICHT eingespielt/);
+      expect(h.docker.containers.find((c) => c.id === 'new-db')!.db).toBe('DUMP-INHALT-KUNDE1');
+      expect(h.docker.containers.find((c) => c.id === 'new-web')!.uploads).toBe('LEER');
+    });
+
+    it('Sicherung ohne Uploads-Archiv und ohne Pruefsumme: normal, kein Hinweis', async () => {
+      const b = await job({ kind: 'backup', instance: instance({ uploadsService: undefined, uploadsPath: undefined }) });
+      expect(h.control.reports[0]!.uploadsSha256).toBeUndefined();
+      const r = await job({ kind: 'restore', objectKey: b.result.objectKey, sha256: b.result.sha256, ageIdentity: identity, target: target() });
+      expect(r.status).toBe('succeeded');
+      expect(r.result.note).toBeUndefined();
+    });
   });
 
   it('backup-control sichert DB und Rechnungsarchiv, Archiv mit Object Lock, unveraenderte Jahre werden nicht doppelt abgelegt', async () => {

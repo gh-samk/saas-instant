@@ -235,7 +235,9 @@ services:
       AGENT_STATE_KEY: ${AGENT_STATE_KEY:?AGENT_STATE_KEY muss gesetzt sein}
       BACKUP_REPORT_KEY: ${BACKUP_REPORT_KEY:?BACKUP_REPORT_KEY muss gesetzt sein}
       CONTROL_URL: http://control-api:3001
-      CONTROL_DATABASE_URL: postgresql://control:${CONTROL_POSTGRES_PASSWORD}@control-db:5432/control
+      # Nur fuer pg_dump, und mit einer eigenen Rolle, die nur lesen darf
+      # (ops/control-db/backup-agent-role.sql), nicht als Superuser `control`.
+      CONTROL_DATABASE_URL: postgresql://backup_agent:${BACKUP_DB_PASSWORD:?BACKUP_DB_PASSWORD fehlt in der .env - install.sh erneut ausfuehren}@control-db:5432/control
       # Aufbewahrung der Rechnungsarchive (Object Lock) kommt aus dem
       # Sicherungsplan der Verwaltung (retentionYears); nur Rueckfall, falls der
       # Plan sie nicht liefert. Ungesetzt = 10 Jahre.
@@ -243,6 +245,11 @@ services:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       # Projektname dieses Stacks: Wiederherstellung dorthin ist ausgeschlossen.
       AGENT_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-}
+      # Weitere Stacks, die nie Restore-Ziel sind (kommagetrennt, `*` am Ende =
+      # Praefix). Eingebaut ist saas-instant-* (Verwaltungen, Portal, portal-auth).
+      RESTORE_DENY_PROJECTS: ${RESTORE_DENY_PROJECTS:-}
+      # Zeitlimit je Auftrag in Minuten (Sicherung, Wiederherstellung, Pruefung).
+      JOB_TIMEOUT_MINUTES: ${JOB_TIMEOUT_MINUTES:-120}
     volumes:
       - backup-agent-state:/state
     read_only: true
@@ -256,42 +263,49 @@ services:
       - default
       - docker-api
     depends_on:
-      - docker-socket-proxy
-      - control-db
+      docker-socket-proxy:
+        condition: service_started
+      control-db-roles:
+        condition: service_completed_successfully
     restart: unless-stopped
 
+  # Einmalauftrag bei jedem Start: legt die schreibgeschuetzte Rolle backup_agent
+  # in der Verwaltungsdatenbank an bzw. gleicht sie an (idempotent). Laeuft mit dem
+  # Datenbank-Superuser und beendet sich danach; der Agent wartet darauf.
+  control-db-roles:
+    image: postgres:16-alpine
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-q", "-f", "/roles/backup-agent-role.sql"]
+    environment:
+      PGHOST: control-db
+      PGUSER: control
+      PGDATABASE: control
+      PGPASSWORD: ${CONTROL_POSTGRES_PASSWORD:?CONTROL_POSTGRES_PASSWORD muss gesetzt sein}
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?BACKUP_DB_PASSWORD fehlt in der .env - install.sh erneut ausfuehren}
+    volumes:
+      - ./ops/control-db/backup-agent-role.sql:/roles/backup-agent-role.sql:ro
+    depends_on:
+      control-db:
+        condition: service_healthy
+    networks:
+      - default
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
   # Einziger Dienst mit Zugriff auf den Docker-Socket (nur lesend gemountet).
-  # Allowlist: Container ansehen/starten/stoppen und Exec (fuer pg_dump,
-  # pg_restore, tar). Images, Netze, Volumes, Dienste und Swarm sind gesperrt.
+  # Allowlist in ops/docker-proxy/haproxy.cfg.template (eigene Regeln statt der
+  # Schalter des Images: POST=1 + CONTAINERS=1 erlaubte auch /containers/create
+  # und DELETE). Erlaubt sind nur: Container auflisten und ansehen, starten und
+  # stoppen, Exec anlegen/starten/auslesen. Alles andere bekommt 403.
   # Lauscht nur im internen Netz docker-api, ohne ports:.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
-    environment:
-      CONTAINERS: "1"
-      EXEC: "1"
-      POST: "1"
-      IMAGES: "0"
-      NETWORKS: "0"
-      VOLUMES: "0"
-      SERVICES: "0"
-      SWARM: "0"
-      TASKS: "0"
-      SECRETS: "0"
-      CONFIGS: "0"
-      PLUGINS: "0"
-      BUILD: "0"
-      COMMIT: "0"
-      AUTH: "0"
-      SYSTEM: "0"
-      NODES: "0"
-      DISTRIBUTION: "0"
-      EVENTS: "0"
-      INFO: "0"
-      SESSION: "0"
-      VERSION: "1"
-      PING: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./ops/docker-proxy/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro
     # Bewusst ohne read_only: der Entrypoint des Images schreibt beim Start
     # /usr/local/etc/haproxy/haproxy.cfg (aus der Vorlage); mit read_only
     # startet der Dienst in einer Neustartschleife. Der Schutz bleibt ueber

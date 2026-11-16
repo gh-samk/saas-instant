@@ -150,6 +150,8 @@ describe('BackupReportDto — kind, objectKey, sha256 (abwärtskompatibel)', () 
     expect(await errorFields({ ...VALID, objectKey: '../etc/passwd' })).toEqual(['objectKey']);
     expect(await errorFields({ ...VALID, objectKey: 'a b' })).toEqual(['objectKey']);
     expect(await errorFields({ ...VALID, sha256: 'xyz' })).toEqual(['sha256']);
+    expect(await errorFields({ ...VALID, uploadsSha256: 'xyz' })).toEqual(['uploadsSha256']);
+    expect(await errorFields({ ...VALID, uploadsSha256: HASH })).toEqual([]);
   });
 });
 
@@ -172,6 +174,33 @@ describe('BackupService — kind/objectKey/sha256', () => {
     const call = prisma.backup.upsert.mock.calls[0][0];
     expect(call.create).toMatchObject({ objectKey: 'p/k.dump.age', sha256: 'a'.repeat(64) });
     expect(call.update).toMatchObject({ objectKey: 'p/k.dump.age', verifiedAt: null });
+  });
+
+  it('speichert uploadsSha256 klein geschrieben; ohne sie wird eine alte beim neuen Satz geleert', async () => {
+    const { service, prisma } = build();
+    await service.report(
+      { ...VALID, kind: 'instance', objectKey: 'p/k.dump.age', sha256: 'a'.repeat(64), uploadsSha256: 'D'.repeat(64) },
+      null,
+    );
+    expect(prisma.backup.upsert.mock.calls[0][0].update).toMatchObject({ uploadsSha256: 'd'.repeat(64) });
+    await service.report({ ...VALID, kind: 'instance', objectKey: 'p/k2.dump.age', sha256: 'a'.repeat(64) }, null);
+    expect(prisma.backup.upsert.mock.calls[1][0].update).toMatchObject({ uploadsSha256: null });
+  });
+
+  it('nimmt null als „nicht gemeldet“ statt mit 500 zu scheitern (sonst Giftmeldung im Agenten)', async () => {
+    const { service, prisma } = build();
+    await expect(
+      service.report(
+        { ...VALID, kind: 'instance', objectKey: 'p/k.dump.age', sha256: null, uploadsSha256: null } as never,
+        null,
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(prisma.backup.upsert.mock.calls[0][0].update).toMatchObject({ uploadsSha256: null });
+    // objectKey null darf einen gespeicherten Schlüssel nicht löschen und die Prüfung nicht zurücksetzen.
+    await service.report({ ...VALID, kind: 'instance', objectKey: null } as never, null);
+    const update = prisma.backup.upsert.mock.calls[1][0].update;
+    expect(update).not.toHaveProperty('objectKey');
+    expect(update).not.toHaveProperty('verifiedAt');
   });
 
   it('lässt ohne neue Felder objectKey und Prüfung unangetastet (abwärtskompatibel)', async () => {

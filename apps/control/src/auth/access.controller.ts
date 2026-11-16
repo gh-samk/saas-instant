@@ -1,3 +1,4 @@
+import { AllowWhileUninitialized } from '../vault/allow-while-locked.decorator';
 import {
   Body,
   Controller,
@@ -58,6 +59,10 @@ import type { FactorsOverview, DeviceEntry } from './access.service';
  * `totp/einrichten` und `wiederherstellungscodes` — über beide zusammen lief
  * eine vollständige Kontoübernahme mit einem 25 Stunden alten Cookie.
  * `zugang-routen.spec.ts` zählt die Routen auf und lässt keine unmarkierte zu.
+ *
+ * Tresor: Kontopflege bleibt bei gesperrtem Tresor gesperrt (423). Nur die Routen der
+ * Ersteinrichtung sind erreichbar, solange noch KEIN Tresor eingerichtet ist
+ * (`@AllowWhileUninitialized`): der Assistent läuft vor der Tresor-Einrichtung.
  */
 @Controller('access')
 @UseGuards(SessionGuard, SecondFactorGuard)
@@ -81,6 +86,9 @@ export class AccessController {
    * Das deckt die Ersteinrichtung ab, in der Passwort und TOTP unmittelbar
    * zuvor gesetzt wurden.
    */
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
+  )
   @Post('passkey/start')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -109,6 +117,9 @@ export class AccessController {
     'Zweiter Schritt eines Vorgangs, dessen ERSTER Schritt (passkey/start) den '
       + 'Nachweis bereits verlangt hat. Ohne den dort ausgestellten '
       + 'Vorgangs-Token samt Challenge ist diese Route wirkungslos.',
+  )
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
   )
   @Post('passkey/complete')
   @HttpCode(200)
@@ -149,6 +160,9 @@ export class AccessController {
       + 'Passwort gesetzt, verlangt der Dienst stattdessen eine Anmeldung, die '
       + 'höchstens zehn Minuten zurückliegt (Passkey oder Notfall-Link).',
   )
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
+  )
   @Post('password')
   @HttpCode(200)
   // Dasselbe Limit wie auf den Anmelderouten: `aktuellesPasswort` zu raten ist
@@ -182,6 +196,9 @@ export class AccessController {
   // --- TOTP ---------------------------------------------------------------
 
   /** Erzeugt ein neues TOTP-Geheimnis; Klartext nur in dieser einen Antwort. */
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
+  )
   @Post('totp/setup')
   @HttpCode(200)
   async totpSetup(
@@ -213,6 +230,9 @@ export class AccessController {
       + 'liegt: gebremst wird sie deshalb durch @Throttle, durch Fehlversuche '
       + 'auf der Kontosperre samt Audit-Eintrag und durch die Frist von zehn '
       + 'Minuten auf dem vorläufigen Geheimnis ([K5]).',
+  )
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
   )
   @Post('totp/confirm')
   @HttpCode(200)
@@ -256,6 +276,9 @@ export class AccessController {
    * unter zehn Minuten) und schickt bei einem echten Adresswechsel eine
    * Hinweismail an die BISHERIGE Adresse.
    */
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
+  )
   @Post('factors/email-code/setup')
   @HttpCode(200)
   // Dasselbe Limit wie auf den Anmelderouten: hier verlässt ein Code das
@@ -274,6 +297,9 @@ export class AccessController {
     'Zweiter Schritt eines Vorgangs, dessen ERSTER Schritt '
       + '(email-code/einrichten) den Nachweis bereits verlangt hat. Der Code aus '
       + 'der E-Mail ist hier selbst der Nachweis über die Zieladresse.',
+  )
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
   )
   @Post('factors/email-code/confirm')
   @HttpCode(200)
@@ -346,6 +372,9 @@ export class AccessController {
   // --- Wiederherstellungscodes -------------------------------------------
 
   /** Erzeugt acht neue Codes und verwirft alle bisherigen. */
+  @AllowWhileUninitialized(
+    'Ersteinrichtung des ersten Kontos läuft, bevor der Tresor existiert; danach gesperrt.',
+  )
   @Post('recovery-codes')
   @HttpCode(200)
   async recoveryCodes(

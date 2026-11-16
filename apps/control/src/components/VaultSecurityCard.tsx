@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyRound, LifeBuoy, ShieldCheck } from 'lucide-react';
+import { KeyRound, LifeBuoy, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { Badge, Button, Card, Dialog, InputField, Skeleton, useToast } from '@saas-instant/ui';
 import { PassphraseFields } from './PassphraseFields';
 import { RecoveryKeyPanel } from './RecoveryKeyPanel';
@@ -7,9 +7,11 @@ import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
 import { useAuth } from '../context/AuthContext';
 import {
   fetchVaultEntries,
+  fetchVaultLegacyPlaintext,
   vaultAddPassphrase,
   vaultChangePassphrase,
   vaultRegenerateRecovery,
+  vaultRemovePassphrase,
 } from '../lib/api';
 import type { SecondFactorEvidence, VaultEntry } from '../lib/api';
 import { ApiError, ERROR_CODE, errorText } from '../lib/api-client';
@@ -21,6 +23,7 @@ import { useT } from '../i18n';
 type Action =
   | { kind: 'change'; entry: VaultEntry }
   | { kind: 'add' }
+  | { kind: 'remove'; entry: VaultEntry }
   | { kind: 'regenerate' };
 
 /**
@@ -37,6 +40,8 @@ export function VaultSecurityCard() {
   const evidenceState = useSecondFactorEvidence();
   const [entries, setEntries] = useState<VaultEntry[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // Belege und Protokolleinträge aus der Zeit vor dem Tresor (unveränderlich, Klartext).
+  const [legacy, setLegacy] = useState<{ invoices: number; auditEntries: number } | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const [current, setCurrent] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -62,6 +67,12 @@ export function VaultSecurityCard() {
   useEffect(() => {
     alive.current = true;
     void load();
+    // Reine Information: scheitert sie, fehlt nur der Hinweis.
+    fetchVaultLegacyPlaintext()
+      .then((counts) => {
+        if (alive.current) setLegacy(counts);
+      })
+      .catch(() => {});
     return () => {
       alive.current = false;
     };
@@ -99,6 +110,11 @@ export function VaultSecurityCard() {
         evidenceState.close();
         toast.show(t('vault.changeDone'));
         close();
+      } else if (action.kind === 'remove') {
+        await vaultRemovePassphrase(action.entry.id, evidence);
+        evidenceState.close();
+        toast.show(t('vault.removeDone'));
+        close();
       } else if (action.kind === 'add') {
         await vaultAddPassphrase(passphrase, label.trim() || undefined, evidence);
         evidenceState.close();
@@ -117,13 +133,19 @@ export function VaultSecurityCard() {
           ? t('vault.changeFailed')
           : action.kind === 'add'
             ? t('vault.addFailed')
-            : t('vault.regenerateFailed');
+            : action.kind === 'remove'
+              ? t('vault.removeFailed')
+              : t('vault.regenerateFailed');
       setError(
         action.kind === 'change' &&
           e instanceof ApiError &&
           e.error.code === ERROR_CODE.vaultWrongSecret
           ? t('vault.changeWrongCurrent')
-          : errorText(e, fallback),
+          : action.kind === 'remove' &&
+              e instanceof ApiError &&
+              e.error.code === ERROR_CODE.vaultLastEntry
+            ? t('vault.removeLastEntry')
+            : errorText(e, fallback),
       );
     } finally {
       setBusy(false);
@@ -197,23 +219,65 @@ export function VaultSecurityCard() {
                     {t('vault.regenerateButton')}
                   </Button>
                 ) : (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    aria-label={
-                      unnamed
-                        ? t('vault.changeAriaDefault')
-                        : t('vault.changeAria', { label: entry.label })
-                    }
-                    onClick={() => open({ kind: 'change', entry })}
-                  >
-                    {t('vault.changeButton')}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={
+                        unnamed
+                          ? t('vault.changeAriaDefault')
+                          : t('vault.changeAria', { label: entry.label })
+                      }
+                      onClick={() => open({ kind: 'change', entry })}
+                    >
+                      {t('vault.changeButton')}
+                    </Button>
+                    {entries.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={
+                          unnamed
+                            ? t('vault.removeAriaDefault')
+                            : t('vault.removeAria', { label: entry.label })
+                        }
+                        onClick={() => open({ kind: 'remove', entry })}
+                      >
+                        {t('vault.removeButton')}
+                      </Button>
+                    )}
+                  </div>
                 )}
               </li>
             );
           })}
         </ul>
+      )}
+
+      {legacy !== null && (legacy.invoices > 0 || legacy.auditEntries > 0) && (
+        <div
+          role="note"
+          className="mt-4 flex items-start gap-2 rounded-lg border border-rahmen bg-flaeche-2 p-3 text-sm text-text"
+        >
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-leise" aria-hidden="true" />
+          <div>
+            <p>
+              {t('vault.legacyIntro', {
+                invoices: legacy.invoices,
+                invoicesText: t(
+                  legacy.invoices === 1 ? 'vault.legacyInvoices_one' : 'vault.legacyInvoices_other',
+                  { count: legacy.invoices },
+                ),
+                entries: legacy.auditEntries,
+                entriesText: t(
+                  legacy.auditEntries === 1 ? 'vault.legacyEntries_one' : 'vault.legacyEntries_other',
+                  { count: legacy.auditEntries },
+                ),
+              })}
+            </p>
+            <p className="mt-1 text-leise">{t('vault.legacyWhy')}</p>
+          </div>
+        </div>
       )}
 
       <div className="mt-4">
@@ -262,6 +326,36 @@ export function VaultSecurityCard() {
         />
         {error && action?.kind === 'change' && (
           <p role="alert" className="text-sm text-gefahr">{error}</p>
+        )}
+      </Dialog>
+
+      {/* --- Passphrase entziehen ----------------------------------------- */}
+      <Dialog
+        open={action?.kind === 'remove'}
+        title={t('vault.removeTitle')}
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>{t('vault.cancel')}</Button>
+            <Button variant="danger" loading={busy} onClick={() => void perform()}>
+              {t('vault.removeSubmit')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text">
+          {action?.kind === 'remove'
+            ? t('vault.removeNote', {
+                name:
+                  action.entry.label.trim().toLowerCase() === 'passphrase'
+                    ? t('vault.entryPassphraseDefault')
+                    : t('vault.entryPassphrase', { label: action.entry.label }),
+              })
+            : ''}
+        </p>
+        <p className="mt-2 text-sm text-leise">{t('vault.removeLimit')}</p>
+        {error && action?.kind === 'remove' && (
+          <p role="alert" className="mt-3 text-sm text-gefahr">{error}</p>
         )}
       </Dialog>
 

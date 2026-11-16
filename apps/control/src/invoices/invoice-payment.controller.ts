@@ -77,6 +77,7 @@ export class InvoicePaymentController {
       dto.paidAmountCent,
       asActor(user),
       sourceFrom(req),
+      dto.expectedPaidCent,
     );
   }
 

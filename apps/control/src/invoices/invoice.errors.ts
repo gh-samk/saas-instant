@@ -232,6 +232,34 @@ export class PaymentImplausibleError extends BusinessError {
   }
 }
 
+/**
+ * Eine Zahlungserinnerung ergibt hier keinen Sinn (Stornorechnung, nichts
+ * offen, noch nicht fällig). Eigener Code, damit die Oberfläche die Meldung
+ * zeigen kann, statt einen allgemeinen Zustandsfehler.
+ */
+export class ReminderNotApplicableError extends BusinessError {
+  constructor(message: string) {
+    super('reminder_not_applicable', message, HttpStatus.CONFLICT);
+  }
+}
+
+/**
+ * Der Zahlungsstand wurde zwischenzeitlich geändert (zweiter Tab, zweite
+ * Person). Wer blind überschriebe, ginge von einem Stand aus, den es nicht
+ * mehr gibt [N8e].
+ */
+export class PaymentChangedMeanwhileError extends BusinessError {
+  constructor(currentPaidCent: number | null) {
+    super(
+      'payment_changed_meanwhile',
+      'Der Zahlungsstand wurde inzwischen geändert. Lade die Rechnung neu ' +
+        'und prüfe den aktuellen Stand, bevor du erneut speicherst.',
+      HttpStatus.CONFLICT,
+      { currentPaidCent },
+    );
+  }
+}
+
 /** Die Rechnung hat keine Empfängeradresse für den Versand. */
 export class InvoiceWithoutRecipientAddressError extends BusinessError {
   constructor() {

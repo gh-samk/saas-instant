@@ -99,7 +99,12 @@ Bestehende lokale Konten bleiben `admin`. Danach darf sich lokal nur noch ein
 Notzugang anmelden (siehe unten). Wer sich vorher noch nicht über das Portal
 angemeldet hat, legt ein Portal-Konto an (`portal first-account` bzw. in „Konten und
 Zugriffe“); die Verwaltung verknüpft ein vorhandenes lokales Konto mit derselben
-E-Mail-Adresse beim ersten Portal-Login.
+E-Mail-Adresse beim ersten Portal-Login. **Ausgenommen sind Notzugangskonten**
+(`emergency=true`): sie werden nie automatisch verknüpft, und ein Portal-Login mit ihrer
+Adresse wird mit `401 sso_invalid` abgewiesen. Ein Notzugang soll auch dann
+funktionieren, wenn das Portal ausfällt oder falsch eingerichtet ist; ein verknüpftes
+Konto bekäme zudem bei jeder Anmeldung die Rolle aus dem Portal. Wer einen Notzugang
+auch über das Portal nutzen will, legt dafür ein eigenes, zweites Konto an.
 
 ## Ablauf der Anmeldung
 
@@ -168,7 +173,9 @@ bin/saas-instant emergency <slug> enrollment <kennung>           # Link für ein
 ```
 
 Diese Kommandos setzen das Konto zugleich auf `emergency=true`. Im Modus `portal` darf
-sich lokal **nur** ein solches Konto anmelden (sonst `403 local_login_disabled`). Die
+sich lokal **nur** ein solches Konto anmelden; jede andere lokale Anmeldung scheitert
+wie ein falsches Passwort (`401 login_failed`, auch bei richtigem Passwort, damit die
+Antwort nichts über das Passwort verrät). Die
 Anmeldeseite zeigt „Mit dem Portal anmelden“ und einen kleinen Link „Notzugang“. Weitere
 Einzelheiten: [emergency-access.md](emergency-access.md). Die Notzugänge sind bewusst
 wenige; sie gehören ins Audit-Log wie alle anderen Anmeldungen.

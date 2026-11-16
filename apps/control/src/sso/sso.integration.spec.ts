@@ -258,7 +258,7 @@ describe('Anmeldung über das Portal (Modus portal)', () => {
     expect(reply.body.authMode).toBe('portal');
   });
 
-  it('erreicht die SSO-Wege auch bei gesperrtem Tresor (nur auth/**)', async () => {
+  it('erreicht bei gesperrtem Tresor nur die markierten Wege (auth/**, Health, Flags, Sicherungsplan, Abmeldung)', async () => {
     const vault = app.get(VaultService);
     await vault.lock({ userId: null, actor: 'test' });
     try {
@@ -267,6 +267,19 @@ describe('Anmeldung über das Portal (Modus portal)', () => {
       expect(start.status).toBe(302);
       const closed = await call('GET', '/api/companies', jar);
       expect(closed.status).toBe(423);
+      // Dieselbe Route in anderer Schreibweise: Express findet sie, die Sperre auch.
+      expect((await call('GET', '/API/companies', jar)).status).toBe(423);
+      expect((await call('GET', '/Api/Companies/', jar)).status).toBe(423);
+      // Markierte Routen ohne verschlüsselte Felder bleiben offen (H1).
+      expect((await call('GET', '/api/flags', jar)).status).toBe(200);
+      expect((await call('GET', '/api/health', jar)).status).toBe(200);
+      // Ohne gesetzten Schlüssel gibt es die Sicherungswege nicht (404): die Sperre ließ sie also durch.
+      expect((await call('GET', '/api/internal/backup-plan', jar)).status).toBe(404);
+      expect((await call('POST', '/api/backups', jar, {})).status).not.toBe(423);
+      // Ein unbekannter Abmeldelink erreicht den Handler (404-Seite), die Bestätigung bleibt gesperrt.
+      expect((await call('GET', '/api/consent/unsubscribe/gibt-es-nicht', jar)).status).toBe(404);
+      expect((await call('POST', '/api/consent/confirmation/gibt-es-nicht', jar)).status).toBe(423);
+      expect((await call('POST', '/api/public/inquiry', jar, {})).status).toBe(423);
     } finally {
       await vault.unlock(TEST_VAULT_PASSPHRASE, { userId: null, actor: 'test' }, 'test');
     }
@@ -392,6 +405,31 @@ describe('Anmeldung über das Portal (Modus portal)', () => {
     const linked = await prisma.user.findUniqueOrThrow({ where: { id: local.id } });
     expect(linked.ssoSubject).toBe(account.sub);
     expect(await prisma.user.count({ where: { email: emailOf('lokal') } })).toBe(1);
+  });
+
+  it('N5: ein Notzugangskonto wird NIE per Adresse mit dem Portal-Konto verknüpft, seine Rolle bleibt', async () => {
+    const emergency = await prisma.user.create({
+      data: {
+        name: 'Notzugang Nora',
+        email: emailOf('notzugang'),
+        username: emailOf('notzugang'),
+        role: 'owner',
+        emergency: true,
+        accessRole: 'admin',
+      },
+    });
+    userIds.push(emergency.id);
+    // Ein Portal-Konto mit derselben Adresse, aber nur als Mitarbeitende (staff).
+    account.sub = `konto-notzugang-${run}`;
+    account.email = emailOf('notzugang');
+    account.roles = { [SLUG]: 'staff' };
+    const reply = await login(await withCsrf(new Jar()));
+    expect(reply.status).toBe(401);
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: emergency.id } });
+    expect(after.ssoSubject).toBeNull();
+    expect(after.ssoIssuer).toBeNull();
+    expect(after.accessRole).toBe('admin');
+    expect(await prisma.user.count({ where: { email: emailOf('notzugang') } })).toBe(1);
   });
 
   it('übersteht einen Schlüsselwechsel des Portals (neue kid, JWKS wird neu geholt)', async () => {
@@ -849,14 +887,34 @@ describe('Anmeldung über das Portal (Modus portal)', () => {
       return user;
     }
 
-    it('lokale Anmeldung ohne emergency -> 403 local_login_disabled', async () => {
+    it('lokale Anmeldung ohne emergency -> 401 login_failed, auch mit RICHTIGEM Passwort (kein Passwort-Orakel)', async () => {
       await localUser('normal', false);
       const reply = await call('POST', '/api/auth/login', await withCsrf(new Jar()), {
         identifier: emailOf('normal'),
         password,
       });
-      expect(reply.status).toBe(403);
-      expect(reply.body.error.code).toBe('local_login_disabled');
+      // Früher 403 local_login_disabled, aber nur bei richtigem Passwort: ein Orakel.
+      expect(reply.status).toBe(401);
+      expect(reply.body.error.code).toBe('login_failed');
+      expect(reply.body.error.detail).toBeUndefined();
+      // Und KEINE Sitzung, KEIN Fehlversuch auf dem Konto.
+      const row = await prisma.user.findFirstOrThrow({ where: { email: emailOf('normal') } });
+      expect(row.failedAttempts).toBe(0);
+    });
+
+    it('die Antwort ist für richtiges und falsches Passwort eines Nicht-Notzugangs und für eine unbekannte Kennung gleich', async () => {
+      await localUser('gleich', false);
+      const bodies = [];
+      for (const [identifier, pass] of [
+        [emailOf('gleich'), password],
+        [emailOf('gleich'), 'ein-ganz-falsches-passwort'],
+        [emailOf('gibt-es-nicht'), password],
+      ] as const) {
+        const reply = await call('POST', '/api/auth/login', await withCsrf(new Jar()), { identifier, password: pass });
+        bodies.push({ status: reply.status, error: reply.body.error });
+      }
+      expect(bodies[1]).toEqual(bodies[0]);
+      expect(bodies[2]).toEqual(bodies[0]);
     });
 
     it('lokale Anmeldung mit emergency=true wird angenommen (weiter zum zweiten Faktor)', async () => {

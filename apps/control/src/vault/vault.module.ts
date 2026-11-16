@@ -1,5 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { MailModule } from '../mail/mail.module';
+import { VaultLockedNoticeService } from './vault-locked-notice.service';
 import { EncryptExistingService } from './encrypt-existing.service';
 import { VaultController, VaultStatusController } from './vault.controller';
 import { VaultService } from './vault.service';
@@ -10,11 +12,12 @@ import { VaultService } from './vault.service';
  */
 @Global()
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, MailModule],
   controllers: [VaultStatusController, VaultController],
   providers: [
     VaultService,
     EncryptExistingService,
+    VaultLockedNoticeService,
   ],
   exports: [VaultService, EncryptExistingService],
 })

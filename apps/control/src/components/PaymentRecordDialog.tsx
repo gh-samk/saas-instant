@@ -2,13 +2,19 @@ import { useEffect, useState } from 'react';
 import { today } from '@saas-instant/shared';
 import { Dialog, DateField, InputField, Button } from '@saas-instant/ui';
 import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
-import { ApiError, errorText } from '../lib/api-client';
+import { errorText } from '../lib/api-client';
+import { useSecondFactorEvidence } from '../lib/second-factor';
 import {
   notePayment,
   type Invoice,
   type SecondFactorEvidence,
 } from '../lib/api';
-import { centFromInput, formatAmount, formatAmountCent } from '../utils/amount';
+import {
+  centAsFieldValue,
+  centFromInput,
+  formatAmount,
+  formatAmountCent,
+} from '../utils/amount';
 import { cumulativePaidCent, type PaymentMode } from '../utils/payment';
 import { useT } from '../i18n';
 
@@ -33,17 +39,27 @@ import { useT } from '../i18n';
  * es ausdrücklich nicht gibt. Der Dialog fragt trotzdem in der Sprache der
  * Überweisung („voll bezahlt“ / „Teilzahlung“) und rechnet vor dem Senden
  * auf den Gesamtstand um (`cumulativePaidCent`).
+ *
+ * [M13] DRITTE OPTION „ZAHLUNGSSTAND BERICHTIGEN": Wer eine Zahlung falsch
+ * erfasst hat, tippt den richtigen Gesamtstand (auch 0) und überschreibt
+ * damit den alten — der Server hält die Berichtigung im Audit-Log fest. Der
+ * Dialog sendet immer den bisher angezeigten Stand mit (`expectedPaidCent`):
+ * Hat inzwischen jemand anderes etwas erfasst, antwortet der Server mit 409
+ * statt es still zu überschreiben.
  */
 export function PaymentRecordDialog({
   open,
   invoice,
   totpPossible,
+  initialMode = 'full',
   onClose,
   onNoted,
 }: {
   open: boolean;
   invoice: Invoice;
   totpPossible: boolean;
+  /** Mit welcher Auswahl der Dialog aufgeht (`correct` aus dem Menü „Weitere“). */
+  initialMode?: PaymentMode;
   onClose: () => void;
   onNoted: (invoice: Invoice) => void;
 }) {
@@ -55,25 +71,31 @@ export function PaymentRecordDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [amountError, setAmountError] = useState<string>();
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const [dialogError, setDialogError] = useState<string>();
-
-  useEffect(() => {
-    if (!open) return;
-    setPaymentDate(today());
-    // Vorauswahl ist „voll bezahlt“: Der häufigste Fall ist die vollständige
-    // Zahlung. Erst „Teilzahlung“ öffnet das Betragsfeld.
-    setMode('full');
-    setAmount('');
-    setError(null);
-    setAmountError(undefined);
-    setEvidenceOpen(false);
-    setDialogError(undefined);
-  }, [open, invoice.sumGrossCent]);
+  const evidenceState = useSecondFactorEvidence();
 
   // Was bereits erfasst ist, in Cent — die Teilzahlung wird darauf addiert.
   const alreadyPaidCent =
     invoice.paidAmount === null ? 0 : (centFromInput(invoice.paidAmount) ?? 0);
+  // Berichtigen gibt es nur, wo etwas erfasst ist.
+  const canCorrect = alreadyPaidCent !== 0;
+
+  useEffect(() => {
+    if (!open) return;
+    // Vorauswahl ist „voll bezahlt“: Der häufigste Fall ist die vollständige
+    // Zahlung. Erst „Teilzahlung“ öffnet das Betragsfeld. Aus dem Menü
+    // „Weitere“ kommt „berichtigen“, vorbelegt mit dem bisherigen Stand.
+    const start: PaymentMode =
+      initialMode === 'correct' && canCorrect ? 'correct' : 'full';
+    setMode(start);
+    setPaymentDate(
+      start === 'correct' && invoice.paymentDate ? invoice.paymentDate : today(),
+    );
+    setAmount(start === 'correct' ? centAsFieldValue(alreadyPaidCent) : '');
+    setError(null);
+    setAmountError(undefined);
+    evidenceState.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, invoice.sumGrossCent, initialMode]);
 
   async function record(evidence?: SecondFactorEvidence) {
     const cent = cumulativePaidCent(
@@ -94,25 +116,18 @@ export function PaymentRecordDialog({
     try {
       const updated = await notePayment(
         invoice.id,
-        { paymentDate, paidAmountCent: cent },
+        {
+          paymentDate,
+          paidAmountCent: cent,
+          expectedPaidCent: alreadyPaidCent,
+        },
         evidence,
       );
-      setEvidenceOpen(false);
+      evidenceState.close();
       onNoted(updated);
     } catch (f) {
-      if (f instanceof ApiError && f.status === 401) {
-        if (evidence) {
-          setDialogError(
-            evidence.totpCode !== undefined
-              ? t('components.paymentRecordDialog.text2')
-              : t('components.paymentRecordDialog.text3'),
-          );
-        } else {
-          setDialogError(undefined);
-          setEvidenceOpen(true);
-        }
-        return;
-      }
+      if (evidenceState.handle(f, evidence)) return;
+      evidenceState.close();
       // Die Plausibilitätsmeldungen des Servers („Das Zahldatum liegt vor dem
       // Rechnungsdatum.") sind bereits für Menschen geschrieben — ein eigener
       // Wortlaut wäre hier eine schlechtere Auskunft.
@@ -126,7 +141,11 @@ export function PaymentRecordDialog({
     <>
       <Dialog
         open={open}
-        title={t('components.paymentRecordDialog.title')}
+        title={
+          mode === 'correct'
+            ? t('components.paymentRecordDialog.correct')
+            : t('components.paymentRecordDialog.title')
+        }
         size="sm"
         onClose={() => {
           if (!loading) onClose();
@@ -139,7 +158,7 @@ export function PaymentRecordDialog({
               form="zahlung-formular"
               type="submit"
               loading={loading}
-              disabled={paymentDate === '' || (mode === 'partial' && amount.trim() === '')}
+              disabled={paymentDate === '' || (mode !== 'full' && amount.trim() === '')}
             >
               {t('components.paymentRecordDialog.button2')}</Button>
           </>
@@ -202,13 +221,33 @@ export function PaymentRecordDialog({
               />
               <span>{t('components.paymentRecordDialog.partial')}</span>
             </label>
+            {canCorrect && (
+              <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-text">
+                <input
+                  type="radio"
+                  name="zahlung-art"
+                  className="size-4 accent-primaer"
+                  checked={mode === 'correct'}
+                  onChange={() => {
+                    setMode('correct');
+                    setAmount(centAsFieldValue(alreadyPaidCent));
+                    setAmountError(undefined);
+                  }}
+                />
+                <span>{t('components.paymentRecordDialog.correct')}</span>
+              </label>
+            )}
           </fieldset>
 
-          {mode === 'partial' && (
+          {mode !== 'full' && (
             <InputField
               id="zahlung-betrag"
               name="zahlung-betrag"
-              label={t('components.paymentRecordDialog.label2')}
+              label={
+                mode === 'correct'
+                  ? t('components.paymentRecordDialog.label3')
+                  : t('components.paymentRecordDialog.label2')
+              }
               type="number"
               step="0.01"
               inputMode="decimal"
@@ -217,7 +256,13 @@ export function PaymentRecordDialog({
               value={amount}
               disabled={loading}
               onChange={(ev) => setAmount(ev.target.value)}
-              helperText={`${t('components.paymentRecordDialog.paidSoFar')} ${formatAmountCent(alreadyPaidCent)} · ${t('components.paymentRecordDialog.open')} ${formatAmount(invoice.openAmount)}`}
+              helperText={
+                mode === 'correct'
+                  ? t('components.paymentRecordDialog.correctHint', {
+                      paid: formatAmountCent(alreadyPaidCent),
+                    })
+                  : `${t('components.paymentRecordDialog.paidSoFar')} ${formatAmountCent(alreadyPaidCent)} · ${t('components.paymentRecordDialog.open')} ${formatAmount(invoice.openAmount)}`
+              }
               error={amountError}
             />
           )}
@@ -231,16 +276,13 @@ export function PaymentRecordDialog({
       </Dialog>
 
       <SecondFactorEvidenceDialog
-        open={evidenceOpen}
+        open={evidenceState.open}
         title={t('components.paymentRecordDialog.title2')}
         declaration={t('components.paymentRecordDialog.declaration')}
         totpPossible={totpPossible}
         loading={loading}
-        error={dialogError}
-        onCancel={() => {
-          setEvidenceOpen(false);
-          setDialogError(undefined);
-        }}
+        error={evidenceState.error}
+        onCancel={evidenceState.close}
         onConfirm={(evidence) => void record(evidence)}
       />
     </>

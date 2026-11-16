@@ -7,6 +7,7 @@ import {
   decryptField,
   isEncryptedBytes,
   isEncryptedText,
+  plaintextPolicy,
 } from '../crypto/field-crypto';
 import { rawClientOf } from '../prisma/field-encryption';
 import { PrismaService } from '../prisma/prisma.service';
@@ -87,6 +88,9 @@ export class EncryptExistingService implements OnModuleInit {
     for (const target of TARGETS) {
       counts[target.model] = await this.encryptTable(raw as any, target);
     }
+    // Ab jetzt ist alles Veränderbare verschlüsselt: Klartext in einem
+    // verschlüsselten Feld gilt beim Lesen nicht mehr als Altbestand (N2).
+    plaintextPolicy.strict = true;
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     if (total > 0) {
       this.logger.log(`encrypt-existing: ${JSON.stringify(counts)}`);

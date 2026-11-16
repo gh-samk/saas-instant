@@ -15,6 +15,7 @@ import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { dayReadable } from '../common/calendar';
 import { writeSystemNote } from '../notes/system-note';
+import { readLenient } from '../prisma/field-encryption';
 import { PrismaService } from '../prisma/prisma.service';
 import { decimalAsCent } from '../invoices/invoice.amount';
 import { PriceTierUnknownError } from '../invoices/invoice.errors';
@@ -81,6 +82,9 @@ interface CompanySearchEntry {
 const NOT_DEMANDING: InvoiceStatus[] = ['draft', 'cancelled'];
 
 /** Felder der Kurzform. Die Liste zeigt keine Bank- und Rechnungsdaten. */
+/** Anzeigename, wenn der Name nicht entschluesselt werden konnte (Liste bleibt benutzbar). */
+const UNREADABLE_NAME = '(nicht lesbar)';
+
 const SHORT_SELECT = {
   id: true,
   name: true,
@@ -101,6 +105,7 @@ const SHORT_SELECT = {
       status: true,
       dueDate: true,
       paidAmount: true,
+      cancelledInvoiceId: true,
       lines: { select: { grossAmount: true } },
     },
   },
@@ -121,6 +126,7 @@ function openState(
     status: InvoiceStatus;
     dueDate: Date;
     paidAmount: Prisma.Decimal | null;
+    cancelledInvoiceId?: string | null;
     lines: readonly { grossAmount: Prisma.Decimal }[];
   }[],
   todayDay: string,
@@ -219,20 +225,26 @@ export class CompanyService {
     ) {
       return cached.entries;
     }
-    const rows = await this.prisma.company.findMany({
-      select: {
-        id: true,
-        name: true,
-        status: true,
-        city: true,
-        contactName: true,
-        contactEmail: true,
-      },
-    });
+    // NACHSICHTIG gelesen: ein beschaedigter Wert (veraenderter Chiffretext)
+    // darf nicht die ganze Liste in einen 500 verwandeln. Die Zeile bleibt
+    // sichtbar, damit man sie findet und aus der Sicherung pruefen kann.
+    const rows = await readLenient(() =>
+      this.prisma.company.findMany({
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          city: true,
+          contactName: true,
+          contactEmail: true,
+        },
+      }),
+    );
     const entries = rows
       .map((r) => ({
         id: r.id,
-        name: r.name,
+        name: r.name ?? UNREADABLE_NAME,
+
         status: r.status,
         haystack: [r.name, r.contactName, r.contactEmail, r.city].map((v) =>
           (v ?? '').toLowerCase(),
@@ -294,10 +306,12 @@ export class CompanyService {
     // Mitternacht gerendert wird, zwei verschiedene „heute" benutzen.
     const todayDay = today();
 
-    const fetched = await this.prisma.company.findMany({
-      where: { id: { in: pageIds } },
-      select: SHORT_SELECT,
-    });
+    const fetched = await readLenient(() =>
+      this.prisma.company.findMany({
+        where: { id: { in: pageIds } },
+        select: SHORT_SELECT,
+      }),
+    );
     const byId = new Map(fetched.map((r) => [r.id, r]));
     const rows = pageIds.flatMap((rowId) => {
       const row = byId.get(rowId);
@@ -307,7 +321,7 @@ export class CompanyService {
     return {
       companies: rows.map((row) => ({
         id: row.id,
-        name: row.name,
+        name: row.name ?? UNREADABLE_NAME,
         status: row.status,
         city: row.city,
         contactName: row.contactName,

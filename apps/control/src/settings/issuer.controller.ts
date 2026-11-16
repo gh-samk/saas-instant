@@ -15,6 +15,7 @@ import type { Request, Response } from 'express';
 import type { IssuerProfile } from '@saas-instant/shared';
 import type { SessionUser } from '../auth/session.service';
 import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import { WithoutSecondFactor } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
 import { SessionGuard } from '../common/guards/session.guard';
@@ -114,6 +115,7 @@ export class IssuerSettingsController {
 }
 
 /** Das Logo, anonym und rein lesend: die Anmeldeseite braucht es vor der Anmeldung. */
+@AllowWhileLocked('Logo der Anmeldeseite, unverschlüsselt')
 @Controller('public/logo')
 export class PublicLogoController {
   constructor(private readonly issuer: IssuerProfileService) {}

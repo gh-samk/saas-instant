@@ -23,4 +23,19 @@ describe('cumulativePaidCent', () => {
     expect(cumulativePaidCent('partial', 58310, 0, '-5')).toBeNull();
     expect(cumulativePaidCent('partial', 58310, 0, '1.234')).toBeNull();
   });
+
+  // [M13] Berichtigen: der Betrag ist der neue Gesamtstand, auch 0.
+  it('setzt bei „berichtigen“ den eingetippten Gesamtstand, auch 0', () => {
+    expect(cumulativePaidCent('correct', 58310, 58310, '100')).toBe(10000);
+    expect(cumulativePaidCent('correct', 58310, 58310, '0')).toBe(0);
+    expect(cumulativePaidCent('correct', 58310, 10000, '0,00')).toBe(0);
+    expect(cumulativePaidCent('correct', 58310, 10000, '583,10')).toBe(58310);
+  });
+
+  it('weist beim Berichtigen unlesbare und negative Eingaben ab', () => {
+    expect(cumulativePaidCent('correct', 58310, 10000, '')).toBeNull();
+    expect(cumulativePaidCent('correct', 58310, 10000, 'abc')).toBeNull();
+    expect(cumulativePaidCent('correct', 58310, 10000, '-1')).toBeNull();
+    expect(cumulativePaidCent('correct', 58310, 10000, '1.234')).toBeNull();
+  });
 });

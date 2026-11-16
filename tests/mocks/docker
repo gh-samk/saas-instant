@@ -7,6 +7,8 @@ set -u
 mkdir -p "$MOCK_DIR/nets"
 LOG="$MOCK_DIR/calls.log"
 printf '%s\n' "$*" >> "$LOG"
+# Verzeichnis der Portal-Registry, das ein Aufruf per Umgebung mitbekam (Test --dir).
+[ -z "${PORTAL_REGISTRY_DIR:-}" ] || printf '%s\n' "$PORTAL_REGISTRY_DIR" >> "$MOCK_DIR/registry-dir.log"
 
 case "${1:-}" in
   info) exit 0 ;;

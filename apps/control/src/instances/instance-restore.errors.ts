@@ -24,7 +24,7 @@ export class BackupNotRestorableError extends BusinessError {
   constructor() {
     super(
       'backup_not_restorable',
-      'Zu dieser Sicherung ist kein Objekt im Sicherungsziel gemeldet; sie lässt sich nicht automatisch wiederherstellen.',
+      'Zu dieser Sicherung sind kein Objekt und keine Prüfsumme im Sicherungsziel gemeldet; sie lässt sich nicht automatisch wiederherstellen.',
       HttpStatus.CONFLICT,
     );
   }

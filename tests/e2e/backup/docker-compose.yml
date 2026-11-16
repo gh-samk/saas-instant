@@ -29,37 +29,13 @@ services:
     labels: *label
 
   docker-socket-proxy:
-    # Allowlist wie im Haupt-Compose (docker-compose.yml): nur Container ansehen/starten/stoppen + Exec.
+    # Allowlist wie im Haupt-Compose (docker-compose.yml): dieselbe Vorlage ops/docker-proxy/haproxy.cfg.template.
     image: tecnativa/docker-socket-proxy:0.3.0
-    environment:
-      CONTAINERS: "1"
-      EXEC: "1"
-      POST: "1"
-      IMAGES: "0"
-      NETWORKS: "0"
-      VOLUMES: "0"
-      SERVICES: "0"
-      SWARM: "0"
-      TASKS: "0"
-      SECRETS: "0"
-      CONFIGS: "0"
-      PLUGINS: "0"
-      BUILD: "0"
-      COMMIT: "0"
-      AUTH: "0"
-      SYSTEM: "0"
-      NODES: "0"
-      DISTRIBUTION: "0"
-      EVENTS: "0"
-      INFO: "0"
-      SESSION: "0"
-      VERSION: "1"
-      PING: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # PRODUKTFEHLER im Haupt-Compose: dort steht "read_only: true" fuer diesen Dienst, aber das
-    # Entrypoint des Images (0.3.0) schreibt /usr/local/etc/haproxy/haproxy.cfg ("Read-only file system",
-    # Container beendet sich mit Exit 1). Hier deshalb ohne read_only; cap_drop/no-new-privileges bleiben.
+      - ../../../ops/docker-proxy/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro
+    # Ohne read_only: Das Entrypoint des Images (0.3.0) schreibt /usr/local/etc/haproxy/haproxy.cfg
+    # ("Read-only file system", Container beendet sich mit Exit 1). cap_drop/no-new-privileges bleiben.
     tmpfs:
       - /run
       - /tmp

@@ -15,6 +15,7 @@ describe('SecondFactorGuard', () => {
   /** Baut Guard und Kontext um einen Benutzer und einen Body herum. */
   async function build(options: {
     body?: unknown;
+    headers?: Record<string, string>;
     evidenceAt?: Date | null;
     exception?: string;
     withoutUser?: boolean;
@@ -29,7 +30,7 @@ describe('SecondFactorGuard', () => {
       sessionEvidenceAt: options.evidenceAt ?? null,
       body: options.body,
       ip: '203.0.113.5',
-      headers: { 'user-agent': 'Jest' },
+      headers: { 'user-agent': 'Jest', ...(options.headers ?? {}) },
     };
     const context = {
       getHandler: () => () => undefined,
@@ -68,6 +69,35 @@ describe('SecondFactorGuard', () => {
     });
 
     await expect(guard.canActivate(context as never)).resolves.toBe(true);
+  });
+
+  // [M12] Logo-Upload (rohes Bild) und -Entfernen (kein Body) tragen den
+  // Nachweis im Kopf `x-second-factor` (Base64 eines JSON).
+  const header = (evidence: object): string =>
+    Buffer.from(JSON.stringify(evidence), 'utf8').toString('base64');
+
+  it('nimmt den Nachweis aus dem Kopf, wenn der Body keinen trägt', async () => {
+    const { guard, context } = await build({
+      body: {},
+      headers: { 'x-second-factor': header({ currentPassword: TEST_PASSWORD }) },
+      evidenceAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    });
+
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+  });
+
+  it('weist einen falschen oder unlesbaren Nachweis im Kopf ab', async () => {
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    for (const value of [header({ currentPassword: 'wrong' }), '%%%kein-base64%%%', header([])]) {
+      const { guard, context } = await build({
+        body: {},
+        headers: { 'x-second-factor': value },
+        evidenceAt: stale,
+      });
+      await expect(guard.canActivate(context as never)).rejects.toBeInstanceOf(
+        LoginFailedError,
+      );
+    }
   });
 
   it('lässt eine FRISCHE Sitzung ohne Nachweis durch (Ersteinrichtung)', async () => {

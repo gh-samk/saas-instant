@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   HttpCode,
@@ -20,6 +21,7 @@ import { SessionGuard } from '../common/guards/session.guard';
 import { RequireAdmin } from '../common/decorators/require-role.decorator';
 import { RoleGuard } from '../common/guards/role.guard';
 import { sourceFrom } from '../common/inquiry-source';
+import { AllowWhileLocked } from './allow-while-locked.decorator';
 import {
   AddPassphraseDto,
   ChangePassphraseDto,
@@ -53,6 +55,7 @@ function actorOf(user: SessionUser, req: Request): VaultActor {
 export class VaultStatusController {
   constructor(private readonly vault: VaultService) {}
 
+  @AllowWhileLocked('Liefert nur den Zustand des Tresors, ohne Schlüssel und Daten.')
   @Get('status')
   @Header('Cache-Control', 'no-store')
   async status(): Promise<{ state: VaultState }> {
@@ -71,6 +74,7 @@ export class VaultStatusController {
 export class VaultController {
   constructor(private readonly vault: VaultService) {}
 
+  @AllowWhileLocked('Das Entsperren selbst: ohne diese Route käme niemand hinein.')
   @Post('unlock')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -92,6 +96,7 @@ export class VaultController {
   }
 
   /** Erste Einrichtung. Antwort trägt EINMALIG den Wiederherstellungsschlüssel. */
+  @AllowWhileLocked('Die Ersteinrichtung läuft zwangsläufig, bevor ein Schlüssel existiert.')
   @Post('setup')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -112,6 +117,15 @@ export class VaultController {
   )
   async entries(): Promise<VaultEntryInfo[]> {
     return this.vault.listEntries();
+  }
+
+  @Get('legacy-plaintext')
+  @Header('Cache-Control', 'no-store')
+  @WithoutSecondFactor(
+    'Rein lesend: zwei Zahlen (Belege und Protokolleinträge aus der Zeit vor dem Tresor, die unveränderlich im Klartext liegen).',
+  )
+  async legacyPlaintext(): Promise<{ invoices: number; auditEntries: number }> {
+    return this.vault.legacyPlaintext();
   }
 
   @Post('passphrases')
@@ -145,6 +159,23 @@ export class VaultController {
       dto.newPassphrase,
       actorOf(user, req),
     );
+    return { ok: true };
+  }
+
+  /**
+   * Entzieht eine Passphrase. Zweiter Faktor wie bei allen Umpack-Routen (Klassen-
+   * Guard); der letzte verbleibende Zugang ist geschützt (409).
+   */
+  @Delete('passphrases/:id')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async removePassphrase(
+    @LoggedInUser() user: SessionUser,
+    @Param('id') id: string,
+    @Body() _dto: VaultEvidenceDto,
+    @Req() req: Request,
+  ): Promise<{ ok: true }> {
+    await this.vault.removePassphrase(id, actorOf(user, req));
     return { ok: true };
   }
 

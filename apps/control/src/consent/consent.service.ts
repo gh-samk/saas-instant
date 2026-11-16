@@ -8,6 +8,7 @@ import { baseUrl } from '../common/base-url';
 import { MailService } from '../mail/mail.service';
 import type { DbClient } from '../prisma/db-client';
 import { consentEmailIndex } from '../crypto/field-crypto';
+import { keyring } from '../crypto/keyring';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   newToken,
@@ -597,8 +598,16 @@ export class ConsentService {
    */
   async unsubscribe(
     token: string,
-    source: InquirySource,
+    sourceGiven: InquirySource,
   ): Promise<{ consentId: string; abortedMails: number }> {
+    // GESPERRTER TRESOR: Die Abmeldung läuft trotzdem (ein Widerspruch darf nicht
+    // warten, bis jemand entsperrt). Das Audit-Log nimmt in diesem Zustand aber
+    // alles im Klartext auf und ist append-only; die IP und der User-Agent der
+    // abmeldenden Person gehören dort nicht hinein. Der Nachweis bleibt: wer
+    // (Eintrags-Kennung), was (abgemeldet) und wann (Zeitstempel des Eintrags).
+    const source: InquirySource = keyring.unlocked
+      ? sourceGiven
+      : { ip: null, userAgent: null };
     const row = await this.prisma.consent.findUnique({
       where: { unsubscribeToken: token },
       select: { id: true, status: true, companyId: true },
@@ -630,6 +639,9 @@ export class ConsentService {
         await tx.consent.update({
           where: { id: row.id },
           data: { status: 'unsubscribed', unsubscribedAt: new Date() },
+          // Nur die Kennung zurück, damit bei gesperrtem Tresor keine
+          // verschlüsselten Spalten (E-Mail, IP) entschlüsselt werden müssen.
+          select: { id: true },
         });
         await this.mirrorToCompany(tx, row.companyId, 'unsubscribed');
       }
@@ -1095,6 +1107,10 @@ export class ConsentService {
     await db.company.update({
       where: { id: companyId },
       data: { newsletterConsentStatus: status },
+      // Nur die Kennung zurück: ohne `select` käme die ganze Zeile samt
+      // verschlüsselter Felder, und das Entschlüsseln scheitert bei gesperrtem
+      // Tresor. Die Ein-Klick-Abmeldung muss auch dann wirken.
+      select: { id: true },
     });
   }
 }

@@ -37,6 +37,7 @@ import {
   type InvoiceWithRetention,
 } from '../lib/api';
 import { formatAmount } from '../utils/amount';
+import type { PaymentMode } from '../utils/payment';
 import { formatQuantity, formatPercent } from '../utils/decimal';
 import { formatDate } from '../utils/date';
 import { useMediaQuery } from '../lib/use-media-query';
@@ -206,6 +207,9 @@ export function InvoiceView({
     }
   }
   const [paymentOpen, setPaymentOpen] = useState(false);
+  // Mit welcher Auswahl der Zahlungsdialog aufgeht: „Zahlung erfassen“ startet
+  // bei voll bezahlt, das Menü „Weitere“ direkt bei „berichtigen“.
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('full');
   const [cancellationOpen, setCancellationOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
 
@@ -226,7 +230,10 @@ export function InvoiceView({
     `${invoice.status}|${invoice.paymentState}|${invoice.transferStatus ?? ''}`,
   );
 
-  const cancelled = invoice.paymentState === 'cancelled';
+  // [H2] `paymentState === 'cancelled'` gilt jetzt auch für die Stornorechnung
+  // selbst; sie muss aber versendbar bleiben. Hier zählt nur das stornierte
+  // ORIGINAL.
+  const cancelled = invoice.status === 'cancelled';
   const alreadySent = invoice.status === 'sent';
 
   // GENAU EINE HAUPTAKTION JE STATUS. Eine festgeschriebene, nie versendete
@@ -234,7 +241,12 @@ export function InvoiceView({
   // Zahlung. Bezahlt oder storniert gibt es nichts Dringendes mehr, dann
   // bleiben nur Nebenaktionen. Alles andere sind Sekundärknöpfe, und das
   // Stornieren liegt im Menü „Weitere": nie als roter Knopf neben der Zahlung.
-  const canPay = invoice.paymentState !== 'paid' && !cancelled;
+  const canPay =
+    invoice.paymentState !== 'paid' && !cancelled && !invoice.isCancellation;
+  // [M13] Berichtigen geht auch bei `paid`: Wer eine Zahlung falsch erfasst
+  // hat, muss sie zurücknehmen können, ohne dass der Server einen Löschpfad kennt.
+  const canCorrectPayment =
+    invoice.paidAmount !== null && !cancelled && invoice.finalizedAt !== null;
   const sendIsPrimary = !cancelled && invoice.status === 'finalized';
   const payIsPrimary = canPay && !sendIsPrimary;
   const canReminder =
@@ -270,17 +282,32 @@ export function InvoiceView({
     },
   );
 
-  const moreItems: MenuItem[] = canCancel
-    ? [
-        {
-          id: 'cancel',
-          label: t('components.invoiceView.button5'),
-          description: t('components.invoiceView.cancelHint'),
-          tone: 'danger',
-          onSelect: () => setCancellationOpen(true),
-        },
-      ]
-    : [];
+  const moreItems: MenuItem[] = [
+    ...(canCorrectPayment
+      ? [
+          {
+            id: 'correct-payment',
+            label: t('components.invoiceView.correctPayment'),
+            description: t('components.invoiceView.correctPaymentHint'),
+            onSelect: () => {
+              setPaymentMode('correct');
+              setPaymentOpen(true);
+            },
+          } satisfies MenuItem,
+        ]
+      : []),
+    ...(canCancel
+      ? [
+          {
+            id: 'cancel',
+            label: t('components.invoiceView.button5'),
+            description: t('components.invoiceView.cancelHint'),
+            tone: 'danger',
+            onSelect: () => setCancellationOpen(true),
+          } satisfies MenuItem,
+        ]
+      : []),
+  ];
 
   const transferDate = (integrityState.history ?? [])
     .filter((e) => e.action === 'invoice.transfer.noted')
@@ -319,7 +346,13 @@ export function InvoiceView({
         >
           {sendIsPrimary && sendButton}
           {payIsPrimary && (
-            <Button variant="primary" onClick={() => setPaymentOpen(true)}>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setPaymentMode('full');
+                setPaymentOpen(true);
+              }}
+            >
               <Landmark className="h-4 w-4" aria-hidden="true" />
               {t('components.invoiceView.button4')}
             </Button>
@@ -342,7 +375,13 @@ export function InvoiceView({
             </Button>
           )}
           {canPay && !payIsPrimary && (
-            <Button variant="secondary" onClick={() => setPaymentOpen(true)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPaymentMode('full');
+                setPaymentOpen(true);
+              }}
+            >
               <Landmark className="h-4 w-4" aria-hidden="true" />
               {t('components.invoiceView.button4')}
             </Button>
@@ -591,6 +630,7 @@ export function InvoiceView({
       <PaymentRecordDialog
         open={paymentOpen}
         invoice={invoice}
+        initialMode={paymentMode}
         totpPossible={totpPossible}
         onClose={() => setPaymentOpen(false)}
         onNoted={(updated) => {

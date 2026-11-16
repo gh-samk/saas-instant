@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { createApp, type App } from '../src/app.js';
+import { ResilientControlClient } from '../src/control-cache.js';
 import type { BackupReport, ControlClient, InvoiceArchivePage } from '../src/control-client.js';
 import type { ContainerRef, DockerClient, ExecHandle } from '../src/docker/types.js';
 import { signRequest } from '../src/hmac.js';
@@ -21,6 +22,10 @@ export const S3_KEY_ID = 'AKIATESTACCESSKEYID';
 export interface FakeContainer extends ContainerRef {
   db?: string; // Inhalt der "Datenbank" (Klartext-Dump)
   uploads?: string;
+  /** Anzahl Nutzerobjekte in der "Datenbank" (psql-Pruefung vor der Wiederherstellung). */
+  tables?: number;
+  /** Erzwingt die Ausgabe der psql-Pruefung (z. B. nicht numerisch). */
+  psqlOut?: string;
 }
 
 /** Fake-Docker: pg_dump liefert den Dump-Text, pg_restore schreibt ihn zurueck. */
@@ -65,6 +70,10 @@ export class FakeDocker implements DockerClient {
         stdout.end(Buffer.from(c.uploads ?? ''));
         return { exitCode: 0, stderr: '' };
       }
+      if (cmd[0] === 'psql') {
+        stdout.end(c.psqlOut ?? `${c.tables ?? 0}\n`);
+        return { exitCode: 0, stderr: '' };
+      }
       const chunks: Buffer[] = [];
       for await (const ch of opts!.stdin!) chunks.push(Buffer.from(ch as Uint8Array));
       stdout.end();
@@ -82,13 +91,18 @@ export class FakeControl implements ControlClient {
   reports: BackupReport[] = [];
   plan: InstanceSpec[] = [];
   retentionYears: number | undefined = undefined;
+  /** Setzt einen Fehler, den getPlan bzw. report wirft (z. B. ControlLockedError). */
+  planError: Error | null = null;
+  reportError: Error | null = null;
   async getPlan() {
+    if (this.planError) throw this.planError;
     return { ...(this.retentionYears !== undefined ? { retentionYears: this.retentionYears } : {}), instances: this.plan };
   }
   async getInvoiceArchivePage(): Promise<InvoiceArchivePage> {
     return { items: [], next: null };
   }
   async report(e: BackupReport) {
+    if (this.reportError) throw this.reportError;
     this.reports.push(e);
   }
 }
@@ -142,7 +156,9 @@ export function s3Body(extra: Record<string, unknown> = {}) {
   };
 }
 
-export async function startHarness(opts: { storage?: FakeStorage } = {}): Promise<Harness> {
+export async function startHarness(
+  opts: { storage?: FakeStorage; resilient?: boolean; jobTimeoutMs?: number; deniedProjects?: string[] } = {},
+): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), 'bkp-agent-'));
   const docker = new FakeDocker();
   const clock = { now: new Date('2026-11-15T02:30:00Z') };
@@ -153,15 +169,18 @@ export async function startHarness(opts: { storage?: FakeStorage } = {}): Promis
   const redactor = new Redactor();
   redactor.add(SECRET);
   const log = createLogger(redactor, (l) => logs.push(l));
+  const store = new StateStore(path.join(dir, 'state'), STATE_KEY);
   const app = await createApp({
+    ...(opts.jobTimeoutMs ? { jobTimeoutMs: opts.jobTimeoutMs } : {}),
+    ...(opts.deniedProjects ? { deniedProjects: opts.deniedProjects } : {}),
     secret: SECRET,
     version: 'test',
     workDir: path.join(dir, 'work'),
     invoiceRetentionYears: 10,
     extraOwnProjects: [],
     docker,
-    control,
-    store: new StateStore(path.join(dir, 'state'), STATE_KEY),
+    control: opts.resilient ? new ResilientControlClient(control, store, log, redactor, () => clock.now) : control,
+    store,
     storageFactory: () => withDeleteGuard(storage),
     redactor,
     log,

@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithI18n as render } from '../test-support/render-with-i18n';
 import App from '../App';
-import { rememberCompany, readRecentCompanies } from '../lib/recent-companies';
+import {
+  clearRecentCompanies,
+  readRecentCompanyIds,
+  rememberCompanyId,
+} from '../lib/recent-companies';
 
 /**
  * Die Kommandopalette (⌘K): Suche mit Live-Treffern, Aktionen, zuletzt
@@ -18,6 +22,13 @@ const STATE = {
   loginCodeEmail: 'test@example.com',
   setUpFactors: ['totp'],
   openRecoveryCodes: 8,
+};
+
+/** Namen, die der Server je Kennung liefert (gespeichert werden nur Kennungen). */
+const NAMES: Record<string, string> = {
+  'c-7': 'Gemüsehof Aue',
+  'c-8': 'Imkerei Berg',
+  'c-9': 'Hofgut Eich',
 };
 
 const COMPANY = (id: string, name: string, city: string | null = null) => ({
@@ -46,7 +57,9 @@ function arrange(companies = [COMPANY('c-1', 'Solawi Rheintal', 'Basel')]) {
       return new Response(JSON.stringify({ tasksUrgent: 0, invoicesOpen: 0 }), { status: 200 });
     }
     if (/\/api\/companies\/[^/?]+$/.test(path.split('?')[0])) {
-      return new Response(JSON.stringify(COMPANY('c-9', 'Hofgut Eich')), { status: 200 });
+      const id = decodeURIComponent(path.split('?')[0].split('/').pop() ?? '');
+      if (id === 'c-weg') return new Response('{}', { status: 404 });
+      return new Response(JSON.stringify(COMPANY(id, NAMES[id] ?? 'Hofgut Eich')), { status: 200 });
     }
     if (path.includes('/api/companies')) {
       return new Response(
@@ -249,29 +262,83 @@ describe('Kommandopalette', () => {
     );
   });
 
-  it('zeigt die zuletzt geöffneten Organisationen aus dem Speicher', async () => {
+  it('zeigt die zuletzt geöffneten Organisationen: gespeichert sind Kennungen, die Namen kommen vom Server', async () => {
     arrange();
-    rememberCompany({ id: 'c-7', name: 'Gemüsehof Aue' });
-    rememberCompany({ id: 'c-8', name: 'Imkerei Berg' });
+    rememberCompanyId('b1', 'c-7');
+    rememberCompanyId('b1', 'c-8');
     await openPalette();
 
     const list = screen.getByRole('listbox');
-    const group = within(list).getByRole('group', { name: 'Zuletzt geöffnet' });
-    expect(within(group).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'Imkerei Berg',
-      'Gemüsehof Aue',
-    ]);
+    const group = await within(list).findByRole('group', { name: 'Zuletzt geöffnet' });
+    await waitFor(() =>
+      expect(within(group).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Imkerei Berg',
+        'Gemüsehof Aue',
+      ]),
+    );
     fireEvent.click(within(group).getByRole('option', { name: 'Gemüsehof Aue' }));
     await waitFor(() => expect(window.location.pathname).toBe('/companies/c-7'));
   });
 
-  it('merkt sich eine geöffnete Organisation mit Namen', async () => {
+  it('merkt sich eine geöffnete Organisation nur mit ihrer Kennung, je Benutzer', async () => {
     arrange();
     window.history.pushState({}, '', '/companies/c-9');
     render(<App />);
-    await waitFor(() =>
-      expect(readRecentCompanies()).toEqual([{ id: 'c-9', name: 'Hofgut Eich' }]),
+    await waitFor(() => expect(readRecentCompanyIds('b1')).toEqual(['c-9']));
+    // Kein Name im Speicher, unter keinem Schlüssel.
+    const everything = JSON.stringify(Object.entries(localStorage));
+    expect(everything).not.toContain('Hofgut Eich');
+    // Ein anderer Benutzer sieht die Liste nicht.
+    expect(readRecentCompanyIds('anderer')).toEqual([]);
+  });
+
+  it('lässt eine nicht mehr vorhandene Organisation aus der Liste fallen', async () => {
+    arrange();
+    rememberCompanyId('b1', 'c-weg');
+    rememberCompanyId('b1', 'c-7');
+    await openPalette();
+    await screen.findByRole('option', { name: 'Gemüsehof Aue' });
+    expect(screen.queryByRole('option', { name: /c-weg/ })).toBeNull();
+    await waitFor(() => expect(readRecentCompanyIds('b1')).toEqual(['c-7']));
+  });
+
+  it('clearRecentCompanies leert alle Benutzer und den früheren Schlüssel mit Namen', () => {
+    rememberCompanyId('b1', 'c-1');
+    rememberCompanyId('b2', 'c-2');
+    localStorage.setItem(
+      'saas-instant.control.recent-companies',
+      JSON.stringify([{ id: 'c-3', name: 'Alt-Kundenname' }]),
     );
+    localStorage.setItem('unrelated', 'bleibt');
+    clearRecentCompanies();
+    expect(readRecentCompanyIds('b1')).toEqual([]);
+    expect(readRecentCompanyIds('b2')).toEqual([]);
+    expect(JSON.stringify(Object.entries(localStorage))).not.toContain('Alt-Kundenname');
+    expect(localStorage.getItem('unrelated')).toBe('bleibt');
+  });
+
+  it('ein früherer Eintrag mit Namen wird nicht als Liste gelesen', () => {
+    localStorage.setItem(
+      'saas-instant.control.recent-companies.b1',
+      JSON.stringify([{ id: 'c-3', name: 'Alt-Kundenname' }, 'c-4']),
+    );
+    expect(readRecentCompanyIds('b1')).toEqual(['c-4']);
+  });
+
+  it('bei gesperrter Verwaltung (423) wird die Liste geleert', async () => {
+    const base = arrange();
+    rememberCompanyId('b1', 'c-7');
+    // Irgendeine Anfrage der Oberfläche trifft auf die Sperre.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) =>
+        String(input).includes('/api/navigation/counters')
+          ? new Response(JSON.stringify({ error: { code: 'vault_locked' } }), { status: 423 })
+          : base(input),
+      ),
+    );
+    render(<App />);
+    await waitFor(() => expect(readRecentCompanyIds('b1')).toEqual([]));
   });
 
   it('fängt einen gesperrten Speicher ab', () => {
@@ -281,8 +348,9 @@ describe('Kommandopalette', () => {
     const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('gesperrt');
     });
-    expect(readRecentCompanies()).toEqual([]);
-    expect(() => rememberCompany({ id: 'x', name: 'Y' })).not.toThrow();
+    expect(readRecentCompanyIds('b1')).toEqual([]);
+    expect(() => rememberCompanyId('b1', 'x')).not.toThrow();
+    expect(() => clearRecentCompanies()).not.toThrow();
     spy.mockRestore();
     set.mockRestore();
   });

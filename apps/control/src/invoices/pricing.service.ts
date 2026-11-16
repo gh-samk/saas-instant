@@ -8,6 +8,14 @@ import { averageActivePersons, tierFor } from './pricing.tier';
 import type { PriceSuggestion, SuggestionBlocker } from './pricing.types';
 
 /**
+ * Beginn der Bezeichnung eines Einrichtungspostens (`Einrichtung — {Stufe}`,
+ * siehe `invoicePriceSuggestion.label3`). Der Posten trägt kein eigenes
+ * Kennzeichen; die Bezeichnung ist die einzige Spur, an der sich ein bereits
+ * berechnetes Einrichtungshonorar erkennen lässt.
+ */
+export const SETUP_LABEL_PREFIX = 'Einrichtung';
+
+/**
  * Der Stufenvorschlag — R5 in Reinform: er wird ANGEZEIGT, nicht vollzogen.
  *
  * Es gibt in diesem Dienst keinen Schreibvorgang. `Organisation.preisstufe`
@@ -53,6 +61,25 @@ export class PricingService {
       },
     });
     if (!company) throw new CompanyNotFoundError();
+
+    // [N8f] Die Einrichtung wird EINMAL berechnet. Steht sie schon auf einer
+    // festgeschriebenen, nicht stornierten Rechnung der Organisation, wird sie
+    // nicht noch einmal vorgeschlagen — sonst läge der Posten auf jeder
+    // folgenden Rechnung wieder als Vorschlag da. Eine stornierte Rechnung
+    // zählt nicht (der Storno nimmt die Leistung zurück), ebenso wenig die
+    // Stornorechnung selbst.
+    const setupInvoiced =
+      (await this.prisma.invoiceLine.count({
+        where: {
+          label: { startsWith: SETUP_LABEL_PREFIX, mode: 'insensitive' },
+          invoice: {
+            companyId,
+            finalizedAt: { not: null },
+            status: { not: 'cancelled' },
+            cancelledInvoiceId: null,
+          },
+        },
+      })) > 0;
 
     // Der Zeitraum endet AM Stichtag und umfasst `averageDays` Tage.
     const from = datePlusDays(cutoffDate, -(table.averageDays - 1));
@@ -109,7 +136,8 @@ export class PricingService {
       customAmount: company.customAmount?.toFixed(2) ?? null,
       subscriptionCalculableFrom,
       subscriptionCalculable,
-      setupCalculable: true,
+      setupCalculable: !setupInvoiced,
+      setupInvoiced,
       // Nur gelesen, nie gesetzt (R5): Der Vertrag steht, wie die Betreiberin
       // ihn eingetragen hat. `tier()` kennt auch archivierte Stufen — ein
       // Vertrag darf eine ältere Stufe weiterführen.

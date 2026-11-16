@@ -23,27 +23,36 @@ export async function runBackup(ctx: JobContext, spec: InstanceSpec): Promise<Jo
     // 1) Datenbank
     const dumpFile = await tmpFile(ctx, '.dump.age');
     spool.push(dumpFile);
-    const dump = ctx.docker.exec(db.id, ['pg_dump', '-Fc', '-U', spec.dbUser, spec.dbName]);
+    const dump = ctx.docker.exec(db.id, ['pg_dump', '-Fc', '-U', spec.dbUser, spec.dbName], { signal: ctx.signal });
     const dumpSpool = await encryptToFile(ctx, dump.stdout, dumpFile);
     await expectExit(ctx, dump, 'pg_dump');
     await putFile(ctx, dumpKey, dumpFile);
     written.push(dumpKey);
     files.push({ name: dumpKey.split('/').pop()!, sizeBytes: dumpSpool.size, sha256: dumpSpool.sha256 });
 
-    // 2) Uploads (falls konfiguriert)
+    // 2) Uploads (falls konfiguriert). Scheitert nur dieser Teil (z. B. tar), bleibt der bereits
+    //    hochgeladene Datenbank-Dump erhalten: ein halber Satz ist besser als keiner. Der Lauf gilt
+    //    trotzdem als gescheitert (siehe unten), damit die fehlenden Uploads sichtbar bleiben.
     let total = dumpSpool.size;
+    let uploadsError: unknown;
     if (spec.uploadsService && spec.uploadsPath) {
-      const up = await ctx.docker.findContainer(spec.composeProject, spec.uploadsService);
-      if (!up || !up.running) throw new Error('Container fuer die Uploads nicht gefunden oder nicht gestartet');
-      const upFile = await tmpFile(ctx, '.uploads.tar.age');
-      spool.push(upFile);
-      const tar = ctx.docker.exec(up.id, ['tar', 'czf', '-', '-C', spec.uploadsPath, '.']);
-      const upSpool = await encryptToFile(ctx, tar.stdout, upFile);
-      await expectExit(ctx, tar, 'tar');
-      await putFile(ctx, uploadsKey, upFile);
-      written.push(uploadsKey);
-      files.push({ name: uploadsKey.split('/').pop()!, sizeBytes: upSpool.size, sha256: upSpool.sha256 });
-      total += upSpool.size;
+      try {
+        const up = await ctx.docker.findContainer(spec.composeProject, spec.uploadsService);
+        if (!up || !up.running) throw new Error('Container fuer die Uploads nicht gefunden oder nicht gestartet');
+        const upFile = await tmpFile(ctx, '.uploads.tar.age');
+        spool.push(upFile);
+        const tar = ctx.docker.exec(up.id, ['tar', 'czf', '-', '-C', spec.uploadsPath, '.'], { signal: ctx.signal });
+        const upSpool = await encryptToFile(ctx, tar.stdout, upFile);
+        await expectExit(ctx, tar, 'tar');
+        await putFile(ctx, uploadsKey, upFile);
+        written.push(uploadsKey);
+        files.push({ name: uploadsKey.split('/').pop()!, sizeBytes: upSpool.size, sha256: upSpool.sha256 });
+        total += upSpool.size;
+      } catch (e) {
+        if (ctx.signal?.aborted) throw e; // Zeitlimit: kein Teilerfolg, der aeussere Pfad raeumt auf
+        uploadsError = e;
+        await ctx.storage.delete(uploadsKey).catch(() => undefined); // halb hochgeladenes Objekt nicht liegen lassen
+      }
     }
 
     const meta: BackupMeta = {
@@ -52,6 +61,7 @@ export async function runBackup(ctx: JobContext, spec: InstanceSpec): Promise<Jo
       subdomain: spec.subdomain,
       createdAt: ctx.now().toISOString(),
       files,
+      ...(uploadsError !== undefined ? { partial: true } : {}),
     };
     await putMeta(ctx, dumpKey, meta);
 
@@ -64,9 +74,17 @@ export async function runBackup(ctx: JobContext, spec: InstanceSpec): Promise<Jo
         sizeBytes: total,
         objectKey: dumpKey,
         sha256: result.sha256!,
+        ...(files[1] ? { uploadsSha256: files[1].sha256 } : {}),
       });
     } catch (e) {
       ctx.log.warn('Meldung an die Verwaltung fehlgeschlagen', { error: safeMessage(ctx.redactor, e) });
+    }
+    if (uploadsError !== undefined) {
+      // Kein Aufraeumen: sonst verdraengt der unvollstaendige Satz mit der Zeit vollstaendige.
+      written.length = 0; // der Dump bleibt; der aeussere Fehlerpfad darf ihn nicht entfernen
+      throw new Error(
+        `Teilweise gescheitert: Datenbank-Dump gesichert (${dumpKey}), Uploads NICHT: ${safeMessage(ctx.redactor, uploadsError)}`,
+      );
     }
     try {
       await pruneOldBackups(ctx, `instances/${spec.subdomain}/`);

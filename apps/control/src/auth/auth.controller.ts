@@ -1,3 +1,4 @@
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
@@ -89,6 +90,7 @@ export class AuthController {
    * Liefert (und setzt) ein CSRF-Token für das Double-Submit-Verfahren.
    * Muss vor jeder schreibenden Anfrage einmal abgerufen werden.
    */
+  @AllowWhileLocked('Token für die Anmeldung; keine Daten.')
   @Get('csrf')
   csrf(@Res({ passthrough: true }) res: Response): { csrfToken: string } {
     const csrfToken = generateCsrfToken();
@@ -103,6 +105,7 @@ export class AuthController {
    * Schreibaktionen aus und überspringt in einer Portal-Sitzung die lokale
    * Ersteinrichtung (Faktoren verwaltet dort das Portal).
    */
+  @AllowWhileLocked('Sitzung/„wer bin ich“, nötig, um die Entsperrseite zu zeigen; nur Konto, keine Kundendaten.')
   @Get('me')
   @UseGuards(SessionGuard)
   async me(@LoggedInUser() user: SessionUser, @Req() req: LoggedInRequest) {
@@ -115,6 +118,7 @@ export class AuthController {
     };
   }
 
+  @AllowWhileLocked('Abmelden muss auch vor dem Entsperren gehen.')
   @Post('logout')
   @HttpCode(200)
   @UseGuards(SessionGuard)
@@ -156,6 +160,7 @@ export class AuthController {
    * `{ zweiterFaktorErforderlich: true }` zurück und der Vorgang wird in einem
    * kurzlebigen httpOnly-Cookie gehalten.
    */
+  @AllowWhileLocked('Anmeldung vor dem Entsperren; liest nur Mitarbeiterkonten (User, unverschlüsselt).')
   @Post('login')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -192,6 +197,7 @@ export class AuthController {
   // -------------------------------------------------------------------------
 
   /** Schließt die Anmeldung mit dem Code aus der Authenticator-App ab. */
+  @AllowWhileLocked('Zweiter Schritt der Anmeldung vor dem Entsperren.')
   @Post('login/totp')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -222,6 +228,7 @@ export class AuthController {
    * Einheitsantwort verhindern soll. Die Oberfläche zählt ab dem eigenen
    * Absenden herunter, dafür braucht sie den Server nicht.
    */
+  @AllowWhileLocked('Anmeldecode per E-Mail ist Teil der Anmeldung vor dem Entsperren.')
   @Post('login-code/request')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -237,6 +244,7 @@ export class AuthController {
   }
 
   /** Schließt die Anmeldung mit dem achtstelligen Code aus der E-Mail ab. */
+  @AllowWhileLocked('Zweiter Schritt der Anmeldung vor dem Entsperren.')
   @Post('login/email-code')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -259,6 +267,7 @@ export class AuthController {
    * Schließt die Anmeldung ersatzweise mit einem Wiederherstellungscode ab.
    * Der Code ist danach verbraucht; ein Merk-Gerät entsteht dabei nicht.
    */
+  @AllowWhileLocked('Zweiter Schritt der Anmeldung vor dem Entsperren.')
   @Post('login/recovery-code')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -280,6 +289,7 @@ export class AuthController {
   // Weg 2: Passkey (einstufig, ersetzt Passwort und zweiten Faktor zugleich)
   // -------------------------------------------------------------------------
 
+  @AllowWhileLocked('Passkey-Anmeldung vor dem Entsperren.')
   @Post('passkey/login/start')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -299,6 +309,7 @@ export class AuthController {
     return { options };
   }
 
+  @AllowWhileLocked('Passkey-Anmeldung vor dem Entsperren.')
   @Post('passkey/login/complete')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -326,6 +337,7 @@ export class AuthController {
    * Bewusst POST statt GET: so steht der Token im Body und nicht in
    * Zugriffsprotokollen oder im Referrer.
    */
+  @AllowWhileLocked('Notzugang (Einladung/Notfall-Link) geht vor dem Entsperren; nur Mitarbeiterkonten.')
   @Post('emergency/check')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -353,6 +365,7 @@ export class AuthController {
   }
 
   /** Startet die Passkey-Registrierung über einen Notfall-Link. */
+  @AllowWhileLocked('Notzugang: Passkey anlegen vor dem Entsperren; nur Mitarbeiterkonten.')
   @Post('emergency/enrollment/start')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -383,6 +396,7 @@ export class AuthController {
    * Passkey und meldet den Benutzer direkt an. Der Passkey ist einstufig, ein
    * zweiter Faktor ist daher nicht nötig.
    */
+  @AllowWhileLocked('Notzugang: Passkey anlegen vor dem Entsperren; nur Mitarbeiterkonten.')
   @Post('emergency/enrollment/complete')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)
@@ -439,6 +453,7 @@ export class AuthController {
    * mit Passwort UND zweitem Faktor an. Ein Passwort-Link allein ist niemals
    * ein vollständiger Zugang.
    */
+  @AllowWhileLocked('Notzugang: erstes Passwort setzen vor dem Entsperren; nur Mitarbeiterkonten.')
   @Post('emergency/password/set')
   @HttpCode(200)
   @Throttle(LOGIN_LIMIT)

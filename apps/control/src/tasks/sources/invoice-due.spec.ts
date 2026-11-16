@@ -33,7 +33,7 @@ function contextWith(rows: unknown[]): TasksContext {
 /** Instanzstart so, dass das Abo an `aboFrom` berechenbar wird. */
 function company(fields: {
   aboFrom: string;
-  paymentInterval: 'monthly' | 'yearly';
+  paymentInterval: 'monthly' | 'half_yearly' | 'yearly';
   invoices?: {
     status: string;
     until: string;
@@ -96,6 +96,28 @@ describe('rechnungFaellig — der abgelaufene Zeitraum', () => {
     );
     expect(tasks).toHaveLength(1);
     expect(tasks[0].reason).toContain('01.09.2025 bis 31.08.2026');
+  });
+});
+
+describe('rechnungFaellig — halbjährlich [H3]', () => {
+  it('meldet einen halbjährlichen Zeitraum nach sechs Monaten, nicht erst nach zwölf', async () => {
+    // Abo ab 01.02.2026, halbjährlich: Zeitraum 01.02.–31.07. Heute ist der
+    // 01.09. — der Zeitraum ist abgelaufen. Mit „sonst zwölf" lief er bis
+    // 31.01.2027 und die Aufgabe käme ein halbes Jahr zu spät.
+    const { tasks } = await invoiceDue.collect(
+      contextWith([company({ aboFrom: '2026-02-01', paymentInterval: 'half_yearly' })]),
+    );
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.reason).toContain('01.02.2026');
+    expect(tasks[0]?.reason).toContain('31.07.2026');
+  });
+
+  it('meldet am letzten Tag des halben Jahres noch nichts', async () => {
+    // Zeitraum 02.03.–01.09.: heute (01.09.) ist der letzte Tag.
+    const { tasks } = await invoiceDue.collect(
+      contextWith([company({ aboFrom: '2026-03-02', paymentInterval: 'half_yearly' })]),
+    );
+    expect(tasks).toEqual([]);
   });
 });
 

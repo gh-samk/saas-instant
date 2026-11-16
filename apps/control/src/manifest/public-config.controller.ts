@@ -1,5 +1,6 @@
 import { Controller, Get, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import { authModeFrom, envFrom } from '../sso/sso-settings';
 import type { AuthMode } from '../sso/sso-settings';
 import { IssuerProfileService } from '../settings/issuer-profile.service';
@@ -26,6 +27,10 @@ export interface PublicConfiguration {
  * Manifests: Mail-, Abrechnungs- und Provisionierungsdaten verlassen den
  * Server nie über diesen Weg.
  */
+@AllowWhileLocked(
+  'Die Anmeldeseite braucht Name, Logo-Hinweis und Anmeldeart vor dem Entsperren; ' +
+    'gelesen werden nur Manifest und Einstellungen, keine verschlüsselten Felder.',
+)
 @Controller('public-config')
 export class PublicConfigController {
   constructor(

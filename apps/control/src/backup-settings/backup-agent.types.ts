@@ -44,6 +44,8 @@ export interface AgentTargetUpdate {
     authType: 'key' | 'password';
     privateKey?: string;
     password?: string;
+    /** Fingerabdruck des SSH-Host-Keys ('SHA256:...'); fehlt er, pinnt der Agent beim Verbindungstest (TOFU). */
+    hostKeyFingerprint?: string;
   };
 }
 
@@ -62,7 +64,7 @@ export type AgentJobRequest =
   | { kind: 'backup'; instance: AgentInstance }
   | { kind: 'backup-control' }
   | { kind: 'verify'; objectKey: string }
-  | { kind: 'restore'; objectKey: string; ageIdentity: string; target: AgentInstance };
+  | { kind: 'restore'; objectKey: string; sha256: string; uploadsSha256?: string; ageIdentity: string; target: AgentInstance };
 
 export interface AgentJob {
   id: string;
@@ -71,7 +73,7 @@ export interface AgentJob {
   startedAt: string;
   finishedAt?: string;
   message?: string;
-  result?: { objectKey?: string; sizeBytes?: number; sha256?: string };
+  result?: { objectKey?: string; sizeBytes?: number; sha256?: string; note?: string };
 }
 
 export interface AgentBackupEntry {

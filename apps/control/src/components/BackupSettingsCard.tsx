@@ -121,6 +121,8 @@ export interface BackupForm {
   authType: 'key' | 'password';
   privateKey: string;
   password: string;
+  /** Optional: SSH-Host-Key-Fingerabdruck (SHA256:…); leer = der Agent pinnt beim Verbindungstest. */
+  hostKeyFingerprint: string;
 }
 
 /** Formularstand aus den gespeicherten Metadaten (auch Präfix, Pfad-Stil, Anmeldeart); Geheimfelder bleiben immer leer. */
@@ -150,6 +152,7 @@ export function formFrom(settings: BackupSettings | null): BackupForm {
     authType: target?.authType ?? 'key',
     privateKey: '',
     password: '',
+    hostKeyFingerprint: '',
   };
 }
 
@@ -182,7 +185,9 @@ export function validate(
     if (!/^https?:\/\/[^\s/]+/.test(form.endpoint.trim())) problems.push(t('backup.errEndpoint'));
     if (form.region.trim() === '') problems.push(t('backup.errRegion'));
     if (form.bucket.trim() === '') problems.push(t('backup.errBucket'));
-    const keepS3 = existing?.type === 's3';
+    // Gespeicherte Zugangsdaten bleiben nur bei gleichem Endpunkt und Bucket (der Agent prüft dasselbe).
+    const sameS3Type = existing?.type === 's3';
+    const keepS3 = sameS3Type && existing.endpoint === form.endpoint.trim() && existing.bucket === form.bucket.trim();
     const hasId = form.accessKeyId !== '';
     const hasSecret = form.secretAccessKey !== '';
     if (hasId !== hasSecret && keepS3) {
@@ -190,6 +195,7 @@ export function validate(
     } else if (!keepS3 || hasId || hasSecret) {
       if (!hasId) problems.push(t('backup.errAccessKeyId'));
       if (!hasSecret) problems.push(t('backup.errSecretAccessKey'));
+      if (sameS3Type && !keepS3 && !(hasId && hasSecret)) problems.push(t('backup.errSecretAgain'));
     }
     if (problems.length > 0) return { problems, input: null };
     return {
@@ -215,15 +221,25 @@ export function validate(
   if (!(port >= 1 && port <= 65535)) problems.push(t('backup.errPort'));
   if (form.username.trim() === '') problems.push(t('backup.errUsername'));
   if (form.path.trim() === '') problems.push(t('backup.errPath'));
-  const keepBox =
+  const sameBoxType =
     existing?.type === 'storagebox' &&
     (existing.authType === null || existing.authType === form.authType);
+  // Passwort bzw. Schlüssel bleiben nur bei gleichem Host, Port und Benutzer (der Agent prüft dasselbe).
+  const keepBox =
+    sameBoxType &&
+    existing.host === form.host.trim() &&
+    existing.port === port &&
+    existing.username === form.username.trim();
+  const hostKeyFingerprint = form.hostKeyFingerprint.trim();
+  if (hostKeyFingerprint !== '' && !/^SHA256:[A-Za-z0-9+/]{43}$/.test(hostKeyFingerprint)) problems.push(t('backup.errHostKey'));
   if (form.authType === 'key' && form.privateKey.trim() === '' && !keepBox) {
     problems.push(t('backup.errPrivateKey'));
   }
   if (form.authType === 'password' && form.password === '' && !keepBox) {
     problems.push(t('backup.errPassword'));
   }
+  const secretMissing = form.authType === 'key' ? form.privateKey.trim() === '' : form.password === '';
+  if (sameBoxType && !keepBox && secretMissing) problems.push(t('backup.errSecretAgain'));
   if (problems.length > 0) return { problems, input: null };
   return {
     problems,
@@ -242,6 +258,7 @@ export function validate(
           : form.password === ''
             ? {}
             : { password: form.password }),
+        ...(hostKeyFingerprint !== '' ? { hostKeyFingerprint } : {}),
       },
     },
   };
@@ -251,7 +268,7 @@ type Pending = 'saveTest' | 'test';
 
 /** Felder, die nach dem Speichern leer sind (Geheimnisse sind write-only). */
 function withoutSecrets(form: BackupForm): BackupForm {
-  return { ...form, accessKeyId: '', secretAccessKey: '', privateKey: '', password: '' };
+  return { ...form, accessKeyId: '', secretAccessKey: '', privateKey: '', password: '', hostKeyFingerprint: '' };
 }
 
 /** Zwei Spalten ab `sm`, mobil untereinander. */
@@ -416,7 +433,8 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
   const defaultPathStyle = provider === 'minio';
   const deviates =
     form.retentionDays !== DEFAULT_RETENTION ||
-    (isS3 && (form.prefix !== '' || form.pathStyle !== defaultPathStyle));
+    (isS3 && (form.prefix !== '' || form.pathStyle !== defaultPathStyle)) ||
+    (!isS3 && form.hostKeyFingerprint !== '');
   const advancedShown = advancedOpen || retentionBad || deviates;
 
   const endpointHint =
@@ -611,6 +629,9 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
                 )}
                 <InputField id="sicherung-aufbewahrung" label={t('backup.retentionDays')} helperText={t('backup.retentionHint')} inputMode="numeric" value={form.retentionDays} onChange={(e) => set('retentionDays', e.target.value)} autoComplete="off" />
               </div>
+              {!isS3 && (
+                <InputField id="sicherung-hostkey" label={t('backup.hostKeyInput')} helperText={t('backup.hostKeyInputHint')} value={form.hostKeyFingerprint} onChange={(e) => set('hostKeyFingerprint', e.target.value)} placeholder="SHA256:…" autoComplete="off" spellCheck={false} />
+              )}
               {isS3 && (
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div className="min-w-0">

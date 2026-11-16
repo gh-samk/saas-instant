@@ -45,6 +45,8 @@ export const ERROR_CODE = {
   vaultWrongSecret: 'vault_wrong_secret',
   vaultRateLimited: 'vault_rate_limited',
   vaultUninitialized: 'vault_uninitialized',
+  /** Der letzte Zugang zum Tresor lässt sich nicht entziehen. */
+  vaultLastEntry: 'vault_last_entry',
   vaultAlreadyInitialized: 'vault_already_initialized',
 } as const;
 

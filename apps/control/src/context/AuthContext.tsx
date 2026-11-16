@@ -10,6 +10,7 @@ import { ApiError, errorText, fetchCsrf } from '../lib/api-client';;
 import { logout as logoutCall, fetchState } from '../lib/api';
 import type { AccessState } from '../lib/api';
 import { setViaPortal } from '../lib/portal-session';
+import { clearRecentCompanies } from '../lib/recent-companies';
 import { useT } from '../i18n';
 
 interface AuthValues {
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         setViaPortal(false);
+        clearRecentCompanies();
         setState(null);
         setError(null);
         return;
@@ -73,6 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       portalLogoutUrl = (await logoutCall())?.portalLogoutUrl;
     } finally {
       setViaPortal(false);
+      // Kundendaten-Reste dieses Browsers (zuletzt geöffnet) gehören nicht über das Abmelden hinaus.
+      clearRecentCompanies();
       setState(null);
     }
     // Portal-Sitzung: erst das Portal beendet seine Sitzung und meldet alle

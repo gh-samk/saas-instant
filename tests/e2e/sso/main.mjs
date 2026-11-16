@@ -506,10 +506,14 @@ try {
     assert(down === 'nicht erreichbar' || down >= 500, `Portal noch erreichbar: ${down}`);
 
     const aLocal = `http://127.0.0.1:${PA}`;
-    // normales lokales Konto (Seed-Konto "test", Passwort stimmt): abgelehnt
+    // normales lokales Konto (Seed-Konto "test", Passwort stimmt): abgelehnt. Die Absage kommt VOR der
+    // Passwortprüfung und ist von einem falschen Passwort nicht zu unterscheiden (kein Passwort-Orakel):
+    // 401 login_failed, nicht 403 local_login_disabled.
     const { api } = makeClient(aLocal);
     const denied = await api('POST', '/api/auth/login', { identifier: 'test', password: 'entwicklung-passwort' });
-    expect(denied.status === 403 && errorCode(denied) === 'local_login_disabled', `normales Konto -> ${denied.status} ${JSON.stringify(denied.body).slice(0, 160)}`);
+    expect(denied.status === 401 && errorCode(denied) === 'login_failed', `normales Konto -> ${denied.status} ${JSON.stringify(denied.body).slice(0, 160)}`);
+    const wrong = await api('POST', '/api/auth/login', { identifier: 'test', password: 'falsches-passwort' });
+    expect(wrong.status === denied.status && errorCode(wrong) === errorCode(denied) && JSON.stringify(wrong.body) === JSON.stringify(denied.body), `falsches Passwort antwortet anders als richtiges: ${wrong.status} ${JSON.stringify(wrong.body).slice(0, 160)}`);
     // Notzugang: Passwort + TOTP
     const em = await localLogin(aLocal, { username: 'notfall' });
     const me = await em.api('GET', '/api/auth/me');

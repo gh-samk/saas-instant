@@ -10,6 +10,16 @@ export function hostKeyFingerprint(key: Buffer): string {
   return 'SHA256:' + createHash('sha256').update(key).digest('base64').replace(/=+$/, '');
 }
 
+/** Ohne gepinnten Host-Key wird nicht verbunden (ein Angreifer im Netz koennte sonst Passwort und Sicherungen abgreifen). */
+export class HostKeyNotPinnedError extends Error {
+  constructor() {
+    super(
+      'Der SFTP-Host-Key ist nicht gepinnt: Sicherungen und Wiederherstellung sind gesperrt. ' +
+        'Fingerabdruck in den Sicherungseinstellungen (Erweitert) eintragen oder den Verbindungstest ausfuehren, der ihn beim ersten Kontakt festhaelt',
+    );
+  }
+}
+
 export class HostKeyMismatchError extends Error {
   constructor(expected: string, seen: string) {
     super(`SFTP-Host-Key weicht vom gespeicherten Fingerabdruck ab (erwartet ${expected}, gesehen ${seen}): Verbindung abgelehnt`);
@@ -19,14 +29,29 @@ export class HostKeyMismatchError extends Error {
 /** Hetzner Storage Box ueber SFTP (Port 23). Eine Verbindung je Operation. Host-Key: TOFU-Pinning. */
 export class SftpStorage implements Storage {
   private observed: string | undefined;
+  /** Gilt nur fuer diese Instanz (siehe `withTofu`); erster gesehener Schluessel bleibt fuer deren Verbindungen verbindlich. */
+  private tofuKey: string | undefined;
 
-  constructor(private readonly cfg: StorageBoxConfig) {}
+  constructor(
+    private readonly cfg: StorageBoxConfig,
+    private readonly tofu = false,
+  ) {}
+
+  /**
+   * Eigene Sicht fuer EINEN Verbindungstest: erlaubt den ersten Kontakt ohne Pin (TOFU). Der Zustand
+   * gehoert zu der zurueckgegebenen Instanz, nicht zu dieser; parallele Verbindungen dieser Instanz
+   * (Sicherung, Wiederherstellung) bleiben daher ohne Pin gesperrt.
+   */
+  withTofu(): SftpStorage {
+    return new SftpStorage(this.cfg, true);
+  }
 
   observedHostKey(): string | undefined {
     return this.observed;
   }
 
   private async open(): Promise<SftpClient> {
+    if (!this.cfg.hostKeyFingerprint && !this.tofu) throw new HostKeyNotPinnedError();
     const c = new SftpClient();
     let mismatch: Error | undefined;
     let abort: (e: Error) => void = () => undefined;
@@ -47,7 +72,8 @@ export class SftpStorage implements Storage {
         hostVerifier: (key: Buffer | string): boolean => {
           const seen = hostKeyFingerprint(Buffer.isBuffer(key) ? key : Buffer.from(key, 'hex'));
           this.observed = seen;
-          const pinned = this.cfg.hostKeyFingerprint;
+          const pinned = this.cfg.hostKeyFingerprint ?? this.tofuKey;
+          if (!pinned && this.tofu) this.tofuKey = seen;
           if (pinned && pinned !== seen) {
             mismatch = new HostKeyMismatchError(pinned, seen);
             abort(mismatch);

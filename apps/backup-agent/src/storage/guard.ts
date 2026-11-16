@@ -12,6 +12,7 @@ export function withDeleteGuard(inner: Storage): Storage {
     list: (p) => inner.list(p),
     head: (k) => inner.head(k),
     observedHostKey: () => inner.observedHostKey?.(),
+    ...(inner.withTofu ? { withTofu: () => withDeleteGuard(inner.withTofu!()) } : {}),
     delete: async (k) => {
       if (isProtectedKey(k)) throw new Error('Loeschen von Rechnungsarchiven ist nicht erlaubt');
       return inner.delete(k);

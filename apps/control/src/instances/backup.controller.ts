@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { sourceFrom } from '../common/inquiry-source';
 import { WithoutCsrf } from '../common/decorators/without-csrf.decorator';
+import { AllowWhileLocked } from '../vault/allow-while-locked.decorator';
 import { BackupReportDto } from './dto/instance.dto';
 import { BackupKeyGuard } from './backup-key.guard';
 import { BackupService } from './backup.service';
@@ -28,6 +29,11 @@ export class BackupController {
       'weist sich mit CONTROL_BACKUP_KEY im Header aus. Es hat kein ' +
       'CSRF-Cookie, und die Route wertet keine Sitzung aus — es gibt also ' +
       'keine fremde Sitzung, die sich missbrauchen ließe.',
+  )
+  @AllowWhileLocked(
+    'Schreibt nur Backup (Datum, Größe, Objektschlüssel) und einen Audit-Eintrag ' +
+      'mit Instanz-Kennung; keine verschlüsselten Felder. Eine verlorene Meldung ' +
+      'würde sonst als "Sicherung überfällig" zur Aufgabe.',
   )
   @Post()
   @HttpCode(200)

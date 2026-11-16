@@ -11,7 +11,7 @@ import { runBackup } from './jobs/backup.js';
 import { runBackupControl } from './jobs/backupControl.js';
 import { readMeta } from './jobs/common.js';
 import { JobQueue } from './jobs/queue.js';
-import { runRestore } from './jobs/restore.js';
+import { DEFAULT_DENIED_PROJECTS, runRestore } from './jobs/restore.js';
 import { runVerify } from './jobs/verify.js';
 import { Scheduler } from './scheduler.js';
 import type { StorageFactory } from './storage/index.js';
@@ -24,6 +24,7 @@ import {
   parseAgeIdentity,
   parseInstanceSpec,
   parseObjectKey,
+  parseSha256,
   parseSubdomain,
 } from './validate.js';
 
@@ -33,13 +34,17 @@ export interface AppDeps {
   workDir: string;
   invoiceRetentionYears: number;
   extraOwnProjects: string[];
+  /** Sperrliste fuer Restore-Ziele (Namen oder Praefixe mit `*`), zusaetzlich zur Vorgabe. */
+  deniedProjects?: string[];
+  /** Zeitlimit je Auftrag in Millisekunden (Vorgabe 2 Stunden). */
+  jobTimeoutMs?: number;
   docker: DockerClient;
   control: ControlClient;
   store: StateStore;
   storageFactory: StorageFactory;
   redactor: Redactor;
   log: Logger;
-  controlDump: () => ExecHandle;
+  controlDump: (signal?: AbortSignal) => ExecHandle;
   invoices: () => InvoiceSource;
   now?: () => Date;
   nonces?: NonceStore;
@@ -63,7 +68,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
   const nonces = deps.nonces ?? new NonceStore();
   const targets = new TargetService(deps.store, deps.storageFactory, deps.redactor);
   await targets.init();
-  const queue = new JobQueue(deps.redactor, now);
+  const queue = new JobQueue(deps.redactor, now, { timeoutMs: deps.jobTimeoutMs, log: deps.log });
   // Aufbewahrung der Rechnungsarchive: Vorgabe der Verwaltung (Plan), sonst Umgebung.
   let invoiceRetentionYears = deps.invoiceRetentionYears;
   const refreshRetention = async (): Promise<void> => {
@@ -75,7 +80,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
     }
   };
 
-  const buildCtx = (): JobContext => {
+  const buildCtx = (signal?: AbortSignal): JobContext => {
     const cur = targets.current();
     if (!cur) throw new Error('Kein Ziel eingerichtet');
     return {
@@ -92,6 +97,8 @@ export async function createApp(deps: AppDeps): Promise<App> {
       invoiceRetentionYears,
       controlDump: deps.controlDump,
       invoices: deps.invoices,
+      ...(signal ? { signal } : {}),
+      deniedProjects: [...DEFAULT_DENIED_PROJECTS, ...(deps.deniedProjects ?? [])],
       ownProjects: async () => {
         const set = new Set(deps.extraOwnProjects);
         const own = await deps.docker.ownProject();
@@ -102,13 +109,13 @@ export async function createApp(deps: AppDeps): Promise<App> {
   };
 
   const enqueueBackup = (spec: InstanceSpec) =>
-    queue.submit('backup', () => runBackup(buildCtx(), spec));
+    queue.submit('backup', (signal) => runBackup(buildCtx(signal), spec));
   // Rechnungsarchiv verschoben (Verwaltung gesperrt)? Der Planer versucht es erneut, ohne neuen DB-Dump.
   let invoicesDeferred = false;
-  const runControlJob = async (invoicesOnly: boolean): Promise<JobResult | void> => {
+  const runControlJob = async (invoicesOnly: boolean, signal?: AbortSignal): Promise<JobResult | void> => {
     await refreshRetention();
     try {
-      const r = await runBackupControl(buildCtx(), { invoicesOnly });
+      const r = await runBackupControl(buildCtx(signal), { invoicesOnly });
       invoicesDeferred = false;
       return r;
     } catch (e) {
@@ -116,8 +123,8 @@ export async function createApp(deps: AppDeps): Promise<App> {
       throw e;
     }
   };
-  const enqueueControl = () => queue.submit('backup-control', () => runControlJob(false));
-  const enqueueInvoices = () => queue.submit('backup-control', () => runControlJob(true));
+  const enqueueControl = () => queue.submit('backup-control', (signal) => runControlJob(false, signal));
+  const enqueueInvoices = () => queue.submit('backup-control', (signal) => runControlJob(true, signal));
 
   const scheduler = new Scheduler({
     control: deps.control,
@@ -170,16 +177,20 @@ export async function createApp(deps: AppDeps): Promise<App> {
         return enqueueControl();
       case 'verify': {
         const objectKey = parseObjectKey(body['objectKey']);
-        return queue.submit('verify', () => runVerify(buildCtx(), objectKey));
+        return queue.submit('verify', (signal) => runVerify(buildCtx(signal), objectKey));
       }
       case 'restore': {
         const objectKey = parseObjectKey(body['objectKey']);
         const ageIdentity = parseAgeIdentity(body['ageIdentity']);
         const target = parseInstanceSpec(body['target'], 'target');
+        // Pflicht: SHA-256 der Sicherung laut Verwaltung (Echtheit unabhaengig vom Speicher des Ziels).
+        const expectedSha256 = parseSha256(body['sha256']);
+        // Optional: SHA-256 des Uploads-Archivs laut Verwaltung; fehlt bei Altbestand und Sicherungen ohne Uploads.
+        const expectedUploadsSha256 = body['uploadsSha256'] === undefined ? undefined : parseSha256(body['uploadsSha256']);
         deps.redactor.add(ageIdentity);
-        return queue.submit('restore', async () => {
+        return queue.submit('restore', async (signal) => {
           try {
-            return await runRestore(buildCtx(), { objectKey, ageIdentity, target });
+            return await runRestore(buildCtx(signal), { objectKey, ageIdentity, target, expectedSha256, expectedUploadsSha256 });
           } finally {
             deps.redactor.remove(ageIdentity);
           }

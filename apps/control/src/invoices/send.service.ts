@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { dateStringFromDate } from '@saas-instant/shared';
+import { dateStringFromDate, today } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { dayReadable } from '../common/calendar';
@@ -12,6 +12,7 @@ import {
   InvoiceNotFoundError,
   InvoiceWithoutRecipientAddressError,
   InvoiceStatusMismatchError,
+  ReminderNotApplicableError,
 } from './invoice.errors';
 import type { InvoiceResponse } from './invoice.response';
 import type { Actor } from './invoice.service';
@@ -125,6 +126,28 @@ export class InvoiceSendService {
     if (invoice.status === 'paid' || invoice.status === 'cancelled') {
       throw new InvoiceStatusMismatchError(invoice.status, 'open');
     }
+    // [H2] Eine Stornorechnung fordert nichts, eine Rechnung ohne positive
+    // Summe auch nicht — dorthin gehört keine Erinnerung.
+    if (invoice.isCancellation || invoice.sumGrossCent <= 0) {
+      throw new ReminderNotApplicableError(
+        invoice.isCancellation
+          ? 'Zu einer Stornorechnung gibt es keine Zahlungserinnerung — es ist nichts zu zahlen.'
+          : 'Diese Rechnung hat keinen offenen Betrag, eine Zahlungserinnerung ergibt keinen Sinn.',
+      );
+    }
+    // [M15] Nur, was wirklich offen und fällig ist. Der Mailtext nennt den
+    // offenen Betrag; „fällig" heißt: das Datum liegt VOR heute.
+    if (invoice.sumGrossCent - invoice.paidCent <= 0) {
+      throw new ReminderNotApplicableError(
+        'Diese Rechnung ist bereits vollständig bezahlt. Eine Zahlungserinnerung ist nicht nötig.',
+      );
+    }
+    if (invoice.dueDate >= today()) {
+      throw new ReminderNotApplicableError(
+        `Die Rechnung ist erst am ${dayReadable(invoice.dueDate)} fällig. ` +
+          'Eine Zahlungserinnerung ist erst danach möglich.',
+      );
+    }
 
     const subject = `Zahlungserinnerung zu Rechnung ${invoice.invoiceNumber}`;
     const text = this.reminderText(invoice);
@@ -191,6 +214,8 @@ export class InvoiceSendService {
     issuerBankDetails: string | null;
     dueDate: string;
     sumGrossCent: number;
+    paidCent: number;
+    isCancellation: boolean;
   }> {
     const row = await this.prisma.invoice.findUnique({
       where: { id },
@@ -203,6 +228,8 @@ export class InvoiceSendService {
         issuerCompanyName: true,
         issuerBankDetails: true,
         dueDate: true,
+        paidAmount: true,
+        cancelledInvoiceId: true,
         lines: { select: { grossAmount: true } },
       },
     });
@@ -226,6 +253,8 @@ export class InvoiceSendService {
         (s, p) => s + (decimalAsCent(p.grossAmount) ?? 0),
         0,
       ),
+      paidCent: decimalAsCent(row.paidAmount) ?? 0,
+      isCancellation: row.cancelledInvoiceId !== null,
     };
   }
 
@@ -256,19 +285,34 @@ export class InvoiceSendService {
     );
   }
 
-  private reminderText(r: {
+  /**
+   * Der Text der Zahlungserinnerung [M15].
+   *
+   * Nennt Rechnungsbetrag, bereits Gezahltes und den offenen Rest — so wie die
+   * Oberfläche es im Dialog zeigt. Mit dem vollen Betrag allein verlangte die
+   * Mail nach einer Teilzahlung mehr, als noch offen ist.
+   */
+  reminderText(r: {
     recipientName: string;
     invoiceNumber: string;
     sumGrossCent: number;
+    paidCent: number;
     dueDate: string;
     issuerCompanyName: string;
   }): string {
+    const open = Math.max(0, r.sumGrossCent - r.paidCent);
+    const amounts =
+      r.paidCent > 0
+        ? `Rechnungsbetrag: ${this.amountReadable(r.sumGrossCent)}\n` +
+          `Bereits gezahlt: ${this.amountReadable(r.paidCent)}\n` +
+          `Noch offen: ${this.amountReadable(open)}\n\n`
+        : `Offener Betrag: ${this.amountReadable(open)}\n\n`;
     return (
       `Guten Tag,\n\n` +
-      `die Rechnung ${r.invoiceNumber} über ` +
-      `${this.amountReadable(r.sumGrossCent)} war am ` +
+      `die Rechnung ${r.invoiceNumber} war am ` +
       `${dayReadable(r.dueDate)} fällig und ist bei uns noch nicht ` +
-      `als bezahlt vermerkt.\n\n` +
+      `vollständig als bezahlt vermerkt.\n\n` +
+      amounts +
       `Falls die Zahlung inzwischen unterwegs ist, betrachtet diese Nachricht ` +
       `bitte als gegenstandslos — wir gleichen von Hand ab, da kann sich ` +
       `etwas überschneiden.\n\n` +

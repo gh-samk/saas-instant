@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
+import { ENCRYPTED_FIELDS } from '../crypto/encrypted-fields';
 import { keyring } from '../crypto/keyring';
 import { PrismaService } from '../prisma/prisma.service';
 import { base32Decode, base32Encode, groupsOfEight } from './base32';
@@ -107,6 +108,8 @@ export class VaultService {
   private readonly logger = new Logger(VaultService.name);
   private readonly events = new EventEmitter();
   private dek: Buffer | null = null;
+  /** Zählt jedes Sperren; laufende Umpack-Vorgänge erkennen daran, dass zwischenzeitlich gesperrt wurde. */
+  private lockEpoch = 0;
   /** Laufende Wartungsläufe (z. B. encrypt-existing), während derer die Verwaltung noch 423 meldet. */
   private readonly holds = new Set<Promise<unknown>>();
   private kdf: { memoryKib: number; timeCost: number; parallelism: number } = KDF_PARAMS;
@@ -195,6 +198,59 @@ export class VaultService {
       select: { id: true, kind: true, label: true, userId: true, createdAt: true },
     });
     return rows.map((r) => ({ ...r, kind: r.kind as 'passphrase' | 'recovery' }));
+  }
+
+  /**
+   * Wie viele Belege und Protokolleinträge aus der Zeit VOR dem Tresor noch im
+   * Klartext liegen.
+   *
+   * Festgeschriebene Rechnungen und das Audit-Log sind per Trigger unveränderlich
+   * (GoBD, Nachweis); der Einmal-Lauf kann sie nicht nachträglich verschlüsseln und
+   * umgeht die Trigger bewusst nicht. Gezählt wird serverseitig an der fehlenden
+   * Chiffre-Kennung (`enc:v1:` bzw. `ENC1`), nicht an einem Merker.
+   *
+   * Protokolleinträge: nur solche VOR der Einrichtung des Tresors. Einträge, die
+   * bei gesperrtem Tresor entstehen (Anmeldungen), sind ebenfalls Klartext, aber
+   * kein Altbestand.
+   */
+  async legacyPlaintext(): Promise<{ invoices: number; auditEntries: number }> {
+    const plain = (model: string, alias = ''): string => {
+      const prefix = alias ? `${alias}.` : '';
+      const parts: string[] = [];
+      for (const [field, kind] of Object.entries(ENCRYPTED_FIELDS[model] ?? {})) {
+        const col = `${prefix}"${field}"`;
+        if (kind === 'text') {
+          parts.push(`(${col} IS NOT NULL AND ${col} NOT LIKE 'enc:v1:%')`);
+        } else if (kind === 'bytes') {
+          parts.push(`(${col} IS NOT NULL AND substring(${col} from 1 for 4) <> 'ENC1'::bytea)`);
+        } else {
+          parts.push(
+            `(${col} IS NOT NULL AND (jsonb_typeof(${col}::jsonb) <> 'string' OR (${col} #>> '{}') NOT LIKE 'enc:v1:%'))`,
+          );
+        }
+      }
+      return parts.length > 0 ? parts.join(' OR ') : 'false';
+    };
+    const [invoices] = await this.prisma.$queryRawUnsafe<{ n: bigint }[]>(
+      `SELECT count(*)::bigint AS n FROM "Invoice" WHERE "finalizedAt" IS NOT NULL AND (${plain('Invoice')})`,
+    );
+    // Stichtag: die Einrichtung des Tresors (Audit-Eintrag), sonst der älteste Tresor-Eintrag.
+    const [since] = await this.prisma.$queryRawUnsafe<{ t: Date | null }[]>(
+      `SELECT coalesce(
+         (SELECT min("timestamp") FROM "AuditLog" WHERE "action" = $1),
+         (SELECT min("createdAt") FROM "Vault")
+       ) AS t`,
+      AUDIT_ACTION.vaultInitialized,
+    );
+    let audit = 0n;
+    if (since?.t) {
+      const [row] = await this.prisma.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT count(*)::bigint AS n FROM "AuditLog" WHERE "timestamp" < $1 AND (${plain('AuditLog')})`,
+        since.t,
+      );
+      audit = row?.n ?? 0n;
+    }
+    return { invoices: Number(invoices?.n ?? 0n), auditEntries: Number(audit) };
   }
 
   // --- Einrichten --------------------------------------------------------------
@@ -319,6 +375,7 @@ export class VaultService {
 
   /** Vergisst den DEK. Sonst gibt es keinen Weg in den gesperrten Zustand außer dem Neustart. */
   async lock(actor?: VaultActor): Promise<void> {
+    this.lockEpoch += 1;
     this.dek?.fill(0);
     this.dek = null;
     keyring.clear();
@@ -342,20 +399,22 @@ export class VaultService {
     owner: string | null,
     actor: VaultActor,
   ): Promise<VaultEntryInfo> {
-    const dek = this.requireDek();
     this.assertPassphrase(passphrase);
-    const row = await this.wrap('passphrase', label.trim() || 'Passphrase', owner, passphrase, dek);
-    await this.prisma.vault.create({ data: row });
-    await this.audit.log({
-      userId: actor.userId,
-      actor: actor.actor,
-      action: AUDIT_ACTION.vaultPassphraseAdded,
-      objectType: 'Vault',
-      objectId: row.id,
-      ip: actor.ip,
-      userAgent: actor.userAgent,
+    return this.withDek(async (dek, assertUnlocked) => {
+      const row = await this.wrap('passphrase', label.trim() || 'Passphrase', owner, passphrase, dek);
+      assertUnlocked();
+      await this.prisma.vault.create({ data: row });
+      await this.audit.log({
+        userId: actor.userId,
+        actor: actor.actor,
+        action: AUDIT_ACTION.vaultPassphraseAdded,
+        objectType: 'Vault',
+        objectId: row.id,
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+      return { id: row.id, kind: 'passphrase' as const, label: row.label, userId: row.userId, createdAt: new Date() };
     });
-    return { id: row.id, kind: 'passphrase', label: row.label, userId: row.userId, createdAt: new Date() };
   }
 
   /** Ersetzt die Verpackung eines Passphrase-Eintrags. Die ALTE Passphrase muss stimmen. */
@@ -365,34 +424,84 @@ export class VaultService {
     newPassphrase: string,
     actor: VaultActor,
   ): Promise<void> {
-    const dek = this.requireDek();
     this.assertPassphrase(newPassphrase);
-    const entry = (await this.prisma.vault.findUnique({ where: { id: entryId } })) as WrapRow | null;
-    if (!entry || entry.kind !== 'passphrase') {
-      throw new NotFoundException({
-        errorCode: 'vault_entry_not_found',
-        message: 'Eintrag nicht gefunden.',
+    await this.withDek(async (dek, assertUnlocked) => {
+      const entry = (await this.prisma.vault.findUnique({ where: { id: entryId } })) as WrapRow | null;
+      if (!entry || entry.kind !== 'passphrase') {
+        throw new NotFoundException({
+          errorCode: 'vault_entry_not_found',
+          message: 'Eintrag nicht gefunden.',
+        });
+      }
+      const verified = await this.unwrap(entry, currentPassphrase);
+      if (!verified || !constantTimeEqual(verified, dek)) {
+        throw new HttpException(
+          { errorCode: 'vault_wrong_secret', message: 'Die bisherige Passphrase ist falsch.' },
+          HttpStatus.UNAUTHORIZED,
+        );
+      }
+      verified.fill(0);
+      const fresh = await this.wrap('passphrase', entry.label, entry.userId, newPassphrase, dek);
+      assertUnlocked();
+      // Neue Zeile, dann alte weg: es gibt keinen Zeitpunkt ohne gültigen Eintrag.
+      await this.prisma.$transaction([
+        this.prisma.vault.create({ data: fresh }),
+        this.prisma.vault.delete({ where: { id: entry.id } }),
+      ]);
+      await this.audit.log({
+        userId: actor.userId,
+        actor: actor.actor,
+        action: AUDIT_ACTION.vaultPassphraseChanged,
+        objectType: 'Vault',
+        objectId: fresh.id,
+        ip: actor.ip,
+        userAgent: actor.userAgent,
       });
-    }
-    const verified = await this.unwrap(entry, currentPassphrase);
-    if (!verified || !constantTimeEqual(verified, dek)) {
-      throw new HttpException(
-        { errorCode: 'vault_wrong_secret', message: 'Die bisherige Passphrase ist falsch.' },
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-    const fresh = await this.wrap('passphrase', entry.label, entry.userId, newPassphrase, dek);
-    // Neue Zeile, dann alte weg: es gibt keinen Zeitpunkt ohne gültigen Eintrag.
-    await this.prisma.$transaction([
-      this.prisma.vault.create({ data: fresh }),
-      this.prisma.vault.delete({ where: { id: entry.id } }),
-    ]);
+    });
+  }
+
+  /**
+   * Entzieht eine Passphrase (z. B. beim Ausscheiden einer Person). Der
+   * Wiederherstellungsschlüssel lässt sich nur neu erzeugen, nie einzeln entziehen.
+   *
+   * GRENZE: Das verhindert das künftige Entsperren mit dieser Passphrase. Wer vorher
+   * eine Kopie der Datenbank samt Passphrase hatte, kommt damit weiter an die damals
+   * eingepackte Kopie des Datenschlüssels; dagegen hilft nur ein Wechsel des
+   * Datenschlüssels selbst (nicht Teil dieser Version).
+   *
+   * Bleibt danach kein anderer Eintrag übrig, wird abgelehnt (409): sonst käme
+   * niemand mehr hinein.
+   */
+  async removePassphrase(entryId: string, actor: VaultActor): Promise<void> {
+    this.requireDek();
+    const epoch = this.lockEpoch;
+    await this.prisma.$transaction(async (tx) => {
+      // Zwei gleichzeitige Entzüge dürfen nicht beide den "anderen" Eintrag zählen.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(7165300002)`;
+      const all = await tx.vault.findMany({ select: { id: true, kind: true } });
+      const entry = all.find((r) => r.id === entryId);
+      if (!entry || entry.kind !== 'passphrase') {
+        throw new NotFoundException({
+          errorCode: 'vault_entry_not_found',
+          message: 'Eintrag nicht gefunden.',
+        });
+      }
+      if (all.length < 2) {
+        throw new ConflictException({
+          errorCode: 'vault_last_entry',
+          message:
+            'Das ist der letzte Zugang zum Tresor. Lege zuerst eine weitere Passphrase an oder erzeuge einen Wiederherstellungsschlüssel.',
+        });
+      }
+      if (this.lockEpoch !== epoch || !this.isUnlocked()) throw lockedException();
+      await tx.vault.delete({ where: { id: entryId } });
+    });
     await this.audit.log({
       userId: actor.userId,
       actor: actor.actor,
-      action: AUDIT_ACTION.vaultPassphraseChanged,
+      action: AUDIT_ACTION.vaultPassphraseRemoved,
       objectType: 'Vault',
-      objectId: fresh.id,
+      objectId: entryId,
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
@@ -400,23 +509,25 @@ export class VaultService {
 
   /** Neuer Wiederherstellungsschlüssel; der alte wird ungültig. Wird nur hier zurückgegeben. */
   async regenerateRecovery(actor: VaultActor): Promise<{ recoveryKey: string }> {
-    const dek = this.requireDek();
-    const recovery = randomBytes(RECOVERY_BYTES);
-    const row = await this.wrap('recovery', 'Wiederherstellungsschlüssel', null, recovery, dek);
-    await this.prisma.$transaction([
-      this.prisma.vault.deleteMany({ where: { kind: 'recovery' } }),
-      this.prisma.vault.create({ data: row }),
-    ]);
-    await this.audit.log({
-      userId: actor.userId,
-      actor: actor.actor,
-      action: AUDIT_ACTION.vaultRecoveryRegenerated,
-      objectType: 'Vault',
-      objectId: row.id,
-      ip: actor.ip,
-      userAgent: actor.userAgent,
+    return this.withDek(async (dek, assertUnlocked) => {
+      const recovery = randomBytes(RECOVERY_BYTES);
+      const row = await this.wrap('recovery', 'Wiederherstellungsschlüssel', null, recovery, dek);
+      assertUnlocked();
+      await this.prisma.$transaction([
+        this.prisma.vault.deleteMany({ where: { kind: 'recovery' } }),
+        this.prisma.vault.create({ data: row }),
+      ]);
+      await this.audit.log({
+        userId: actor.userId,
+        actor: actor.actor,
+        action: AUDIT_ACTION.vaultRecoveryRegenerated,
+        objectType: 'Vault',
+        objectId: row.id,
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+      return { recoveryKey: groupsOfEight(base32Encode(recovery)) };
     });
-    return { recoveryKey: groupsOfEight(base32Encode(recovery)) };
   }
 
   // --- intern -----------------------------------------------------------------
@@ -428,13 +539,32 @@ export class VaultService {
   }
 
   private requireDek(): Buffer {
-    if (!this.dek) {
-      throw new HttpException(
-        { errorCode: 'vault_locked', message: 'Der Tresor ist gesperrt.' },
-        HttpStatus.LOCKED,
-      );
-    }
+    if (!this.dek) throw lockedException();
     return this.dek;
+  }
+
+  /**
+   * Arbeitet mit einer KOPIE des Datenschlüssels und gibt sie danach frei.
+   *
+   * `lock()` überschreibt den echten Schlüssel mit Nullen. Ein Umpack-Vorgang
+   * wartet aber zwischendurch auf die Schlüsselableitung (argon2, Sekunden) und
+   * die Datenbank; mit dem geteilten Puffer hätte er danach einen Nullschlüssel
+   * eingepackt und einen unbrauchbaren Eintrag gespeichert. Mit der Kopie bleibt
+   * der Vorgang in sich stimmig, und `assertUnlocked` bricht vor dem Schreiben
+   * ab, wenn zwischenzeitlich gesperrt wurde (423).
+   */
+  private async withDek<T>(
+    work: (dek: Buffer, assertUnlocked: () => void) => Promise<T>,
+  ): Promise<T> {
+    const copy = Buffer.from(this.requireDek());
+    const epoch = this.lockEpoch;
+    try {
+      return await work(copy, () => {
+        if (this.lockEpoch !== epoch || !this.isUnlocked()) throw lockedException();
+      });
+    } finally {
+      copy.fill(0);
+    }
   }
 
   private assertPassphrase(passphrase: unknown): asserts passphrase is string {
@@ -524,6 +654,13 @@ export class VaultService {
     }
     this.failures.set(key, entry);
   }
+}
+
+function lockedException(): HttpException {
+  return new HttpException(
+    { errorCode: 'vault_locked', message: 'Der Tresor ist gesperrt.' },
+    HttpStatus.LOCKED,
+  );
 }
 
 function constantTimeEqual(a: Buffer, b: Buffer): boolean {

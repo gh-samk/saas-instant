@@ -65,7 +65,7 @@ export class SecondFactorGuard implements CanActivate {
     );
     await this.access.checkSecondFactor(
       req.user.id,
-      evidenceFromBody(req.body),
+      evidenceFromRequest(req),
       sourceFrom(req),
       always ? null : (req.sessionEvidenceAt ?? null),
     );
@@ -73,14 +73,50 @@ export class SecondFactorGuard implements CanActivate {
   }
 }
 
+/**
+ * Name des Kopfes, über den ein Nachweis mitgeschickt werden kann, wenn der
+ * Body ihn nicht tragen kann (rohes Bild beim Logo-Upload, `DELETE` ohne Body).
+ *
+ * Inhalt: Base64 eines JSON-Objekts `{ "currentPassword": …, "totpCode": … }`.
+ * Base64, weil ein Passwort beliebige Zeichen enthalten darf und ein
+ * Kopfwert nur Latin-1 verträgt. Der Kopf gilt nur als RÜCKFALL: Hat der Body
+ * einen Nachweis, entscheidet der. Er wird wie der Body-Nachweis nur gegen
+ * Hash bzw. TOTP geprüft und weder protokolliert noch gespeichert.
+ */
+export const EVIDENCE_HEADER = 'x-second-factor';
+
+type Evidence = { currentPassword?: string; totpCode?: string };
+
+/** Nachweis aus Body, sonst aus dem Kopf. */
+function evidenceFromRequest(req: {
+  body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
+}): Evidence {
+  const fromBody = evidenceFromBody(req.body);
+  if (
+    fromBody.currentPassword !== undefined ||
+    fromBody.totpCode !== undefined
+  ) {
+    return fromBody;
+  }
+  const raw = req.headers?.[EVIDENCE_HEADER];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string' || value === '' || value.length > 2048) return {};
+  try {
+    return evidenceFromBody(
+      JSON.parse(Buffer.from(value, 'base64').toString('utf8')) as unknown,
+    );
+  } catch {
+    // Ein unlesbarer Kopf ist KEIN Nachweis — nicht mehr und nicht weniger.
+    return {};
+  }
+}
+
 /** Liest die beiden Nachweisfelder aus einem ungeprüften Body. */
-function evidenceFromBody(body: unknown): {
-  currentPassword?: string;
-  totpCode?: string;
-} {
+function evidenceFromBody(body: unknown): Evidence {
   if (typeof body !== 'object' || body === null) return {};
   const fields = body as Record<string, unknown>;
-  const evidence: { currentPassword?: string; totpCode?: string } = {};
+  const evidence: Evidence = {};
   if (typeof fields['currentPassword'] === 'string') {
     evidence.currentPassword = fields['currentPassword'];
   }

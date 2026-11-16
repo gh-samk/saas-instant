@@ -10,8 +10,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { fetchCompanies, type CompanyShort } from '../lib/api';
-import { readRecentCompanies, type RecentCompany } from '../lib/recent-companies';
+import { fetchCompanies, fetchCompany, type CompanyShort } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import { forgetCompanyId, readRecentCompanyIds } from '../lib/recent-companies';
+import { ApiError } from '../lib/api-client';
 import { useT } from '../i18n';
 
 /** Wartezeit nach dem letzten Tastenanschlag, bevor gesucht wird. */
@@ -66,6 +68,7 @@ export function CommandPalette({
 }) {
   const t = useT();
   const navigate = useNavigate();
+  const userId = useAuth().state?.user.id ?? null;
   const uid = useId();
   const listId = `${uid}-list`;
   const optionId = (index: number) => `${uid}-opt-${index}`;
@@ -75,7 +78,9 @@ export function CommandPalette({
   const [hits, setHits] = useState<CompanyShort[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [recent, setRecent] = useState<RecentCompany[]>([]);
+  // Namen der zuletzt geöffneten Organisationen: nur im Speicher dieser Ansicht,
+  // beim Öffnen vom Server geholt (gespeichert sind nur die Kennungen).
+  const [recent, setRecent] = useState<{ id: string; name: string }[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -93,13 +98,33 @@ export function CommandPalette({
     setHits(null);
     setSearching(false);
     setLoadError(false);
-    setRecent(readRecentCompanies());
+    setRecent([]);
     inputRef.current?.focus();
+    // Namen nachladen; was der Server nicht (mehr) liefert, fällt aus der Liste.
+    let stale = false;
+    const ids = readRecentCompanyIds(userId);
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          const company = await fetchCompany(id);
+          return typeof company?.name === 'string' ? { id, name: company.name } : null;
+        } catch (error) {
+          // 404: die Organisation gibt es nicht mehr. Bei anderen Fehlern
+          // (Netz, gesperrter Tresor) bleibt die Kennung gespeichert.
+          if (error instanceof ApiError && error.status === 404) forgetCompanyId(userId, id);
+          return null;
+        }
+      }),
+    ).then((found) => {
+      if (stale) return;
+      setRecent(found.filter((c): c is { id: string; name: string } => c !== null));
+    });
     return () => {
+      stale = true;
       const back = previousFocus.current;
       if (back && document.contains(back)) back.focus();
     };
-  }, [open]);
+  }, [open, userId]);
 
   // Live-Treffer mit Entprellung (dieselbe serverseitige Suche wie die Liste).
   useEffect(() => {

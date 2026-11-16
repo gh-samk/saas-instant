@@ -79,7 +79,8 @@ describe('berechne', () => {
    */
   it('bildet die Steuer über die Summe je Satz, nicht über die Posten', () => {
     // Drei Posten zu 3,33 €: einzeln gerundet 3 × 0,63 = 1,89.
-    // Über die Summe: 9,99 × 19 % = 1,898 → 1,90.
+    // Über die Summe: 9,99 × 19 % = 1,898 → 1,90. Seit [M10] tragen auch die
+    // Posten zusammen genau diese 1,90 € (ein Cent wird verteilt).
     const result = calculate(
       [1, 2, 3].map((number) => ({
         label: `Posten ${number}`,
@@ -92,7 +93,7 @@ describe('berechne', () => {
       (s, p) => s + p.taxCent,
       0,
     );
-    expect(sumOfLineTaxes).toBe(189);
+    expect(sumOfLineTaxes).toBe(190);
     expect(result.sumTaxCent).toBe(190);
     expect(result.sumGrossCent).toBe(999 + 190);
   });
@@ -167,5 +168,71 @@ describe('Steuerkategorien je Posten', () => {
     expect(checkTaxCategory(1, 'AE', 0, undefined).reason).toMatch(/§ 13b/);
     expect(checkTaxCategory(1, 'K', 0, undefined).reason).toMatch(/innergemeinschaftlich/i);
     expect(checkTaxCategory(1, 'G', 0, undefined).reason).toMatch(/Ausfuhr/);
+  });
+});
+
+describe('berechne: Steuer je Satz aus der Nettosumme [M10]', () => {
+  const line = (unitPriceNetCent: number, taxRate = 19, quantity = 1) => ({
+    label: 'x',
+    quantity,
+    unitPriceNetCent,
+    taxRate,
+  });
+
+  it('2 × 12,50 € zu 19 % ergeben 4,75 € Steuer, nicht 4,76 €', () => {
+    const r = calculate([line(1250), line(1250)]);
+    expect(r.sumTaxCent).toBe(475);
+    expect(r.sumGrossCent).toBe(2975);
+    // Die Postensteuern ergeben GENAU die Gruppensteuer: Wer sie
+    // aufsummiert (API-Summe, Beleg, Zahlungsabgleich), sieht dieselbe Zahl.
+    expect(r.lines.reduce((s, p) => s + p.taxCent, 0)).toBe(475);
+    expect(r.lines.reduce((s, p) => s + p.grossCent, 0)).toBe(2975);
+    expect(r.taxBreakdown).toEqual([
+      { category: 'S', record: 19, basisCent: 2500, taxCent: 475 },
+    ]);
+  });
+
+  it('verteilt die Differenz bei mehreren Posten und mehreren Sätzen je Gruppe', () => {
+    const r = calculate([
+      line(1250, 19),
+      line(1250, 7),
+      line(1250, 19),
+      line(1250, 7),
+      line(1250, 19),
+    ]);
+    for (const share of r.taxBreakdown) {
+      const members = r.lines.filter((p) => p.taxRate === share.record);
+      expect(members.reduce((s, p) => s + p.taxCent, 0)).toBe(share.taxCent);
+      expect(share.taxCent).toBe(Math.round((share.basisCent * share.record) / 100));
+    }
+    expect(r.sumTaxCent).toBe(r.taxBreakdown.reduce((s, t) => s + t.taxCent, 0));
+  });
+
+  it('rundet kaufmännisch an der Halbcentgrenze und verteilt auch nach unten', () => {
+    // 3 × 0,50 € zu 19 % = 0,285 € → 0,29 €; je Posten 0,095 → 0,10 (3 × 0,10 = 0,30).
+    const r = calculate([line(50), line(50), line(50)]);
+    expect(r.sumTaxCent).toBe(29);
+    expect(r.lines.map((p) => p.taxCent).reduce((s, v) => s + v, 0)).toBe(29);
+    // Jeder Posten weicht höchstens um einen Cent vom Einzelwert (10) ab.
+    r.lines.forEach((p) => expect(Math.abs(p.taxCent - 10)).toBeLessThanOrEqual(1));
+  });
+
+  it('behandelt Stornoposten (negative Mengen) spiegelbildlich', () => {
+    const original = calculate([line(1250), line(1250)]);
+    const storno = calculate([line(1250, 19, -1), line(1250, 19, -1)]);
+    expect(storno.sumTaxCent).toBe(-original.sumTaxCent);
+    expect(storno.sumGrossCent).toBe(-original.sumGrossCent);
+  });
+
+  it('lässt einen einzelnen Posten und den Satz 0 unverändert', () => {
+    expect(calculate([line(1250)]).lines[0]!.taxCent).toBe(238);
+    const zero = calculate([line(1250, 0), line(1250, 0)]);
+    expect(zero.sumTaxCent).toBe(0);
+  });
+
+  it('ist deterministisch (gleiche Eingabe, gleiche Verteilung)', () => {
+    const a = calculate([line(1250), line(1250), line(1250)]);
+    const b = calculate([line(1250), line(1250), line(1250)]);
+    expect(a.lines.map((p) => p.taxCent)).toEqual(b.lines.map((p) => p.taxCent));
   });
 });
