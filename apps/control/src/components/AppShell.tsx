@@ -186,7 +186,8 @@ function NavList({
  */
 export function AppShell() {
   const t = useT();
-  const { logout } = useAuth();
+  const { logout, state } = useAuth();
+  const showRole = state?.authMode === 'portal';
   const { productName, logoUrl, showBrand } = useProduct();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [counter, setCounter] = useState<NavigationCounters | null>(null);
@@ -344,11 +345,21 @@ export function AppShell() {
                 frei bleibende Raum lag danach rechts vom Knopf statt links
                 davon. Auf schmalen Bildschirmen fiel es nicht auf, weil das
                 Feld dort die ganze Breite nimmt und `ml-auto` folgenlos ist. */}
+            {showRole && (
+              <span className="ml-auto shrink-0 text-xs text-leise">
+                {t('sso.roleLabel', {
+                  role:
+                    state?.accessRole === 'staff'
+                      ? t('sso.roleStaff')
+                      : t('sso.roleAdmin'),
+                })}
+              </span>
+            )}
             <button
               onClick={() => void logout()}
               aria-label={t('components.appShell.ariaLabel3')}
               title={t('components.appShell.title')}
-              className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-rahmen-ui text-leise transition-colors duration-150 hover:bg-flaeche-3 hover:text-text"
+              className={`${showRole ? '' : 'ml-auto '}grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-rahmen-ui text-leise transition-colors duration-150 hover:bg-flaeche-3 hover:text-text`}
             >
               <LogOut className="h-[18px] w-[18px]" aria-hidden="true" />
             </button>

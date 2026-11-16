@@ -3,13 +3,20 @@ import {
   Route,
   BrowserRouter as Router,
   Routes,
+  useLocation,
   useParams,
+  useSearchParams,
 } from 'react-router-dom';
 import { Spinner, ToastProvider } from '@saas-instant/ui';
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ProductProvider } from './context/ProductContext';
+import { ProductProvider, useProduct } from './context/ProductContext';
+import { VaultProvider } from './context/VaultContext';
+import { VaultGate } from './components/VaultGate';
 import { LoginPage } from './pages/LoginPage';
+import { PortalLoginPage } from './pages/PortalLoginPage';
+import { NoAccessPage } from './pages/NoAccessPage';
+import { StepUpDonePage } from './pages/StepUpDonePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConsentsPage } from './pages/ConsentsPage';
@@ -52,20 +59,52 @@ function StartError({ message }: { message: string }) {
  */
 function ProtectedArea() {
   const { state, loading, error } = useAuth();
+  const where = useLocation();
   if (loading) return <LoadingScreen />;
   if (error) return <StartError message={error} />;
-  if (!state) return <Navigate to="/login" replace />;
-  if (state.setUpFactors.length === 0)
+  if (!state)
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${where.pathname}${where.search}` }}
+      />
+    );
+  // Eine Portal-Sitzung braucht keine lokale Ersteinrichtung: Passwort und
+  // zweiter Faktor liegen beim Portal.
+  if (state.setUpFactors.length === 0 && state.viaPortal !== true)
     return <Navigate to="/first-setup" replace />;
-  return <AppShell />;
+  return (
+    <VaultGate>
+      <AppShell />
+    </VaultGate>
+  );
 }
 
 /** Anmeldeseite; wer bereits angemeldet ist, landet direkt im Dashboard. */
 function LoginArea() {
   const { state, loading, error } = useAuth();
-  if (loading) return <LoadingScreen />;
+  const { authMode, configReady } = useProduct();
+  const [params] = useSearchParams();
+  const where = useLocation();
+  if (loading || !configReady) return <LoadingScreen />;
   if (error) return <StartError message={error} />;
   if (state) return <Navigate to="/" replace />;
+  // Modus `portal`: ohne Sitzung geht es zum Portal; der Notzugang
+  // (`?notfall=1`) zeigt die lokale Anmeldung.
+  if (authMode === 'portal' && params.get('notfall') !== '1') {
+    const from = (where.state as { from?: unknown } | null)?.from;
+    const returnPath =
+      typeof from === 'string' && from.startsWith('/') && !from.startsWith('//')
+        ? from
+        : '/';
+    return (
+      <PortalLoginPage
+        failed={params.get('sso') === 'failed'}
+        returnPath={returnPath}
+      />
+    );
+  }
   return <LoginPage />;
 }
 
@@ -98,10 +137,13 @@ export default function App() {
   return (
     <ProductProvider>
     <AuthProvider>
+      <VaultProvider>
       <ToastProvider>
         <Router>
           <Routes>
             <Route path="/login" element={<LoginArea />} />
+            <Route path="/no-access" element={<NoAccessPage />} />
+            <Route path="/step-up-done" element={<StepUpDonePage />} />
             <Route path="/emergency-password" element={<NewPasswordPage />} />
             <Route
               path="/emergency-enrollment"
@@ -173,6 +215,7 @@ export default function App() {
           </Routes>
         </Router>
       </ToastProvider>
+      </VaultProvider>
     </AuthProvider>
     </ProductProvider>
   );

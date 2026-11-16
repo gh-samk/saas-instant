@@ -9,6 +9,8 @@ import {
 import { WITHOUT_CSRF } from '../decorators/without-csrf.decorator';
 import { SessionGuard } from './session.guard';
 import { SecondFactorGuard } from './second-factor.guard';
+import { RoleGuard } from './role.guard';
+import { REQUIRED_ROLE } from '../decorators/require-role.decorator';
 
 /**
  * DIE PFLICHT WIRD AUFGEZÄHLT, NICHT ERINNERT.
@@ -78,6 +80,13 @@ const WITHOUT_SESSION: Record<string, string> = {
     'Sitzung tritt derselbe Schlüssel im Header wie beim Meldeweg ' +
     '(BackupKeyGuard, zeitkonstant verglichen, ohne gesetzten Schlüssel gibt ' +
     'es die Route nicht: 404). Sie liest nur und liefert Namen, keine Geheimnisse.',
+  InternalInvoiceArchiveController:
+    'Das entschlüsselte Rechnungsarchiv für den Sicherungs-Agent ' +
+    '(GET /api/internal/invoice-archive) — ein Dienst im Compose-Netz, kein ' +
+    'Mensch mit Sitzung. An die Stelle der Sitzung tritt derselbe Schlüssel ' +
+    'im Header wie beim Sicherungsplan (BackupKeyGuard, zeitkonstant ' +
+    'verglichen, ohne gesetzten Schlüssel gibt es die Route nicht: 404). Bei ' +
+    'gesperrtem Tresor antwortet die globale Sperre mit 423. Sie liest nur.',
   FlagPublicController:
     'Der Stand der Funktionsschalter für die Kundeninstanzen, anonym und rein ' +
     'lesend: einzelne Wahrheitswerte ohne Personenbezug und ohne Kennung. ' +
@@ -89,6 +98,16 @@ const WITHOUT_SESSION: Record<string, string> = {
     'mit nosniff und ETag). Das Logo steht ohnehin auf jeder Rechnung; ' +
     'hochgeladen wird es am IssuerSettingsController hinter Sitzung und ' +
     'zweitem Faktor.',
+  VaultStatusController:
+    'Nur der Tresor-Zustand (uninitialized, locked, unlocked), anonym und rein ' +
+    'lesend. Die Anmelde- und Entsperrseite braucht ihn vor der Anmeldung; er ' +
+    'verrät nichts über Daten, Konten oder Schlüssel.',
+  SsoController:
+    'Der Weg in die Verwaltung über das Portal (OIDC Authorization Code + ' +
+    'PKCE): start, callback und Front-Channel-Logout. Davor gibt es keine ' +
+    'Sitzung. An ihre Stelle treten state, nonce und PKCE-Verifier im ' +
+    'signierten Cookie, die einmalige Verbrauchsmarke in der Datenbank und ' +
+    'die Signaturprüfung des ID-Tokens. Nur im Modus portal, sonst 404.',
   PublicConfigController:
     'Produktname und Logo für die Anmeldeseite, anonym und rein lesend. ' +
     'Davor gibt es keine Sitzung, und die Seite braucht beides schon ' +
@@ -130,10 +149,16 @@ const WITHOUT_SECOND_FACTOR_CONTROLLER: Record<string, string> = {
     'Kein Benutzer, kein Faktor: anonym, rein lesend, nur Produktname und ' +
     'Logo aus dem UI-Teil des Manifests, nichts mit Personenbezug.',
   AppController: 'Anonym und zustandslos; es gibt keinen Faktor zu prüfen.',
+  VaultStatusController:
+    'Kein Benutzer, kein Faktor: anonym, rein lesend, nur der Tresor-Zustand.',
   RobotsController: 'Anonym und zustandslos; es gibt keinen Faktor zu prüfen.',
   AuthController:
     'Hier wird der zweite Faktor überhaupt erst erbracht; ihn vorauszusetzen ' +
     'wäre ein Zirkelschluss.',
+  SsoController:
+    'Hier wird die Anmeldung überhaupt erst erbracht; der Nachweis ist das ' +
+    'ID-Token des Portals samt zweitem Faktor. Der Step-up läuft über dieselbe ' +
+    'Strecke und braucht selbst keinen Nachweis davor.',
   PublicController:
     'Kein Benutzer, kein Faktor. An seine Stelle tritt der Schlüssel im ' +
     'Header, das Rate-Limit und der Honeypot.',
@@ -202,6 +227,10 @@ const WITHOUT_SECOND_FACTOR_CONTROLLER: Record<string, string> = {
     'Kein Benutzer, kein Faktor. An seine Stelle tritt der Schlüssel im ' +
     'Header und das Rate-Limit — dieselbe Abwägung wie beim BackupController; ' +
     'die Route ist rein lesend.',
+  InternalInvoiceArchiveController:
+    'Kein Benutzer, kein Faktor. Der Aufrufer ist der Sicherungs-Agent mit ' +
+    'dem Schlüssel im Header; die Route liest nur und ist bei gesperrtem ' +
+    'Tresor nicht erreichbar (423).',
   FlagPublicController:
     'Kein Benutzer, kein Faktor — der Aufrufer ist eine Instanz. Die Antwort ' +
     'sind Wahrheitswerte ohne Personenbezug; die Route schreibt nichts.',
@@ -357,6 +386,77 @@ describe('Jeder Controller ist entschieden', () => {
     const existing = new Set(allController().map((c) => c.name));
     for (const name of Object.keys(WITHOUT_SECOND_FACTOR_CONTROLLER)) {
       expect(existing.has(name)).toBe(true);
+    }
+  });
+
+  /**
+   * DIE ROLLE `staff` (Modus portal) DARF EINSTELLUNGEN, NUTZER, TRESOR UND
+   * WIEDERHERSTELLUNG NICHT SCHREIBEN. Die Liste wird aufgezählt, nicht
+   * erinnert: eine neue Schreibroute dort fällt hier nicht auf, eine
+   * vergessene Markierung an einer bestehenden aber schon.
+   */
+  it('verlangt die Rolle admin genau an den vorgesehenen Routen', () => {
+    const marked: string[] = [];
+    for (const c of allController()) {
+      const prototype = c.class.prototype as Record<string, unknown>;
+      const classLevel = Reflect.getMetadata(REQUIRED_ROLE, c.class) as
+        | string
+        | undefined;
+      for (const route of routes(c.class)) {
+        const name = route.key.split('.')[1] as string;
+        const method = Reflect.getMetadata(
+          REQUIRED_ROLE,
+          prototype[name] as object,
+        ) as string | undefined;
+        if ((method ?? classLevel) === 'admin') marked.push(route.key);
+      }
+    }
+    expect(marked.sort()).toEqual(
+      [
+        'IssuerSettingsController.update',
+        'IssuerSettingsController.uploadLogo',
+        'IssuerSettingsController.deleteLogo',
+        'PricesController.update',
+        'BackupSettingsController.update',
+        'BackupSettingsController.test',
+        'FeatureFlagController.set',
+        'UserController.register',
+        'UserController.newLink',
+        'UserController.address',
+        'UserController.access',
+        'VaultController.unlock',
+        'VaultController.setup',
+        'VaultController.entries',
+        'VaultController.addPassphrase',
+        'VaultController.changePassphrase',
+        'VaultController.regenerateRecovery',
+        'InstanceBackupsController.startRecovery',
+        'InstanceBackupsController.adopt',
+      ].sort(),
+    );
+  });
+
+  it('stellt den RoleGuard zwischen SessionGuard und SecondFactorGuard', () => {
+    for (const c of allController()) {
+      const hasMarking =
+        Reflect.getMetadata(REQUIRED_ROLE, c.class) !== undefined ||
+        routes(c.class).some(
+          (r) =>
+            Reflect.getMetadata(
+              REQUIRED_ROLE,
+              (c.class.prototype as Record<string, object>)[
+                r.key.split('.')[1] as string
+              ] as object,
+            ) !== undefined,
+        );
+      if (!hasMarking) continue;
+      const session = c.guards.indexOf(SessionGuard);
+      const role = c.guards.indexOf(RoleGuard);
+      const second = c.guards.indexOf(SecondFactorGuard);
+      expect(session).toBeGreaterThanOrEqual(0);
+      expect(role).toBeGreaterThan(session);
+      // Wer ohnehin abgewiesen wird, tippt vorher keinen Nachweis ein.
+      if (second >= 0) expect(second).toBeGreaterThan(role);
     }
   });
 

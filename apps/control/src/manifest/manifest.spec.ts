@@ -162,6 +162,7 @@ describe('ManifestService + GET /api/public-config', () => {
       accentColor: null,
       accentOnDark: null,
       hasLogo: false,
+      authMode: 'single',
     });
   });
 
@@ -202,7 +203,7 @@ describe('ManifestService + GET /api/public-config', () => {
     process.env['MANIFEST_PATH'] = EXAMPLE;
     const { c } = await build();
     const response = await c.read();
-    expect(Object.keys(response).sort()).toEqual(['accentColor', 'accentOnDark', 'bound', 'hasLogo', 'logoUrl', 'productName']);
+    expect(Object.keys(response).sort()).toEqual(['accentColor', 'accentOnDark', 'authMode', 'bound', 'hasLogo', 'logoUrl', 'productName']);
     expect(JSON.stringify(response)).not.toContain('billing@example.com');
   });
 

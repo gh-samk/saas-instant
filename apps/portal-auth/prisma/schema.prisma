@@ -1,0 +1,204 @@
+// Datenmodell des Portal-Anmeldedienstes (eigene Datenbank, keine Verbindung
+// zu einer Verwaltung). Technische Zeitstempel sind volle DateTime.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/portal-auth-client"
+}
+
+/// Ein Konto im Portal. Eine Person, ein Konto, mehrere Verwaltungen.
+model Account {
+  id                    String    @id @default(uuid())
+  email                 String    @unique
+  name                  String
+  /// argon2id; null, solange die Einrichtung (Einrichtungslink) aussteht.
+  passwordHash          String?
+  /// TOTP-Geheimnis, verschluesselt mit PORTAL_KEY_SECRET (AES-256-GCM).
+  totpSecret            String?
+  totpSecretPending     String?
+  totpPendingValidUntil DateTime?
+  /// Zuletzt akzeptierter Zeitschritt (Replay-Schutz, bedingtes updateMany).
+  totpLastStep          Int?
+  failedAttempts        Int       @default(0)
+  lockedUntil           DateTime?
+  /// Darf Konten und Zugriffe verwalten.
+  portalAdmin           Boolean   @default(false)
+  /// Gesperrt (Zugang entzogen); das Konto bleibt, die Sitzungen enden.
+  disabledAt            DateTime?
+  lastLoginAt           DateTime?
+  createdAt             DateTime  @default(now())
+
+  roles          AccountRole[]
+  passkeys       Passkey[]
+  recoveryCodes  RecoveryCode[]
+  sessions       PortalSession[]
+  setupTokens    SetupToken[]
+}
+
+model RecoveryCode {
+  id         String    @id @default(uuid())
+  accountId  String
+  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  codeHash   String
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([accountId])
+}
+
+model Passkey {
+  id           String    @id @default(uuid())
+  accountId    String
+  account      Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  credentialId String    @unique
+  /// Oeffentlicher Schluessel, base64.
+  publicKey    String
+  counter      Int       @default(0)
+  transports   String?
+  label        String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([accountId])
+}
+
+/// Registrierte Verwaltung (OIDC-Client). id = Slug der Verwaltung.
+model OidcClient {
+  id                     String   @id
+  name                   String
+  secretHash             String
+  redirectUris           String[]
+  frontchannelLogoutUri  String?
+  postLogoutRedirectUris String[]
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  roles          AccountRole[]
+  sessionClients SessionClient[]
+}
+
+/// Rolle eines Kontos in einer Verwaltung: 'admin' | 'staff'.
+model AccountRole {
+  accountId String
+  account   Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  clientId  String
+  client    OidcClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  role      String
+  createdAt DateTime   @default(now())
+
+  @@id([accountId, clientId])
+}
+
+/// Portal-Sitzung. `id` ist die sid im ID-Token.
+model PortalSession {
+  id         String    @id @default(uuid())
+  accountId  String
+  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /// SHA-256 des Cookie-Werts; der Klartext liegt nur im Browser.
+  tokenHash  String    @unique
+  /// Zeitpunkt des letzten Faktor-Nachweises (Sekunden-Genauigkeit genuegt).
+  authTime   DateTime
+  amr        String[]
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  clients SessionClient[]
+
+  @@index([accountId])
+}
+
+/// In welchen Verwaltungen eine Portal-Sitzung angemeldet war (Front-Channel-Abmeldung).
+model SessionClient {
+  sessionId String
+  session   PortalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  clientId  String
+  client    OidcClient    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+
+  @@id([sessionId, clientId])
+}
+
+/// Anfrage an /oauth/authorize, die auf eine Anmeldung wartet (kurzlebig, einmalig).
+model AuthRequest {
+  id                String    @id @default(uuid())
+  params            Json
+  /// Bei Step-up: nur dieses Konto darf den Faktor nachweisen.
+  expectedAccountId String?
+  /// Bei erzwungenem Faktor muss die Sitzung NACH diesem Zeitpunkt authentifiziert sein.
+  freshAfter        DateTime?
+  createdAt         DateTime  @default(now())
+  expiresAt         DateTime
+  consumedAt        DateTime?
+}
+
+/// Einmal einloesbarer Code der Weiterleitung zurueck zur Verwaltung.
+model AuthCode {
+  id            String    @id @default(uuid())
+  codeHash      String    @unique
+  clientId      String
+  redirectUri   String
+  codeChallenge String
+  nonce         String
+  sessionId     String
+  accountId     String
+  authTime      DateTime
+  amr           String[]
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+/// Signaturschluessel (Ed25519). Der private Teil liegt verschluesselt.
+model SigningKey {
+  kid        String    @id
+  publicJwk  Json
+  privateEnc String
+  createdAt  DateTime  @default(now())
+  /// Gesetzt, sobald der Schluessel nicht mehr signiert (Rotation).
+  retiredAt  DateTime?
+  /// Bis dahin bleibt er im JWKS (laufende ID-Token pruefbar).
+  expiresAt  DateTime?
+}
+
+/// Einrichtungs-/Zuruecksetzungslink eines Kontos.
+model SetupToken {
+  id         String    @id @default(uuid())
+  accountId  String
+  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  /// 'setup' (neues Konto) | 'reset' (Passwort und Faktoren neu setzen)
+  purpose    String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([accountId])
+}
+
+model WebauthnChallenge {
+  id        String   @id @default(uuid())
+  challenge String
+  purpose   String
+  accountId String?
+  expiresAt DateTime
+}
+
+model AuditEntry {
+  id        String   @id @default(uuid())
+  at        DateTime @default(now())
+  action    String
+  accountId String?
+  clientId  String?
+  ip        String?
+  detail    Json?
+
+  @@index([at])
+  @@index([accountId])
+}

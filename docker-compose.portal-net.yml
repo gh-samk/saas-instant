@@ -1,0 +1,26 @@
+# Zusatzdatei für Verwaltungen im Modus portal (AUTH_MODE=portal): hängt
+# control-api an das Netz des Anmeldedienstes, damit es portal-auth intern als
+# http://portal-auth:3100 erreicht (Token-Endpunkt und JWKS).
+#
+# Wird von install.sh und bin/saas-instant automatisch zusätzlich zu
+# docker-compose.yml angegeben, wenn in installations/<slug>/.env
+# AUTH_MODE=portal steht:
+#   docker compose --env-file installations/<slug>/.env \
+#     -f docker-compose.yml -f docker-compose.portal-net.yml up -d
+# Im Modus single wird diese Datei nie benutzt.
+#
+# Das Netz legt install.sh an (docker network create). Es verbindet nur
+# control-api und portal-auth; Datenbank und control-web liegen weiter nur im
+# eigenen Netz der Verwaltung. Beachten: Verwaltungen am selben Portal sehen sich
+# in diesem Netz gegenseitig (Port 3001 der API, die ihre eigene Anmeldung
+# verlangt); sie gehören demselben Betreiber.
+services:
+  control-api:
+    networks:
+      - default
+      - portal-auth-net
+
+networks:
+  portal-auth-net:
+    name: ${PORTAL_AUTH_NETWORK:-saas-instant-portal-auth}
+    external: true

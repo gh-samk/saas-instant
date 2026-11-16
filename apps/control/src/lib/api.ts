@@ -41,6 +41,12 @@ export interface AccessState {
   /** Alle eingerichteten zweiten Faktoren. Leer heißt: Ersteinrichtung offen. */
   setUpFactors: FactorKind[];
   openRecoveryCodes: number;
+  /** Betriebsart der Anmeldung. Ältere Antworten ohne Feld gelten als `single`. */
+  authMode?: 'single' | 'portal';
+  /** Rolle im Modus `portal`; ohne Angabe (und im Modus `single`) `admin`. */
+  accessRole?: 'admin' | 'staff';
+  /** Die Sitzung ist über das Portal entstanden (Nachweis = Step-up). */
+  viaPortal?: boolean;
 }
 
 /** Ein Eintrag der Faktorenliste (GET /api/zugang/faktoren). */
@@ -181,8 +187,10 @@ export function passkeyLoginComplete(
   );
 }
 
-export function logout(): Promise<{ ok: true }> {
-  return apiFetch<{ ok: true }>('/api/auth/logout', { method: 'POST' });
+export function logout(): Promise<{ ok: true; portalLogoutUrl?: string }> {
+  return apiFetch<{ ok: true; portalLogoutUrl?: string }>('/api/auth/logout', {
+    method: 'POST',
+  });
 }
 
 export function fetchState(): Promise<AccessState> {
@@ -2718,7 +2726,7 @@ export interface InstanceBackupRow {
 export interface BackupJobView {
   id: string;
   kind: 'backup' | 'backup-control' | 'verify' | 'restore';
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'deferred';
   startedAt: string | null;
   finishedAt: string | null;
   message: string | null;
@@ -2930,4 +2938,85 @@ export function deleteIssuerLogo(): Promise<unknown> {
 /** Öffentliche Logo-Adresse; `version` (z. B. der Hash) umgeht veraltete Browser-Zwischenspeicher. */
 export function publicLogoUrl(version?: string | number | null): string {
   return version ? `/api/public/logo?v=${encodeURIComponent(String(version))}` : '/api/public/logo';
+}
+
+// --- Datenverschlüsselung (Tresor) -------------------------------------------
+
+export type VaultState = 'uninitialized' | 'locked' | 'unlocked';
+
+/** Ein Eintrag, der die Daten entsperren kann (nie mit Schlüsselmaterial). */
+export interface VaultEntry {
+  id: string;
+  kind: 'passphrase' | 'recovery';
+  label: string;
+  userId: string | null;
+  createdAt: string;
+}
+
+/** Anonym abrufbar: Die Entsperrseite braucht den Zustand schon vor dem Entsperren. */
+export function fetchVaultStatus(): Promise<{ state: VaultState }> {
+  return apiFetch<{ state: VaultState }>('/api/vault/status');
+}
+
+/** Antwort trägt EINMALIG den Wiederherstellungsschlüssel. */
+export function vaultSetup(
+  passphrase: string,
+  evidence?: SecondFactorEvidence,
+): Promise<{ recoveryKey: string }> {
+  return apiFetch<{ recoveryKey: string }>('/api/vault/setup', {
+    method: 'POST',
+    body: JSON.stringify({ passphrase, ...evidence }),
+  });
+}
+
+/** `secret` ist die Passphrase ODER der Wiederherstellungsschlüssel. */
+export function vaultUnlock(secret: string): Promise<{ state: VaultState }> {
+  return apiFetch<{ state: VaultState }>('/api/vault/unlock', {
+    method: 'POST',
+    body: JSON.stringify({ secret }),
+  });
+}
+
+export function fetchVaultEntries(): Promise<VaultEntry[]> {
+  return apiFetch<VaultEntry[]>('/api/vault/entries');
+}
+
+export function vaultAddPassphrase(
+  passphrase: string,
+  label: string | undefined,
+  evidence?: SecondFactorEvidence,
+): Promise<VaultEntry> {
+  return apiFetch<VaultEntry>('/api/vault/passphrases', {
+    method: 'POST',
+    body: JSON.stringify({
+      passphrase,
+      ...(label ? { label } : {}),
+      ...evidence,
+    }),
+  });
+}
+
+export function vaultChangePassphrase(
+  id: string,
+  currentPassphrase: string,
+  newPassphrase: string,
+  evidence?: SecondFactorEvidence,
+): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>(
+    `/api/vault/passphrases/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ currentPassphrase, newPassphrase, ...evidence }),
+    },
+  );
+}
+
+/** Erzeugt einen neuen Wiederherstellungsschlüssel; der alte wird ungültig. */
+export function vaultRegenerateRecovery(
+  evidence?: SecondFactorEvidence,
+): Promise<{ recoveryKey: string }> {
+  return apiFetch<{ recoveryKey: string }>('/api/vault/recovery', {
+    method: 'POST',
+    body: JSON.stringify(evidence ?? {}),
+  });
 }

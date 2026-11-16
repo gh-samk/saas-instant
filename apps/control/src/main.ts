@@ -9,6 +9,7 @@ import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { assertJwtSecret } from './auth/session.service';
+import { envFrom, readSsoSettings } from './sso/sso-settings';
 import { inquiryHopsFrom } from './common/inquiry-tracker';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { NullAsJsonInterceptor } from './common/interceptors/null-as-json.interceptor';
@@ -17,6 +18,9 @@ import { senderAddresses, checkSenderAlignment } from './mail/sender';
 import { checkTlsRequirement } from './mail/tls-requirement';
 import { assertEnvSlugMatches } from './installation/installation.service';
 import { ManifestService } from './manifest/manifest.service';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { gateCronJobs } from './vault/cron-gate';
+import { VaultService } from './vault/vault.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -28,6 +32,10 @@ async function bootstrap(): Promise<void> {
   // Ein schwaches oder fehlendes JWT_SECRET soll den Start verhindern, nicht
   // erst beim ersten Token auffallen.
   assertJwtSecret(config.get<string>('JWT_SECRET'));
+
+  // Modus `portal`: ohne Aussteller, Client-Kennung und Geheimnis gibt es keine
+  // Anmeldung. Lieber nicht starten als erst beim ersten Login scheitern.
+  readSsoSettings(envFrom(config));
 
   // Eine Verwaltung gehört zu genau einer Software: Der Slug aus der Umgebung
   // (Compose) muss zum Manifest passen. Die Prüfung gegen die Datenbank folgt
@@ -128,6 +136,12 @@ async function bootstrap(): Promise<void> {
   // Eine Route, die „gibt es gerade nicht" beantwortet, muss `null` senden und
   // nicht einen leeren Body. Begründung im Interceptor.
   app.useGlobalInterceptors(new NullAsJsonInterceptor());
+
+  // Nach jedem Start ist der Tresor gesperrt: Nachtjobs, Zeitplan, Kennzahlen-
+  // Abruf und Integritätslauf starten erst beim Entsperren. `init()` zuerst,
+  // damit der Scheduler seine Jobs schon registriert hat.
+  await app.init();
+  gateCronJobs(app.get(VaultService), app.get(SchedulerRegistry));
 
   const port = config.get<number>('PORT', 3001);
   await app.listen(port);

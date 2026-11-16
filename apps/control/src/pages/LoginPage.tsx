@@ -71,7 +71,7 @@ function asSecondFactors(factors: FactorKind[]): SecondFactor[] {
 export function LoginPage() {
   const t = useT();
   const TEXT = useTexts();
-  const { productName, showBrand, logoUrl } = useProduct();
+  const { productName, showBrand, logoUrl, authMode } = useProduct();
   const navigate = useNavigate();
   const { reload } = useAuth();
 
@@ -578,6 +578,14 @@ export function LoginPage() {
 
   return (
     <AuthCard logoUrl={logoUrl} title={productName} brand={showBrand ? t('auth.brand') : undefined} subtitle={t('auth.loginSubtitle')}>
+      {authMode === 'portal' && (
+        <div className="mb-4 rounded-lg border border-rahmen bg-flaeche-2 p-3 text-left text-sm text-leise">
+          <p>{t('sso.emergencyHint')}</p>
+          <p className="mt-2">
+            <a href="/login" className={TEXT_BUTTON}>{t('sso.backToPortal')}</a>
+          </p>
+        </div>
+      )}
       {passkeyAvailable && (
         <>
           <PasskeyButton

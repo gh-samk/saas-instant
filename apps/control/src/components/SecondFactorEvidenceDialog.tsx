@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog, InputField, Button } from '@saas-instant/ui';
 import { TotpInput } from './TotpInput';
 import { TEXT_BUTTON } from '../lib/styles';
 import type { SecondFactorEvidence } from '../lib/api';
+import {
+  STEP_UP_DONE_PATH,
+  listenStepUp,
+  stepUpChannelAvailable,
+  ssoStartUrl,
+  useViaPortal,
+} from '../lib/portal-session';
 import { useT } from '../i18n';
 
 interface Props {
@@ -27,6 +34,11 @@ interface Props {
  * Faktor —, bekommt den Umschalter gar nicht erst angeboten: Der Server nimmt
  * dort nur das Passwort an, und ein Weg, der ins Leere führt, ist schlimmer
  * als keiner.
+ *
+ * In einer Portal-Sitzung gibt es weder Passwort noch Authenticator-App als
+ * Nachweis: Der Nachweis ist ein frischer Durchlauf beim Portal (Step-up, in
+ * einem eigenen Fenster). Danach wird die Aktion mit leerem Nachweis
+ * wiederholt — der Server prüft den Step-up an der Sitzung.
  */
 export function SecondFactorEvidenceDialog({
   open,
@@ -47,7 +59,72 @@ export function SecondFactorEvidenceDialog({
   // einmal umgeschaltet wurde.
   const activeKind = totpPossible ? kind : 'password';
 
+  const viaPortal = useViaPortal();
+  const [waiting, setWaiting] = useState(false);
+  const [stepUpError, setStepUpError] = useState<string | null>(null);
+  const popup = useRef<Window | null>(null);
+  // Nur ein laufendes Step-up wird ausgewertet: Doppelte oder verspätete
+  // Meldungen (z. B. StrictMode im Dev-Betrieb) lösen die Bestätigung nicht
+  // ein zweites Mal aus.
+  const awaiting = useRef(false);
+  const confirmRef = useRef(onConfirm);
+  confirmRef.current = onConfirm;
+
+  // Das Step-up-Fenster meldet sein Ergebnis über einen BroadcastChannel. Ob
+  // es abgebrochen wurde, lässt sich nicht erkennen (COOP des Portals); dafür
+  // gibt es „Abbrechen" und ein Zeitlimit von fünf Minuten.
+  useEffect(() => {
+    if (!viaPortal || !open) return;
+    const stop = listenStepUp((ok) => {
+      if (!awaiting.current) return;
+      awaiting.current = false;
+      setWaiting(false);
+      if (ok) {
+        setStepUpError(null);
+        confirmRef.current({});
+      } else {
+        setStepUpError(t('sso.stepUpFailed'));
+      }
+    });
+    const limit = window.setTimeout(() => {
+      awaiting.current = false;
+      setWaiting(false);
+    }, 5 * 60 * 1000);
+    return () => {
+      stop();
+      window.clearTimeout(limit);
+    };
+  }, [viaPortal, open, t]);
+
+  function startStepUp(): void {
+    setStepUpError(null);
+    if (!stepUpChannelAvailable()) {
+      // Ohne Rückkanal: im selben Tab zum Portal und danach hierher zurück.
+      window.location.assign(
+        ssoStartUrl(`${window.location.pathname}${window.location.search}`, true),
+      );
+      return;
+    }
+    const opened = window.open(
+      ssoStartUrl(STEP_UP_DONE_PATH, true),
+      'si-step-up',
+      'popup,width=520,height=760',
+    );
+    if (!opened) {
+      setStepUpError(t('sso.stepUpBlocked'));
+      return;
+    }
+    popup.current = opened;
+    awaiting.current = true;
+    setWaiting(true);
+  }
+
   function close(): void {
+    popup.current?.close();
+    popup.current = null;
+    awaiting.current = false;
+    setWaiting(false);
+    setStepUpError(null);
     setPassword('');
     setCode('');
     setKind('password');
@@ -64,6 +141,11 @@ export function SecondFactorEvidenceDialog({
         <>
           <Button variant="ghost" onClick={close}>
             {t('components.secondFactorEvidenceDialog.button')}</Button>
+          {viaPortal ? (
+            <Button loading={loading || waiting} onClick={startStepUp}>
+              {t('sso.stepUpButton')}
+            </Button>
+          ) : (
           <Button
             loading={loading}
             disabled={
@@ -78,11 +160,26 @@ export function SecondFactorEvidenceDialog({
             }
           >
             {t('components.secondFactorEvidenceDialog.button2')}</Button>
+          )}
         </>
       }
     >
       <p className="mb-4 text-leise">{declaration}</p>
-      {activeKind === 'password' ? (
+      {viaPortal ? (
+        <>
+          <p className="text-sm text-leise">{t('sso.stepUpHint')}</p>
+          {waiting && (
+            <p role="status" className="mt-3 text-sm text-leise">
+              {t('sso.stepUpWaiting')}
+            </p>
+          )}
+          {(stepUpError ?? error) && (
+            <p role="alert" className="mt-3 text-sm text-gefahr">
+              {stepUpError ?? error}
+            </p>
+          )}
+        </>
+      ) : activeKind === 'password' ? (
         <>
           <InputField
             id="nachweis-passwort"

@@ -1,0 +1,7 @@
+{
+  // Typpruefung des Pruefcodes (Spezifikationen, test-support); erzeugt nichts.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "incremental": false },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

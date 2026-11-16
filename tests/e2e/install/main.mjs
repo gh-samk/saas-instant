@@ -60,6 +60,7 @@ async function teardown(ctx) {
   if (existsSync(pe)) {
     await composeLogs('saas-instant-e2e-portal').then((t) => writeFileSync(join(OUT, `${ctx.dirName}-portal.containers.log`), t)).catch(() => {});
     await docker(['compose', '--env-file', pe, '-f', join(ctx.dir, 'apps/portal/docker-compose.portal.yml'), '-f', ctx.ovrPortal, 'down', '-v', '--remove-orphans', '--rmi', 'local'], { allowFail: true, env: ctx.env, timeoutMs: 300_000 });
+    await docker(['network', 'rm', 'saas-instant-e2e-portal-auth'], { allowFail: true });
   }
 }
 
@@ -193,7 +194,7 @@ async function scenarioSingle() {
       const r = await install(ctx, ['--mode', 'portal', '--software', 'e2e-portalwechsel', '--non-interactive', '--yes']);
       expect(r.code !== 0, 'install.sh --mode portal wurde nach single akzeptiert');
       expect(/festgelegt/.test(r.stderr + r.stdout), 'Meldung nennt die Festlegung nicht: ' + (r.stderr || r.stdout).trim().slice(0, 120));
-      expect(!existsSync(join(ctx.dir, 'installations', 'e2e-portalwechsel')) && !existsSync(join(ctx.dir, 'portal', 'registry.json')), 'es wurde trotz Ablehnung etwas angelegt');
+      expect(!existsSync(join(ctx.dir, 'installations', 'e2e-portalwechsel')) && !existsSync(join(ctx.dir, 'portal', 'registry', 'registry.json')), 'es wurde trotz Ablehnung etwas angelegt');
       expect(/^mode=single$/m.test(readFileSync(join(ctx.dir, '.saas-instant-mode'), 'utf8')), 'Modus-Lock verändert');
     });
     await s.step('3c single: zweite Verwaltung im Modus single wird abgelehnt', async () => {
@@ -303,6 +304,7 @@ async function scenarioPortal() {
   const beta = 'e2e-beta';
   ctx.slugs.push(alpha, beta);
   const portalProject = 'saas-instant-e2e-portal';
+  const portalNet = 'saas-instant-e2e-portal-auth';
   let pa;
   let pb;
   let pp;
@@ -311,7 +313,7 @@ async function scenarioPortal() {
       await copyRepo(ctx.dir);
       pp = await freePortFrom(18090);
       mkdirSync(join(ctx.dir, 'portal'), { recursive: true });
-      writeFileSync(join(ctx.dir, 'portal', 'portal.env'), `COMPOSE_PROJECT_NAME=${portalProject}\nPORTAL_PORT=${pp}\n`);
+      writeFileSync(join(ctx.dir, 'portal', 'portal.env'), `COMPOSE_PROJECT_NAME=${portalProject}\nPORTAL_PORT=${pp}\nPORTAL_AUTH_NETWORK=${portalNet}\n`);
       const r = await install(ctx, ['--mode', 'portal', '--software', alpha, '--name', 'Alpha Verwaltung', '--non-interactive', '--yes']);
       assert(r.code === 0, `install.sh Exit ${r.code}: ${(r.stderr || r.stdout).trim().split('\n').slice(-4).join(' | ')}`);
       pa = Number(parseEnv(envFile(ctx, alpha)).CONTROL_WEB_PORT);
@@ -335,7 +337,7 @@ async function scenarioPortal() {
       expect(b.json?.productName === 'Beta Verwaltung' && b.json?.bound === true, `beta public-config: ${b.text.slice(0, 120)}`);
     }, { timeoutMs: 600_000 });
     await s.step('4d portal: Portal-Container liefert registry.json mit beiden Namen', async () => {
-      const reg = JSON.parse(readFileSync(join(ctx.dir, 'portal', 'registry.json'), 'utf8'));
+      const reg = JSON.parse(readFileSync(join(ctx.dir, 'portal', 'registry', 'registry.json'), 'utf8'));
       const names = reg.entries.map((e) => e.name);
       expect(names.includes('Alpha Verwaltung') && names.includes('Beta Verwaltung'), `registry.json (Datei): ${names.join(', ')}`);
       await waitFor(async () => (await stateOf(portalProject, 'portal'))?.status === 'running', { timeoutMs: 120_000, label: 'Portal-Container läuft' });
@@ -350,6 +352,10 @@ async function scenarioPortal() {
       expect(st.health === 'healthy', `Portal-Container nicht healthy: ${st.health}`);
     });
     await s.step('4e portal: Browser zeigt zwei Karten, "Öffnen" erreicht jeweils die richtige Verwaltung', async () => {
+      // Der Anmeldedienst läuft jetzt mit: der Launcher zeigt dann nur nach der Anmeldung Karten.
+      // Diese Prüfung gilt der statischen Liste (Rückfall, wenn /api/me nicht antwortet); die
+      // Anmeldung selbst deckt tests/install.test.sh und die Suiten von portal-auth ab.
+      await docker(['compose', '--env-file', join(ctx.dir, 'portal', 'portal.env'), '-f', join(ctx.dir, 'apps/portal/docker-compose.portal.yml'), '-f', ctx.ovrPortal, 'stop', 'portal-auth'], { allowFail: true, env: ctx.env, timeoutMs: 120_000 });
       await withBrowser(async (page) => {
         // Bewusst /index.html: die Kartenlogik wird auch geprüft, wenn / (siehe 4d2) nicht ausliefert.
         const base = `http://127.0.0.1:${needed(pp, 'Portal-Port')}/index.html`;
@@ -363,11 +369,15 @@ async function scenarioPortal() {
           await page.waitForSelector('li.karte');
           const card = page.locator('li.karte', { hasText: name });
           expect(await card.count() === 1, `Karte "${name}" fehlt`);
-          await Promise.all([page.waitForURL((u) => u.port === String(port), { timeout: 20_000 }).catch(() => {}), card.locator('a.knopf').click()]);
-          expect(new URL(page.url()).port === String(port), `"Öffnen" von ${name} führt nach ${page.url()}, erwartet Port ${port}`);
+          // Der Link führt (Modus portal) auf den SSO-Start der Verwaltung, der zum Portal weiterleitet.
+          // Geprüft wird deshalb das Ziel des Links, nicht der Weg über den Anmeldedienst.
+          const href = new URL(await card.locator('a.knopf').getAttribute('href'));
+          expect(href.port === String(port) && (href.pathname === '/' || href.pathname === '/api/auth/sso/start'), `"Öffnen" von ${name} zeigt auf ${href}, erwartet Port ${port}`);
+          await page.goto(`http://127.0.0.1:${port}/login`, { waitUntil: 'domcontentloaded' });
           const cfg = await page.evaluate(async () => (await fetch('/api/public-config')).json());
           expect(cfg.productName === name, `Ziel zeigt productName "${cfg.productName}", erwartet "${name}"`);
-          await page.goto(`http://127.0.0.1:${port}/login`, { waitUntil: 'domcontentloaded' });
+          // Im Modus portal leitet /login zum Portal weiter; der Notzugang zeigt die lokale Anmeldeseite.
+          await page.goto(`http://127.0.0.1:${port}/login?notfall=1`, { waitUntil: 'domcontentloaded' });
           await page.waitForFunction((t) => document.body.innerText.includes(t), name, { timeout: 20_000 }).catch(() => {});
           const text = await page.evaluate(() => document.body.innerText);
           expect(text.includes(name), `Anmeldeseite von ${name} zeigt den Namen nicht`);

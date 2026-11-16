@@ -2,6 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Controller, Get, Header } from '@nestjs/common';
 import { APP_VERSION } from './version';
+import { VaultService, type VaultState } from './vault/vault.service';
 
 /**
  * Bauzeitpunkt aus der Datei, die das Image mitbringt (apps/control/Dockerfile).
@@ -22,6 +23,8 @@ const BUILD_TIME = buildTimeFromFile();
 
 @Controller()
 export class AppController {
+  constructor(private readonly vault: VaultService) {}
+
   /**
    * Reines Lebenszeichen für Healthchecks im Container.
    *
@@ -41,8 +44,12 @@ export class AppController {
    * Der Mailstand liegt jetzt hinter der Sitzung: `GET /api/zugang/postausgang`.
    */
   @Get('health')
-  health(): { status: 'ok' } {
-    return { status: 'ok' };
+  async health(): Promise<{ status: VaultState }> {
+    // Einziger Zustand, den der Endpunkt verrät: ob der Tresor entsperrt ist.
+    // Das Monitoring braucht ihn ("locked" nach einem Neustart = jemand muss
+    // entsperren), er sagt nichts über Daten oder Konten. HTTP 200 bleibt in
+    // jedem Zustand, damit der Container-Healthcheck nicht neu startet.
+    return { status: await this.vault.state() };
   }
 
   /**

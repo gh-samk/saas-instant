@@ -15,6 +15,8 @@ import { sourceFrom } from '../common/inquiry-source';
 import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { WithoutSecondFactor } from '../common/decorators/without-second-factor.decorator';
 import { SessionGuard } from '../common/guards/session.guard';
+import { RequireAdmin } from '../common/decorators/require-role.decorator';
+import { RoleGuard } from '../common/guards/role.guard';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
 import { AddressDto, UserDto, AccessDto } from './dto/user.dto';
 import type { UserLine, AccessResult } from './user.service';
@@ -41,7 +43,7 @@ import { UserService } from './user.service';
  * andere gleich mit.
  */
 @Controller('users')
-@UseGuards(SessionGuard, SecondFactorGuard)
+@UseGuards(SessionGuard, RoleGuard, SecondFactorGuard)
 export class UserController {
   constructor(private readonly user: UserService) {}
 
@@ -68,6 +70,7 @@ export class UserController {
    * ES GEHT KEINE MAIL HINAUS. Der Link wird angezeigt und von Hand
    * weitergegeben.
    */
+  @RequireAdmin()
   @Post()
   async register(
     @Body() dto: UserDto,
@@ -82,6 +85,7 @@ export class UserController {
   }
 
   /** Ein neuer Zugangslink für ein Konto, das noch keines eingelöst hat. */
+  @RequireAdmin()
   @Post(':id/access-link')
   async newLink(
     @Param('id', ParseUUIDPipe) id: string,
@@ -104,6 +108,7 @@ export class UserController {
    * zu beheben. Nur solange niemand angemeldet war; danach gehört die Adresse
    * der Person.
    */
+  @RequireAdmin()
   @Patch(':id/address')
   async address(
     @Param('id', ParseUUIDPipe) id: string,
@@ -127,6 +132,7 @@ export class UserController {
    * Frage „wer hat diese Rechnung festgeschrieben?" wäre nicht mehr zu
    * beantworten. Der Weg zurück sieht deshalb genauso aus wie der Weg hin.
    */
+  @RequireAdmin()
   @Patch(':id/access')
   async access(
     @Param('id', ParseUUIDPipe) id: string,

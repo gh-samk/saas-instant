@@ -28,6 +28,11 @@ Hilfsprogramm erledigt das.
 `<kennung>` ist der **Benutzername oder die E-Mail-Adresse** des Kontos. Ohne
 Argumente gibt das Kommando seine Hilfe aus.
 
+Im Modus `portal` (Anmeldung über das Portal, [sso.md](sso.md)) setzen
+`first-account`, `enrollment` und `password` das Konto zugleich auf `emergency=true`;
+nur ein solches Konto darf sich dann lokal anmelden (Link „Notzugang“ auf der
+Anmeldeseite). Der Weg dient dem Portalausfall und dem verlorenen Portalzugang.
+
 ## Wann welches Kommando
 
 Ein **bekanntes** Passwort braucht keines der Kommandos: Es ändert sich in der

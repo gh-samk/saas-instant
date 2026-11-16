@@ -4,10 +4,11 @@ RUN npm install -g pnpm@11.9.0
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile --prod=false
-# shared zuerst bauen, dann den eigenen Prisma-Client erzeugen (liefert die
+# shared und auth-core zuerst bauen, dann den eigenen Prisma-Client erzeugen (liefert die
 # TS-Typen), dann NUR das Backend bauen. `build` wuerde auch `vite build`
 # ausfuehren — das gehoert ins Web-Image, nicht hierher.
 RUN pnpm --filter @saas-instant/shared build \
+ && pnpm --filter @saas-instant/auth-core build \
  && pnpm --filter @saas-instant/control exec prisma generate \
  && pnpm --filter @saas-instant/control build:api
 
@@ -22,16 +23,19 @@ WORKDIR /app
 # Lockfile mitnehmen ([A.16]) — sonst loest pnpm die Bereiche aus den
 # package.json frisch auf und das Laufzeit-Image weicht vom geprueften Build ab.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-# Beide Workspace-Pakete, die apps/control als dependency fuehrt, muessen mit
+# Alle Workspace-Pakete, die apps/control als dependency fuehrt, muessen mit
 # ihrer package.json im Image liegen — sonst bricht `pnpm install --prod` mit
 # ERR_PNPM_WORKSPACE_PKG_NOT_FOUND ab. @saas-instant/ui wird nur vom Web-Bundle
 # gebraucht; hier genuegt die package.json, damit der Workspace aufloest.
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/auth-core/package.json ./packages/auth-core/
 COPY packages/ui/package.json ./packages/ui/
 COPY apps/control/package.json ./apps/control/
-RUN pnpm install --prod --frozen-lockfile --filter @saas-instant/control
+RUN pnpm install --prod --frozen-lockfile --filter "@saas-instant/control..."
 # Gebautes shared-Paket mitliefern (main = ./dist/index.js).
 COPY --from=build /app/packages/shared/dist ./packages/shared/dist
+# Gleiches fuer auth-core (main = ./dist/index.js).
+COPY --from=build /app/packages/auth-core/dist ./packages/auth-core/dist
 COPY --from=build /app/apps/control/dist ./apps/control/dist
 COPY --from=build /app/apps/control/prisma ./apps/control/prisma
 # Prisma-Client für die Laufzeit erzeugen (globale CLI-Version = Client-Version).

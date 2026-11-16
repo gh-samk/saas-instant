@@ -1,21 +1,27 @@
 import { AppController, RobotsController } from './app.controller';
 import { APP_VERSION } from './version';
+import type { VaultService, VaultState } from './vault/vault.service';
+
+const vaultIn = (state: VaultState) =>
+  ({ state: () => Promise.resolve(state) }) as unknown as VaultService;
+const controller = new AppController(vaultIn('unlocked'));
 
 describe('AppController', () => {
-  const controller = new AppController();
-
-  it('gesundheit() bleibt ein reines Lebenszeichen ohne Zustand', () => {
-    expect(controller.health()).toEqual({ status: 'ok' });
-  });
+  it.each(['uninitialized', 'locked', 'unlocked'] as const)(
+    'health() meldet nur den Tresor-Zustand (%s) und sonst nichts',
+    async (state) => {
+      await expect(new AppController(vaultIn(state)).health()).resolves.toEqual({
+        status: state,
+      });
+    },
+  );
 });
 
 /**
  * Die Verwaltung hatte keinen /api/version — anders als die Kundenanwendung.
  * Damit liess sich im Stoerungsfall nicht ablesen, welcher Stand laeuft.
  */
-describe('AppController.version', () => {
-  const controller = new AppController();
-  const before = { ...process.env };
+describe('AppController.version', () => {  const before = { ...process.env };
   afterEach(() => {
     process.env = { ...before };
   });

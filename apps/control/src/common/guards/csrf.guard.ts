@@ -5,23 +5,11 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { timingSafeEqual } from 'crypto';
+import { sameConstantTime } from '@saas-instant/auth-core';
 import type { Request } from 'express';
 import { WITHOUT_CSRF } from '../decorators/without-csrf.decorator';
 
 const PROTECTED_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-/**
- * Vergleicht zwei Zeichenketten zeitkonstant. Unterschiedliche Längen können
- * nicht zeitkonstant verglichen werden — das ist unkritisch, weil die Länge
- * des CSRF-Tokens fest ist und kein Geheimnis darstellt.
- */
-function sameConstantTime(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a, 'utf8');
-  const bufferB = Buffer.from(b, 'utf8');
-  if (bufferA.length !== bufferB.length) return false;
-  return timingSafeEqual(bufferA, bufferB);
-}
 
 /**
  * CSRF-Schutz nach dem Double-Submit-Verfahren.

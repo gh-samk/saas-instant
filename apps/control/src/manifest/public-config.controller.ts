@@ -1,4 +1,7 @@
 import { Controller, Get, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { authModeFrom, envFrom } from '../sso/sso-settings';
+import type { AuthMode } from '../sso/sso-settings';
 import { IssuerProfileService } from '../settings/issuer-profile.service';
 import { ManifestService } from './manifest.service';
 
@@ -13,6 +16,8 @@ export interface PublicConfiguration {
   accentOnDark: string | null;
   /** Ein Logo liegt unter `GET /api/public/logo`. */
   hasLogo: boolean;
+  /** Betriebsart der Anmeldung: `single` (lokal) oder `portal` (SSO). */
+  authMode: AuthMode;
 }
 
 /**
@@ -26,6 +31,7 @@ export class PublicConfigController {
   constructor(
     private readonly manifest: ManifestService,
     @Optional() private readonly issuer?: IssuerProfileService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   @Get()
@@ -40,6 +46,7 @@ export class PublicConfigController {
       logoUrl: this.manifest.ui.logoUrl,
       bound: this.manifest.bound,
       ...branding,
+      authMode: this.config ? authModeFrom(envFrom(this.config)) : 'single',
     };
   }
 }

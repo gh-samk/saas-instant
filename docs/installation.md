@@ -22,7 +22,7 @@ Der Modus wird bei der Erstinstallation gewählt und in `.saas-instant-mode` fes
 | Modus | Bedeutung |
 |---|---|
 | `single` | Genau eine Verwaltung, kein Portal. Eine zweite Verwaltung lehnt `install.sh` ab. |
-| `portal` | Mehrere Verwaltungen (je eigene Datenbank und Anmeldung) und ein schlankes Portal: statische Seite mit Liste und Links, keine Kundendaten, keine Anmeldung. |
+| `portal` | Mehrere Verwaltungen (je eigene Datenbank) und ein Portal mit gemeinsamer Anmeldung (`portal-auth`, OIDC): Liste der Verwaltungen, Konten und Rollen, keine Kundendaten. Siehe [operations/sso.md](operations/sso.md). |
 
 ## 3. Installieren
 
@@ -37,6 +37,9 @@ Optionen (aus `./install.sh --help`):
 | Option | Wirkung |
 |---|---|
 | `--mode single\|portal` | Betriebsart, nur bei der Erstinstallation wählbar |
+| `--portal-url <url>` | Modus portal: öffentliche Adresse des Portals (Aussteller der Anmeldung), nur beim ersten Mal |
+| `--app-url <url>` | öffentliche Adresse der Verwaltung (nur beim Anlegen) |
+| `--admin-email <e>`, `--admin-name <n>` | Modus portal: erstes Portal-Konto |
 | `--software <slug>` | Kennung: a-z, 0-9, Bindestrich, 1 bis 40 Zeichen |
 | `--dir <pfad>` | Zielverzeichnis (Vorgabe: der Ordner von `install.sh`) |
 | `--host <name>` | Hostname für die Adressen in der `.env` (Vorgabe `localhost`) |
@@ -50,7 +53,7 @@ Was `install.sh` anlegt:
 - `.saas-instant-mode` (nur beim ersten Lauf)
 - `installations/<slug>/.env`, Rechte 600: Compose-Projektname, Port (ab 8080, der nächste freie), `CONTROL_APP_URL`, `CONTROL_RP_ID`, zufällige Werte für `CONTROL_POSTGRES_PASSWORD`, `JWT_SECRET`, `CONTROL_CONFIG_KEY`, und `MANIFEST_FILE`. Steht im Manifest unter `provisioning.instanceDomainBase` eine echte Domain (nicht der Platzhalter `example.com`), trägt `install.sh` sie als `CONTROL_INSTANCE_BASE_DOMAIN` ein (Verweise der Oberfläche auf Instanzen, siehe [manifest.md](manifest.md)). Existiert die `.env` schon, bleiben ihre Werte unverändert.
 - `installations/<slug>/saas-instant.manifest.yaml`: Kopie von `saas-instant.manifest.example.yaml`, mit Ihrer Kennung als `product.slug` (nur falls sie dort noch `mein-produkt` heißt)
-- im Modus `portal` zusätzlich `portal/portal.env` (Port ab 8090) und `portal/registry.json` (Liste der Verwaltungen)
+- im Modus `portal` zusätzlich `portal/portal.env` (Port ab 8090, Aussteller-Adresse und die Geheimnisse des Anmeldedienstes, Rechte 600) und `portal/registry/registry.json` (Liste der Verwaltungen; nur dieses Unterverzeichnis wird in den Portal-nginx gemountet, `portal.env` bleibt außerhalb. Eine ältere `portal/registry.json` verschiebt `install.sh` bzw. `bin/saas-instant` beim nächsten Lauf dorthin)
 
 Danach startet `docker compose` je Verwaltung die Dienste `control-db` (Postgres 16), `control-api` und `control-web`; im Modus `portal` zusätzlich das Portal. Beim Start der API laufen die Datenbankmigrationen (`prisma migrate deploy`).
 
@@ -59,8 +62,13 @@ Danach startet `docker compose` je Verwaltung die Dienste `control-db` (Postgres
 ### Weitere Verwaltung (nur Modus portal)
 
 ```bash
-bin/saas-instant add produkt-b
+bin/saas-instant add produkt-b [--name "Produkt B"] [--app-url https://…]
+bin/saas-instant portal set-role <email> produkt-b admin|staff|none
 ```
+
+Die neue Verwaltung meldet über das Portal an und wird beim Anmeldedienst registriert.
+Weitere Portal-Befehle (`portal first-account`, `register`, `enable`, `setup-link`,
+`unlock`, `clients`, `key-rotate`) zeigt `bin/saas-instant help`.
 
 ### Weitere Befehle
 
@@ -134,7 +142,7 @@ Hinweise zum Proxy:
 - Er muss `Host` und `X-Forwarded-For` unverändert bzw. anhängend weiterreichen.
 - `docker-compose.yml` veröffentlicht `control-web` als `${CONTROL_WEB_PORT}:80` auf **allen** Schnittstellen. Läuft der Proxy auf demselben Host, sperren Sie den Port per Firewall nach außen oder binden Sie ihn selbst an `127.0.0.1`; sonst ist die Verwaltung auch ohne TLS erreichbar.
 - Das mitgelieferte nginx (`control-web`) proxyt `/api/` an `control-api:3001` und maskiert Token-Pfade im Zugriffslog. Ein eigener Proxy davor sollte Token-Pfade (`/api/intake/…`, `/api/consent/…`, Notfall-Links) ebenfalls nicht im Klartext protokollieren.
-- Im Modus `portal` schreibt `install.sh` die Adressen in `portal/registry.json` als `http://<host>:<port>`. Für Verwaltungen hinter TLS tragen Sie die `https`-Adressen selbst in die Datei ein. Ein erneuter `install.sh`- oder `add`-Lauf schreibt sie neu.
+- Im Modus `portal` schreibt `install.sh` die Adressen in `portal/registry/registry.json` aus `CONTROL_APP_URL` der Verwaltungen (Vorgabe `http://<host>:<port>`; hinter TLS beim Anlegen `--app-url https://…` angeben). Ein erneuter `install.sh`- oder `add`-Lauf schreibt die Datei neu.
 - Der Betrieb mit Coolify für die Verwaltung selbst ist in `reference/docker-compose.control.coolify.yml` skizziert (Traefik terminiert TLS, nur `control-web` bekommt eine Domain). Das ist eine Vorlage, kein getesteter Weg.
 
 ## 6. Postausgang

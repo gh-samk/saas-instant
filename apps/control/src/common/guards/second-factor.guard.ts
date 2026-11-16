@@ -4,6 +4,8 @@ import { AccessService } from '../../auth/access.service';
 import { sourceFrom } from '../inquiry-source';
 import { EVIDENCE_ALWAYS } from '../decorators/evidence-always.decorator';
 import { WITHOUT_SECOND_FACTOR } from '../decorators/without-second-factor.decorator';
+import { StepUpRequiredError } from '../errors/business-error';
+import { stepUpFresh } from '../../sso/step-up';
 import type { LoggedInRequest } from './session.guard';
 
 /**
@@ -43,6 +45,15 @@ export class SecondFactorGuard implements CanActivate {
       throw new Error(
         'ZweitfaktorGuard ohne vorangehenden SitzungGuard — Route falsch verdrahtet.',
       );
+    }
+
+    // Angemeldet über das Portal: Der Nachweis ist ein frischer SSO-Durchlauf
+    // (Step-up). Die lokalen Faktoren (Passwort, TOTP) gibt es für dieses Konto
+    // als Nachweis nicht; ohne Step-up antwortet der Server mit
+    // `step_up_required`, die Oberfläche öffnet den Durchlauf und wiederholt.
+    if (req.ssoSession) {
+      if (stepUpFresh(req.ssoSession.stepUpAt)) return true;
+      throw new StepUpRequiredError();
     }
 
     // `@NachweisImmer` an der Route: kein Frischefenster. Dem Dienst wird dann

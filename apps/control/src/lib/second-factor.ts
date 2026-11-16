@@ -47,6 +47,8 @@ import { t, useT } from '../i18n';
 /** Verlangt der Server für diesen Aufruf (noch) einen zweiten Faktor? */
 export function evidenceRequired(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
+  // Modus portal: der Nachweis ist ein Step-up beim Portal.
+  if (error.error.code === ERROR_CODE.stepUpRequired) return error.status === 401;
   if (error.error.code !== ERROR_CODE.loginFailed) return false;
   return error.status === 401 || error.status === 403;
 }
@@ -172,7 +174,9 @@ export function useSecondFactorEvidence(): EvidenceState {
       }
       if (evidence !== undefined) {
         setError(
-          evidence.totpCode !== undefined
+          f instanceof ApiError && f.error.code === ERROR_CODE.stepUpRequired
+            ? t('sso.stepUpFailed')
+            : evidence.totpCode !== undefined
             ? t('common.secondFactor.text2')
             : t('common.secondFactor.text3'),
         );

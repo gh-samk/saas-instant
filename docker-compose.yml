@@ -73,6 +73,13 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-1}
       # Anzahl der Proxys vor der API (control-web = 1, plus ein TLS-Proxy = 2).
       CONTROL_TRUST_PROXY: ${CONTROL_TRUST_PROXY:-1}
+      # Anmeldung über das Portal (SSO). `single` = lokale Anmeldung.
+      AUTH_MODE: ${AUTH_MODE:-single}
+      PORTAL_ISSUER: ${PORTAL_ISSUER:-}
+      PORTAL_INTERNAL_URL: ${PORTAL_INTERNAL_URL:-}
+      PORTAL_CLIENT_ID: ${PORTAL_CLIENT_ID:-}
+      PORTAL_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-}
+      PORTAL_POST_LOGOUT_URI: ${PORTAL_POST_LOGOUT_URI:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

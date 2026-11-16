@@ -41,6 +41,8 @@ export const COOKIE_SESSION = 'session';
 export const COOKIE_LOGIN = 'login';
 /** Name des Cookies für ein wiedererkanntes Merk-Gerät. */
 export const COOKIE_TRUSTED_DEVICE = 'trusted_device';
+/** Name des Cookies für einen laufenden SSO-Durchlauf (Portal-Anmeldung). */
+export const COOKIE_SSO = 'sso_flow';
 /** Name des lesbaren CSRF-Cookies (Double-Submit). */
 export const COOKIE_CSRF = 'csrf';
 
@@ -99,5 +101,27 @@ export function csrfCookieOptions(config: ConfigService): CookieOptions {
     secure: isSecure(config),
     sameSite: 'strict',
     path: '/',
+  };
+}
+
+/** Lebensdauer eines SSO-Durchlaufs: zehn Minuten vom Start bis zum Callback. */
+export const SSO_FLOW_MAX_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * Cookie des SSO-Durchlaufs (state, nonce, PKCE-Verifier).
+ *
+ * `SameSite=Lax` und NICHT `Strict` wie die übrigen: Der Callback ist eine
+ * Weiterleitung vom Portal, also eine seitenübergreifende Navigation, bei der
+ * ein Strict-Cookie nicht mitgeschickt würde. Lax genügt, weil das Cookie nur
+ * für GET-Navigationen gebraucht wird; der Pfad ist auf den SSO-Bereich
+ * begrenzt.
+ */
+export function ssoFlowCookieOptions(config: ConfigService): CookieOptions {
+  return {
+    httpOnly: true,
+    secure: isSecure(config),
+    sameSite: 'lax',
+    path: '/api/auth/sso',
+    maxAge: SSO_FLOW_MAX_AGE_MS,
   };
 }

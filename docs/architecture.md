@@ -7,7 +7,7 @@ Aufbau von saas-instant, soweit er für Betrieb und Anbindung einer eigenen Soft
 ```
 Repository
 ├── apps/control     Verwaltung: NestJS-API (Prisma, Postgres) + React-Oberfläche (Vite)
-├── apps/portal      Portal: statische Seite (nginx), liest portal/registry.json
+├── apps/portal      Portal: statische Seite (nginx), liest portal/registry/registry.json
 ├── apps/backup-agent  Backup-Agent: verschlüsselte Sicherungen, Wiederherstellung (Node/TypeScript, kein NestJS)
 ├── tools/invoice-renderer  Rechnungsdienst: erzeugt das PDF/A-3
 ├── packages/shared  gemeinsamer Code (Datum, Mailrahmen, Organisationsname ...)

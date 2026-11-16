@@ -75,3 +75,45 @@ export class LastFactorError extends BusinessError {
     );
   }
 }
+
+/**
+ * Die Rolle des angemeldeten Kontos reicht für diese Aktion nicht (Modus
+ * `portal`: `staff` darf Einstellungen, Tresor und Wiederherstellung nicht
+ * ändern). Der Code ist fest: die Oberfläche richtet sich danach.
+ */
+export class ForbiddenRoleError extends BusinessError {
+  constructor() {
+    super(
+      'forbidden_role',
+      'Für diese Aktion fehlt Ihrer Rolle die Berechtigung.',
+      HttpStatus.FORBIDDEN,
+    );
+  }
+}
+
+/**
+ * Die Aktion verlangt einen frischen Nachweis über das Portal (Step-up), die
+ * Sitzung hat keinen. Die Oberfläche öffnet daraufhin den SSO-Step-up und
+ * wiederholt die Aktion.
+ */
+export class StepUpRequiredError extends BusinessError {
+  constructor() {
+    super(
+      'step_up_required',
+      'Für diese Aktion ist eine erneute Bestätigung über das Portal nötig.',
+      HttpStatus.UNAUTHORIZED,
+      { startPath: '/api/auth/sso/start' },
+    );
+  }
+}
+
+/** Lokale Anmeldung ist im Modus `portal` nur für Konten mit Notzugang erlaubt. */
+export class LocalLoginDisabledError extends BusinessError {
+  constructor() {
+    super(
+      'local_login_disabled',
+      'Die lokale Anmeldung ist abgeschaltet. Bitte über das Portal anmelden.',
+      HttpStatus.FORBIDDEN,
+    );
+  }
+}

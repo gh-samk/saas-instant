@@ -35,6 +35,7 @@ import { PricesCard } from '../components/PricesCard';
 import { IssuerProfileCard } from '../components/IssuerProfileCard';
 import { BackupSettingsCard } from '../components/BackupSettingsCard';
 import { SecurityLog } from '../components/SecurityLog';
+import { VaultSecurityCard } from '../components/VaultSecurityCard';
 import { SecondFactorEvidenceDialog } from '../components/SecondFactorEvidenceDialog';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -137,6 +138,14 @@ export function SettingsPage() {
   const toast = useToast();
   const { state, reload } = useAuth();
   const [parameter, setParameter] = useSearchParams();
+  // Rolle „Mitarbeit" (nur im Modus portal): Schreibkarten sind gesperrt.
+  const staff = state?.accessRole === 'staff';
+  // Portal-Sitzung: Passwort, zweiter Faktor, Passkeys und Merk-Geräte liegen
+  // beim Portal; die Reiter dafür entfallen.
+  const viaPortal = state?.viaPortal === true;
+  const visibleTabs = viaPortal
+    ? TABS.filter((r) => r.value !== 'credentials' && r.value !== 'devices')
+    : TABS;
 
   /**
    * DER OFFENE REITER STEHT IN DER URL, nicht nur im Zustand.
@@ -146,14 +155,14 @@ export function SettingsPage() {
    * Bauart wie auf der Organisationsseite.
    */
   const tabs: TabsValue =
-    TABS.find((r) => r.value === parameter.get('tab'))?.value ??
-    TABS[0].value;
+    visibleTabs.find((r) => r.value === parameter.get('tab'))?.value ??
+    visibleTabs[0].value;
   const setTabs = (value: string) => {
     setParameter(
       (previous) => {
         const updated = new URLSearchParams(previous);
         // Der erste Reiter ist die Vorgabe und braucht keinen Parameter.
-        if (value === TABS[0].value) updated.delete('tab');
+        if (value === visibleTabs[0].value) updated.delete('tab');
         else updated.set('tab', value);
         return updated;
       },
@@ -666,13 +675,16 @@ export function SettingsPage() {
         className="text-2xl font-semibold tracking-tight text-text mb-1"
       >{t('einstellungen.title')}</h1>
       <p className="mb-4 text-sm text-leise">{t('einstellungen.intro')}</p>
+      {viaPortal && (
+        <p role="note" className="mb-4 text-sm text-leise">{t('sso.portalFactorsHint')}</p>
+      )}
 
       <FilterChips
         className="mb-5"
         label={t('einstellungen.sectionCaption')}
         active={tabs}
         onSelect={setTabs}
-        chips={TABS.map((r) => ({
+        chips={visibleTabs.map((r) => ({
           value: r.value,
           label: r.label,
           ...(r.value === 'devices' && devices !== null
@@ -998,6 +1010,9 @@ export function SettingsPage() {
       {/* =========================================== Reiter „Sicherheit" */}
       {tabs === 'security' && (
       <div>
+      {/* Portal-Sitzung: Wiederherstellungscodes (2FA der lokalen Anmeldung) gibt es
+          hier nicht, die Faktoren verwaltet das Portal. */}
+      {!viaPortal && (
       <Card className="p-6">
         {codes ? (
           <>
@@ -1047,11 +1062,21 @@ export function SettingsPage() {
           </div>
         )}
       </Card>
+      )}
+
+      {!staff && <VaultSecurityCard />}
 
       <SecurityLog className="mt-6" />
       </div>
       )}
 
+      {/* Rolle „Mitarbeit": die Reiter mit Schreibzugriff bleiben lesbar, alle
+          Felder und Knöpfe darin sind gesperrt (der Server antwortet ohnehin
+          mit `forbidden_role`). */}
+      {staff && ['user', 'features', 'company', 'prices', 'backup'].includes(tabs) && (
+        <p role="note" className="mb-4 text-sm text-leise">{t('sso.staffReadOnly')}</p>
+      )}
+      <fieldset disabled={staff} className="m-0 min-w-0 border-0 p-0">
       {/* =============================================== Reiter „Nutzer" */}
       {tabs === 'user' && (
       <div>
@@ -1070,6 +1095,7 @@ export function SettingsPage() {
 
       {/* =============================================== Reiter „Sicherung" */}
       {tabs === 'backup' && <BackupSettingsCard totpPossible={state?.totpSetUp ?? false} />}
+      </fieldset>
 
       {/* --- Dialoge ------------------------------------------------------ */}
       <Dialog

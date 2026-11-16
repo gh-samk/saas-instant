@@ -19,6 +19,7 @@ import { SecurityLogModule } from './audit/security-log.module';
 import { TasksModule } from './tasks/tasks.module';
 import { NavigationModule } from './navigation/navigation.module';
 import { AuthModule } from './auth/auth.module';
+import { SsoModule } from './sso/sso.module';
 import { CsrfGuard } from './common/guards/csrf.guard';
 import { IntakeModule } from './intake/intake.module';
 import { ConsentModule } from './consent/consent.module';
@@ -40,6 +41,8 @@ import { IssuerProfileModule } from './settings/issuer-profile.module';
 import { BackupSettingsModule } from './backup-settings/backup-settings.module';
 import { ManifestModule } from './manifest/manifest.module';
 import { InstallationModule } from './installation/installation.module';
+import { VaultModule } from './vault/vault.module';
+import { VaultLockGuard } from './vault/vault-lock.guard';
 
 @Module({
   imports: [
@@ -96,9 +99,13 @@ import { InstallationModule } from './installation/installation.module';
     PrismaModule,
     CryptoModule,
     AuditModule,
+    // Tresor der Feldverschlüsselung (Entsperren, Einrichten, Umpacken).
+    VaultModule,
     UserModule,
     SecurityLogModule,
     AuthModule,
+    // Anmeldung über das Portal (nur im Modus `portal` erreichbar).
+    SsoModule,
     CompanyModule,
     NoteModule,
     PublicModule,
@@ -124,7 +131,9 @@ import { InstallationModule } from './installation/installation.module';
   ],
   controllers: [AppController, RobotsController],
   providers: [
-    // Reihenfolge: Rate-Limit vor CSRF-Prüfung.
+    // Reihenfolge: Tresor-Sperre zuerst (gesperrt = 423, ohne weitere Prüfung),
+    // dann Rate-Limit vor CSRF-Prüfung.
+    { provide: APP_GUARD, useClass: VaultLockGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
   ],

@@ -63,3 +63,14 @@ describe('sitzungTot', () => {
     expect(sessionDead(error('HTTP_403', 403))).toBe(false);
   });
 });
+
+describe('Step-up im Modus portal', () => {
+  it('hält step_up_required (401) für einen fehlenden Nachweis', () => {
+    expect(evidenceRequired(error('step_up_required', 401))).toBe(true);
+  });
+
+  it('hält forbidden_role (403) NICHT für einen fehlenden Nachweis', () => {
+    // Die Rolle reicht nicht: ein Nachweis ändert daran nichts.
+    expect(evidenceRequired(error('forbidden_role', 403))).toBe(false);
+  });
+});

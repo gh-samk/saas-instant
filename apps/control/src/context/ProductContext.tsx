@@ -36,6 +36,10 @@ export interface ProductValues {
   accentOnDark: string | null;
   /** Gibt es ein hochgeladenes Firmenlogo (`/api/public/logo`)? */
   hasLogo: boolean;
+  /** Betriebsart der Anmeldung (`portal` = Anmeldung über das Portal). */
+  authMode: 'single' | 'portal';
+  /** Hat `/api/public-config` schon geantwortet (oder ist der Abruf gescheitert)? */
+  configReady: boolean;
   /** Lädt die öffentliche Konfiguration neu, z. B. nach dem Speichern der Firmendaten. */
   refresh: () => void;
 }
@@ -62,6 +66,8 @@ function valuesFor(
     accentColor: extra.accentColor ?? DEFAULT_ACCENT,
     accentOnDark: extra.accentOnDark ?? null,
     hasLogo: extra.hasLogo ?? false,
+    authMode: 'single',
+    configReady: true,
     refresh: () => undefined,
   };
 }
@@ -140,7 +146,12 @@ const Context = createContext<ProductValues>(PRODUCT_DEFAULT);
  */
 export function ProductProvider({ children }: { children: ReactNode }) {
   const t = useT();
-  const [values, setValues] = useState<ProductValues>(remembered);
+  const [values, setValues] = useState<ProductValues>(() => ({
+    ...remembered(),
+    // Bis die Konfiguration da ist, ist die Betriebsart unbekannt: die
+    // Anmeldeseite wartet darauf, statt vorschnell das Falsche zu zeigen.
+    configReady: false,
+  }));
   const [reload, setReload] = useState(0);
   const [logoVersion, setLogoVersion] = useState<number | null>(null);
 
@@ -158,6 +169,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       accentColor?: unknown;
       accentOnDark?: unknown;
       hasLogo?: unknown;
+      authMode?: unknown;
     } | null>('/api/public-config')
       .then((response) => {
         if (!active || !response) return;
@@ -178,7 +190,10 @@ export function ProductProvider({ children }: { children: ReactNode }) {
         const accentOnDark = isHexColor(response.accentOnDark)
           ? response.accentOnDark.toLowerCase()
           : null;
-        const next = valuesFor(name, logo, bound, { accentColor, accentOnDark, hasLogo });
+        const next = {
+          ...valuesFor(name, logo, bound, { accentColor, accentOnDark, hasLogo }),
+          authMode: response.authMode === 'portal' ? ('portal' as const) : ('single' as const),
+        };
         setValues(next);
         remember(next);
         applyAccent(accentColor, accentOnDark);
@@ -187,6 +202,11 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // Vorgabe behalten.
+      })
+      .finally(() => {
+        // Auch ein gescheiterter Abruf beendet das Warten: die Anmeldeseite
+        // fällt auf die lokale Anmeldung zurück.
+        if (active) setValues((v) => ({ ...v, configReady: true }));
       });
     return () => {
       active = false;

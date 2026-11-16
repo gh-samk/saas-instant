@@ -5,6 +5,8 @@ import type { SessionUser } from '../auth/session.service';
 import { sourceFrom } from '../common/inquiry-source';
 import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { SessionGuard } from '../common/guards/session.guard';
+import { RequireAdmin } from '../common/decorators/require-role.decorator';
+import { RoleGuard } from '../common/guards/role.guard';
 import { FlagSetDto } from './dto/flag-set.dto';
 import type { FeatureFlagEntry } from './feature-flag.service';
 import { FeatureFlagService } from './feature-flag.service';
@@ -17,7 +19,7 @@ import { FeatureFlagService } from './feature-flag.service';
  * vorher/nachher im Audit-Log (Begründung in `controller-schutz.spec.ts`).
  */
 @Controller('feature-flags')
-@UseGuards(SessionGuard)
+@UseGuards(SessionGuard, RoleGuard)
 export class FeatureFlagController {
   constructor(private readonly flag: FeatureFlagService) {}
 
@@ -26,6 +28,7 @@ export class FeatureFlagController {
     return this.flag.all();
   }
 
+  @RequireAdmin()
   @Put(':key')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async set(

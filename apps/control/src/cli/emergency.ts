@@ -54,6 +54,9 @@ function help(): void {
       '  emergency password      <kennung>       Link zum Setzen eines neuen Passworts (15 Minuten gültig)',
       '  emergency unlock        <kennung>       Kontosperre und Fehlversuche sofort zurücksetzen',
       '',
+      '  first-account, enrollment und password markieren das Konto zugleich als Notzugang',
+      '  (emergency=true): im Modus portal (AUTH_MODE=portal) darf sich nur ein solches Konto lokal anmelden.',
+      '',
     ].join('\n'),
   );
 }
@@ -99,6 +102,8 @@ async function main(): Promise<number> {
     if (command === 'first-account') {
       const first = app.get(FirstAccountService);
       const link = await first.create(identifier, name, actor);
+      // Im Modus `portal` ist das die einzige lokale Anmeldung.
+      await app.get(EmergencyService).markEmergencyAccount(link.username);
       process.stdout.write(
         [
           '',
@@ -131,6 +136,8 @@ async function main(): Promise<number> {
     const emergency = app.get(EmergencyService);
     const kind = command === 'password' ? 'password' : 'passkey';
     const link = await emergency.generateLink(identifier, kind, actor);
+    // Notzugang: im Modus `portal` darf sich dieses Konto lokal anmelden.
+    await emergency.markEmergencyAccount(identifier);
 
     const introduction =
       kind === 'password'

@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AUDIT_ACTION, AuditService } from '../../audit/audit.service';
 import { SessionService } from '../../auth/session.service';
-import type { SessionUser } from '../../auth/session.service';
+import type {
+  ResolvedSsoSession,
+  SessionUser,
+} from '../../auth/session.service';
 import { sourceFrom } from '../inquiry-source';
 import { COOKIE_SESSION, sessionCookieOptions } from '../cookies';
 
@@ -17,6 +20,10 @@ export type LoggedInRequest = Request & {
    * nicht hinein.
    */
   sessionEvidenceAt?: Date | null;
+  /** Rolle des Kontos (`admin` im Modus `single` immer). Vom SessionGuard gesetzt. */
+  accessRole?: 'admin' | 'staff';
+  /** Die Portal-Sitzung hinter der Anmeldung, oder `null` bei lokaler Anmeldung. */
+  ssoSession?: ResolvedSsoSession | null;
 };
 
 /**
@@ -38,13 +45,28 @@ export class SessionGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<LoggedInRequest>();
     const token = req.cookies?.[COOKIE_SESSION] as string | undefined;
-    const { user, issuedAt, evidenceAt, sessionStartedAt } =
-      await this.session.resolve(token);
+    const {
+      user,
+      issuedAt,
+      evidenceAt,
+      sessionStartedAt,
+      accessRole,
+      ssoSession,
+    } = await this.session.resolve(token);
     req.user = user;
     req.sessionEvidenceAt = evidenceAt;
+    req.accessRole = accessRole;
+    req.ssoSession = ssoSession;
 
     if (this.session.needsRenewal(issuedAt)) {
-      await this.renew(context, user, evidenceAt, sessionStartedAt, req);
+      await this.renew(
+        context,
+        user,
+        evidenceAt,
+        sessionStartedAt,
+        req,
+        ssoSession?.id,
+      );
     }
     return true;
   }
@@ -65,12 +87,14 @@ export class SessionGuard implements CanActivate {
     evidenceAt: Date | null,
     sessionStartedAt: Date,
     req: LoggedInRequest,
+    ssoSessionId?: string,
   ): Promise<void> {
     const res = context.switchToHttp().getResponse<Response>();
     const newToken = await this.session.createToken(
       user.id,
       evidenceAt,
       sessionStartedAt,
+      ssoSessionId,
     );
     res.cookie(COOKIE_SESSION, newToken, sessionCookieOptions(this.config));
     await this.audit.log({

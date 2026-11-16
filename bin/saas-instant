@@ -7,12 +7,22 @@ while [ -L "$SELF" ]; do
   LINK="$(readlink "$SELF")"
   case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
 done
-ROOT_DIR="${SAAS_INSTANT_ROOT:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+SRC_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+ROOT_DIR="${SAAS_INSTANT_ROOT:-$SRC_DIR}"
 INSTALL_DIR="$ROOT_DIR/installations"
 LOCK_FILE="$ROOT_DIR/.saas-instant-mode"
-COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+PORTAL_DIR="$ROOT_DIR/portal"
+
+# Compose-Dateien: im Wurzelverzeichnis der Installation, sonst neben diesem Skript.
+find_file() { # find_file <relativer Pfad>
+  if [ -f "$ROOT_DIR/$1" ]; then printf '%s' "$ROOT_DIR/$1"; else printf '%s' "$SRC_DIR/$1"; fi
+}
+COMPOSE_FILE="$(find_file docker-compose.yml)"
+NET_COMPOSE_FILE="$(find_file docker-compose.portal-net.yml)"
+PORTAL_COMPOSE_FILE="$(find_file apps/portal/docker-compose.portal.yml)"
 
 die() { printf 'Fehler: %s\n' "$*" >&2; exit 1; }
+info() { printf '%s\n' "$*"; }
 
 usage() {
   cat <<'USAGE'
@@ -22,9 +32,28 @@ Verwendung: saas-instant <Befehl>
   status [slug]             Containerstatus anzeigen
   up [slug]                 Starten (ohne slug: alle)
   down [slug]               Stoppen (ohne slug: alle; Daten bleiben erhalten)
-  add <slug>                Weitere Verwaltung anlegen (nur Modus portal)
+  add <slug> [--name "<Name>"] [--app-url <url>]
+                            Weitere Verwaltung anlegen (nur Modus portal); sie meldet
+                            über das Portal an und wird beim Anmeldedienst registriert
   emergency <slug> [Args]   Emergency-Befehl (Notfallzugang) im Container ausführen, z. B.
                             emergency <slug> password <benutzer-oder-email>
+                            (setzt im Modus portal das Konto als Notzugang, emergency=true)
+
+Portal (nur Modus portal, Anmeldedienst portal-auth):
+  portal first-account [--email <e> --name <n>]
+                            erstes Konto (Portal-Administration) anlegen; gibt den
+                            einmaligen Einrichtungslink aus
+  portal set-role <email> <slug> admin|staff|none
+                            Rolle eines Kontos in einer Verwaltung setzen
+  portal register <slug> [--force]
+                            Verwaltung beim Anmeldedienst registrieren (--force: Secret/Adressen
+                            neu schreiben, z. B. nach einem Secret-Wechsel in der .env)
+  portal enable <slug> [--yes]
+                            bestehende Verwaltung auf Anmeldung über das Portal umstellen
+  portal setup-link <email> neuen Einrichtungs-/Zurücksetzen-Link für ein Konto
+  portal unlock <email>     Kontosperre aufheben
+  portal clients            registrierte Verwaltungen auflisten
+  portal key-rotate         Signaturschlüssel des Anmeldedienstes erneuern
 USAGE
 }
 
@@ -43,9 +72,32 @@ need_slug() {
   [ -f "$INSTALL_DIR/$1/.env" ] || die "Unbekannte Verwaltung '$1'. 'saas-instant list' zeigt die vorhandenen."
 }
 
+env_value() { # env_value <Datei> <NAME>  -> Wert (leer, wenn nicht gesetzt)
+  [ -f "$1" ] || return 0
+  sed -n "s/^$2=//p" "$1" | head -n 1 | tr -d '\r'
+}
+
+sso_instance() { # Steht die Verwaltung auf AUTH_MODE=portal?
+  [ "$(env_value "$INSTALL_DIR/$1/.env" AUTH_MODE)" = "portal" ]
+}
+
 dc() { # dc <slug> <compose-Argumente...>
   local slug="$1"; shift
-  docker compose --project-directory "$ROOT_DIR" --env-file "$INSTALL_DIR/$slug/.env" -f "$COMPOSE_FILE" "$@"
+  local files=(-f "$COMPOSE_FILE")
+  # Verwaltungen mit Portal-Anmeldung hängen zusätzlich am Netz des Anmeldedienstes.
+  if sso_instance "$slug"; then files+=(-f "$NET_COMPOSE_FILE"); fi
+  docker compose --project-directory "$(dirname "$COMPOSE_FILE")" --env-file "$INSTALL_DIR/$slug/.env" "${files[@]}" "$@"
+}
+
+auth_network() {
+  local n; n="$(env_value "$PORTAL_DIR/portal.env" PORTAL_AUTH_NETWORK)"
+  printf '%s' "${n:-saas-instant-portal-auth}"
+}
+
+ensure_auth_net() { # Netz zwischen Anmeldedienst und Verwaltungen anlegen (idempotent)
+  [ "$(mode)" = "portal" ] || return 0
+  local n; n="$(auth_network)"
+  docker network inspect "$n" >/dev/null 2>&1 || docker network create "$n" >/dev/null
 }
 
 for_each() { # for_each <Funktion> [slug]
@@ -54,9 +106,102 @@ for_each() { # for_each <Funktion> [slug]
   for s in $(slugs); do "$fn" "$s"; done
 }
 
+# Die Registry liegt in portal/registry/ (nur das wird in den Portal-nginx gemountet).
+# Eine alte portal/registry.json wird verschoben; idempotent, ohne Datenverlust.
+migrate_registry() {
+  local old="$PORTAL_DIR/registry.json" dir="$PORTAL_DIR/registry"
+  [ -d "$PORTAL_DIR" ] || return 0
+  ( umask 022; mkdir -p "$dir" )
+  chmod 755 "$dir"
+  [ -f "$old" ] || return 0
+  if [ ! -e "$dir/registry.json" ]; then
+    mv "$old" "$dir/registry.json"
+    info "Portal-Registry nach $dir/registry.json verschoben."
+  elif cmp -s "$old" "$dir/registry.json"; then
+    rm -f "$old"
+  else
+    printf 'Warnung: %s und %s bestehen beide; die neue Datei gilt, die alte bleibt liegen.\n' "$old" "$dir/registry.json" >&2
+  fi
+}
+
 portal_dc() {
   [ "$(mode)" = "portal" ] || return 0
-  docker compose --env-file "$ROOT_DIR/portal/portal.env" -f "$ROOT_DIR/apps/portal/docker-compose.portal.yml" "$@"
+  migrate_registry
+  ensure_auth_net
+  docker compose --env-file "$PORTAL_DIR/portal.env" -f "$PORTAL_COMPOSE_FILE" "$@"
+}
+
+# --- Portal-Anmeldedienst ---------------------------------------------------
+
+portal_auth_enabled() { # Läuft der Anmeldedienst (Profil auth) in dieser Installation?
+  [ "$(mode)" = "portal" ] && grep -Eq '^COMPOSE_PROFILES=(.*,)?auth(,.*)?$' "$PORTAL_DIR/portal.env" 2>/dev/null
+}
+
+need_portal_auth() {
+  [ "$(mode)" = "portal" ] || die "Dieser Befehl gibt es nur im Modus portal. Diese Installation läuft im Modus '$(mode)'."
+  portal_auth_enabled || die "Der Anmeldedienst ist nicht eingerichtet (portal/portal.env ohne COMPOSE_PROFILES=auth). './install.sh --mode portal --software <slug>' richtet ihn ein."
+}
+
+# Stdin wird durchgereicht (client upsert --secret-stdin): das Geheimnis steht nie in der Argumentliste.
+auth_cli() { # auth_cli <Argumente> -> CLI im Container portal-auth
+  portal_dc exec -T portal-auth node dist/cli.js "$@"
+}
+
+banner() { # banner <Titel> <Text>  -> deutlich abgesetzte Ausgabe eines Einmal-Ergebnisses
+  printf '\n==============================================================\n'
+  printf ' %s\n' "$1"
+  printf '==============================================================\n'
+  printf '%s\n' "$2"
+  printf '==============================================================\n'
+  printf ' Dieser Link erscheint nur jetzt. Er wird nirgends gespeichert.\n\n'
+}
+
+first_account() { # first_account <email> <name>   (legt das Konto an, Ausgabe als Banner)
+  local email="$1" name="$2" out
+  out="$(auth_cli account create-first --email "$email" --name "$name")" || return 1
+  mkdir -p "$PORTAL_DIR"
+  printf '%s\n' "$email" > "$PORTAL_DIR/.first-account"
+  banner "ERSTES PORTAL-KONTO: $email" "$out"
+}
+
+register_client() { # register_client <slug> [--force]  (idempotent; ohne --force nur bei Änderung)
+  local slug="$1" force="${2:-}" envf="$INSTALL_DIR/$1/.env" secret app name callback listed
+  secret="$(env_value "$envf" PORTAL_CLIENT_SECRET)"
+  [ -n "$secret" ] && sso_instance "$slug" || die "Die Verwaltung '$slug' ist nicht für die Portal-Anmeldung eingerichtet. 'saas-instant portal enable $slug' stellt sie um."
+  app="$(env_value "$envf" CONTROL_APP_URL)"; app="${app%/}"
+  [ -n "$app" ] || die "CONTROL_APP_URL fehlt in $envf."
+  callback="$app/api/auth/sso/callback"
+  listed="$(auth_cli client list 2>/dev/null || true)"
+  if [ "$force" != "--force" ] && printf '%s\n' "$listed" | awk -F'\t' -v id="$slug" -v cb="$callback" '$1==id && index($3, cb) {f=1} END {exit !f}'; then
+    info "Verwaltung '$slug' ist beim Anmeldedienst bereits registriert."
+    return 0
+  fi
+  name="$(sed -n '/^product:/,/^[^ #]/p' "$INSTALL_DIR/$slug/saas-instant.manifest.yaml" 2>/dev/null | sed -n 's/^ *name: *//p' | head -n 1 | tr -d '\r' | sed -e 's/^"\(.*\)"[[:space:]]*\(#.*\)\{0,1\}$/\1/' | tr -d '"\\' | cut -c1-200)"
+  [ -n "$name" ] || name="$slug"
+  printf '%s' "$secret" | auth_cli client upsert --id "$slug" --name "$name" --base-url "$app" --secret-stdin
+}
+
+# Schreibt die Portal-Anmeldung in die .env der Verwaltung. Vorhandene Werte
+# bleiben unverändert (auch das Client-Secret); es wird nur Fehlendes ergänzt.
+enable_sso() { # enable_sso <slug>
+  local slug="$1" envf="$INSTALL_DIR/$1/.env" issuer net
+  issuer="$(env_value "$PORTAL_DIR/portal.env" PORTAL_ISSUER)"
+  [ -n "$issuer" ] || die "portal/portal.env enthält keine PORTAL_ISSUER. './install.sh --mode portal --software $slug' richtet den Anmeldedienst ein."
+  set_if_missing() {
+    grep -q "^$1=" "$envf" || printf '%s=%s\n' "$1" "$2" >> "$envf"
+  }
+  if ! grep -q '^AUTH_MODE=' "$envf"; then
+    printf '# Anmeldung über das Portal (SSO). Hinweis: Notzugang nur mit emergency-Befehl.\n' >> "$envf"
+  fi
+  set_if_missing AUTH_MODE portal
+  # Abweichender Netzname des Anmeldedienstes (portal.env) gilt auch für die Zusatzdatei der Verwaltung.
+  net="$(env_value "$PORTAL_DIR/portal.env" PORTAL_AUTH_NETWORK)"
+  [ -z "$net" ] || set_if_missing PORTAL_AUTH_NETWORK "$net"
+  set_if_missing PORTAL_ISSUER "$issuer"
+  set_if_missing PORTAL_INTERNAL_URL "http://portal-auth:3100"
+  set_if_missing PORTAL_CLIENT_ID "$slug"
+  set_if_missing PORTAL_CLIENT_SECRET "$(openssl rand -hex 32)"
+  chmod 600 "$envf"
 }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
@@ -73,6 +218,7 @@ case "$cmd" in
     for_each st "${1:-}"
     ;;
   up)
+    ensure_auth_net
     upone() { dc "$1" up -d; }
     for_each upone "${1:-}"
     [ -n "${1:-}" ] || portal_dc up -d
@@ -85,13 +231,85 @@ case "$cmd" in
   add)
     [ -n "${1:-}" ] || die "Kennung fehlt: saas-instant add <slug>"
     [ "$(mode)" = "portal" ] || die "'add' gibt es nur im Modus portal. Diese Installation läuft im Modus '$(mode)'."
-    exec "$ROOT_DIR/install.sh" --dir "$ROOT_DIR" --mode portal --software "$1" --non-interactive --yes
+    add_slug="$1"; shift
+    # Optionen durchreichen: --name, --app-url (alles andere ist ein Fehler).
+    add_args=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name|--app-url) [ $# -ge 2 ] || die "$1 braucht einen Wert."; add_args+=("$1" "$2"); shift 2 ;;
+        *) die "Unbekannte Option für add: $1" ;;
+      esac
+    done
+    exec "$SRC_DIR/install.sh" --dir "$ROOT_DIR" --mode portal --software "$add_slug" --non-interactive --yes ${add_args[@]+"${add_args[@]}"}
+    ;;
+  portal)
+    sub="${1:-}"; [ $# -gt 0 ] && shift
+    need_portal_auth
+    case "$sub" in
+      first-account)
+        fa_email=""; fa_name=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --email) [ $# -ge 2 ] || die "--email braucht einen Wert."; fa_email="$2"; shift 2 ;;
+            --name) [ $# -ge 2 ] || die "--name braucht einen Wert."; fa_name="$2"; shift 2 ;;
+            *) die "Unbekannte Option: $1" ;;
+          esac
+        done
+        if [ -z "$fa_email" ]; then read -r -p "E-Mail-Adresse des ersten Kontos: " fa_email || fa_email=""; fi
+        if [ -z "$fa_name" ]; then read -r -p "Name: " fa_name || fa_name=""; fi
+        [ -n "$fa_email" ] && [ -n "$fa_name" ] || die "E-Mail-Adresse und Name sind nötig (--email, --name)."
+        first_account "$fa_email" "$fa_name" || die "Das erste Konto konnte nicht angelegt werden (gibt es schon Konten?)."
+        ;;
+      set-role)
+        [ $# -eq 3 ] || die "Aufruf: saas-instant portal set-role <email> <slug> admin|staff|none"
+        case "$3" in admin|staff|none) ;; *) die "Rolle muss admin, staff oder none sein." ;; esac
+        auth_cli account set-role --email "$1" --client "$2" --role "$3"
+        ;;
+      register)
+        need_slug "${1:-}"
+        register_client "$1" "${2:-}"
+        ;;
+      enable)
+        need_slug "${1:-}"
+        en_slug="$1"; shift
+        if sso_instance "$en_slug"; then
+          info "Die Verwaltung '$en_slug' meldet schon über das Portal an."
+        else
+          if [ "${1:-}" != "--yes" ]; then
+            printf 'Die Anmeldung von "%s" wechselt auf das Portal. Bestehende Konten behalten ihre Rolle (admin);\n' "$en_slug"
+            printf 'lokal anmelden darf danach nur noch ein Notzugang (emergency). Fortfahren? [j/N]: '
+            read -r en_answer || en_answer=""
+            case "$en_answer" in j|J|y|Y|ja|Ja|yes) ;; *) die "Abgebrochen." ;; esac
+          fi
+          enable_sso "$en_slug"
+          info "Portal-Anmeldung in installations/$en_slug/.env eingetragen. Verwaltung neu starten: saas-instant up $en_slug"
+        fi
+        ;;
+      setup-link)
+        [ -n "${1:-}" ] || die "Aufruf: saas-instant portal setup-link <email>"
+        auth_cli account setup-link --email "$1"
+        ;;
+      unlock)
+        [ -n "${1:-}" ] || die "Aufruf: saas-instant portal unlock <email>"
+        auth_cli account unlock --email "$1"
+        ;;
+      clients) auth_cli client list ;;
+      key-rotate) auth_cli key rotate ;;
+      *) usage >&2; die "Unbekannter Unterbefehl für portal: ${sub:-(leer)}" ;;
+    esac
     ;;
   emergency)
     need_slug "${1:-}"
     slug="$1"; shift
     [ $# -gt 0 ] || die "Unterbefehl fehlt (first-account, enrollment, password, unlock)."
     dc "$slug" exec control-api node dist/cli/emergency.js "$@"
+    if sso_instance "$slug"; then
+      case "${1:-}" in
+        first-account|enrollment|password)
+          info "Hinweis: '$slug' meldet über das Portal an. Das Konto ist als Notzugang markiert (emergency=true);" >&2
+          info "lokal anmelden darf nur ein solches Konto (Anmeldeseite, Link \"Notzugang\")." >&2 ;;
+      esac
+    fi
     ;;
   ""|-h|--help|help) usage ;;
   *) usage >&2; die "Unbekannter Befehl: $cmd" ;;

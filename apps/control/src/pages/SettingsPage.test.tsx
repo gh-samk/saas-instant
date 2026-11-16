@@ -339,3 +339,21 @@ describe('Nutzerverwaltung — alle können dasselbe', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('Reiter „Sicherheit" in einer Portal-Sitzung', () => {
+  it('zeigt die Wiederherstellungscodes der lokalen Anmeldung nur ohne Portal', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings?tab=security');
+    const local = renderWithI18n(<App />);
+    expect(
+      await screen.findByRole('button', { name: 'Neue Codes erzeugen' }),
+    ).toBeInTheDocument();
+    local.unmount();
+    vi.unstubAllGlobals();
+
+    setFetchReady({ ...STATE, viaPortal: true, accessRole: 'admin' });
+    renderWithI18n(<App />);
+    expect(await screen.findByText('Datenverschlüsselung')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Neue Codes erzeugen' })).toBeNull();
+  });
+});

@@ -1,5 +1,17 @@
-# Schlankes Portal (nur Liste + Links). Wird von install.sh im Modus portal
-# gestartet: docker compose --env-file portal/portal.env -f apps/portal/docker-compose.portal.yml up -d --build
+# Portal: Launcher, Anmeldeseiten und (optional) der Anmeldedienst portal-auth.
+# Wird von install.sh im Modus portal gestartet:
+#   docker compose --env-file portal/portal.env -f apps/portal/docker-compose.portal.yml up -d --build
+#
+# Der Anmeldedienst (portal-auth + Datenbank) gehört zum Profil "auth" und
+# startet nur, wenn COMPOSE_PROFILES=auth in portal.env steht (zusammen mit
+# PORTAL_ISSUER, PORTAL_KEY_SECRET und PORTAL_DB_PASSWORD). Ohne das Profil
+# bleibt es beim statischen Launcher wie bisher.
+#
+# Einrichtung im Container (Beispiele):
+#   docker compose ... exec portal-auth node dist/cli.js account create-first --email <e> --name <n>
+#   printf '%s' "$SECRET" | docker compose ... exec -T portal-auth node dist/cli.js client upsert \
+#       --id <slug> --name <Name> --base-url <https://verwaltung> --secret-stdin
+#   docker compose ... exec portal-auth node dist/cli.js account set-role --email <e> --client <slug> --role admin
 name: ${COMPOSE_PROJECT_NAME:-saas-instant-portal}
 services:
   portal:
@@ -9,8 +21,10 @@ services:
       # Nur Loopback; vor dem Netz steht ein TLS-Proxy auf demselben Host.
       - "${PORTAL_BIND:-127.0.0.1}:${PORTAL_PORT:-8090}:8080"
     volumes:
-      # Verzeichnis statt Einzeldatei: install.sh ersetzt registry.json atomar.
-      - ../../portal:/srv/registry:ro
+      # Nur das Registry-Unterverzeichnis (nicht portal/ mit portal.env und den
+      # Geheimnissen). Verzeichnis statt Einzeldatei: install.sh ersetzt
+      # registry.json atomar.
+      - ../../portal/registry:/srv/registry:ro
     read_only: true
     tmpfs:
       - /tmp
@@ -18,3 +32,76 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+  portal-auth-db:
+    profiles: ["auth"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: portal_auth
+      POSTGRES_PASSWORD: ${PORTAL_DB_PASSWORD:-}
+      POSTGRES_DB: portal_auth
+    volumes:
+      - portal-auth-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portal_auth -d portal_auth"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  portal-auth:
+    profiles: ["auth"]
+    build:
+      context: ../..
+      dockerfile: apps/portal-auth/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://portal_auth:${PORTAL_DB_PASSWORD:-}@portal-auth-db:5432/portal_auth
+      # Öffentliche Basis-URL des Portals (https); zugleich der Issuer der ID-Token.
+      PORTAL_ISSUER: ${PORTAL_ISSUER:-}
+      PORTAL_KEY_SECRET: ${PORTAL_KEY_SECRET:-}
+      PORTAL_NAME: ${PORTAL_TITLE:-Portal}
+      PORTAL_AUTH_PORT: "3100"
+      # Hinter dem Portal-nginx und einem TLS-Proxy: zwei Hops bis zum Client.
+      PORTAL_TRUST_PROXY: ${PORTAL_TRUST_PROXY:-2}
+      COOKIE_SECURE: ${PORTAL_COOKIE_SECURE:-true}
+      NODE_ENV: production
+    depends_on:
+      portal-auth-db:
+        condition: service_healthy
+    # Nur im Docker-Netz erreichbar; nach außen nur über den Portal-nginx.
+    expose:
+      - "3100"
+    # default: Portal-nginx. portal-auth-net: die Verwaltungen erreichen den
+    # Dienst intern als http://portal-auth:3100 (Token und JWKS). Die Datenbank
+    # hängt nur am default-Netz und ist von den Verwaltungen aus nicht sichtbar.
+    networks:
+      - default
+      - portal-auth-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+# Gemeinsames Netz zwischen portal-auth und den Verwaltungen. Es wird von
+# install.sh bzw. bin/saas-instant angelegt (docker network create) und hier
+# wie in docker-compose.portal-net.yml nur eingebunden (external).
+networks:
+  portal-auth-net:
+    name: ${PORTAL_AUTH_NETWORK:-saas-instant-portal-auth}
+    external: true
+
+volumes:
+  portal-auth-db:

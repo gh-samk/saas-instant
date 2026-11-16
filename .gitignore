@@ -17,6 +17,7 @@ coverage/
 # Laufzeitdaten einer Installation (install.sh)
 /installations/
 /portal/registry.json
+/portal/registry/
 /portal/portal.env
 /.saas-instant-mode
 

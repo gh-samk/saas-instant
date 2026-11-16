@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Docker-Attrappe für tests/install.test.sh: startet nichts, protokolliert jeden Aufruf
+# und spielt den Anmeldedienst (portal-auth) in Dateien nach.
+#   MOCK_DIR  Verzeichnis für Zustand und Protokoll (Pflicht)
+set -u
+: "${MOCK_DIR:?MOCK_DIR fehlt}"
+mkdir -p "$MOCK_DIR/nets"
+LOG="$MOCK_DIR/calls.log"
+printf '%s\n' "$*" >> "$LOG"
+
+case "${1:-}" in
+  info) exit 0 ;;
+  network)
+    case "${2:-}" in
+      inspect) [ -f "$MOCK_DIR/nets/${3:-}" ] ;;
+      create) : > "$MOCK_DIR/nets/${3:-}" ;;
+    esac
+    exit $? ;;
+  compose)
+    shift
+    [ "${1:-}" != "version" ] || exit 0
+    # Argumente nach "exec -T portal-auth node" suchen
+    args=("$@")
+    n=${#args[@]}
+    for ((i = 0; i < n; i++)); do
+      if [ "${args[i]}" = "exec" ] && [ "${args[i+2]:-}" = "portal-auth" ]; then
+        rest=("${args[@]:i+4}")   # nach "node"
+        if [ "${rest[0]:-}" = "-e" ]; then exit 0; fi   # Gesundheitsprüfung
+        # rest = dist/cli.js <gruppe> <befehl> ...
+        group="${rest[1]:-}"; cmd="${rest[2]:-}"
+        flag() { local k="$1" j; for ((j = 3; j < ${#rest[@]}; j++)); do [ "${rest[j]}" = "--$k" ] && { printf '%s' "${rest[j+1]:-}"; return; }; done; }
+        case "$group $cmd" in
+          "client list")
+            [ ! -f "$MOCK_DIR/clients.tsv" ] || cat "$MOCK_DIR/clients.tsv" ;;
+          "client upsert")
+            secret="$(cat)"
+            printf '%s' "$secret" > "$MOCK_DIR/secret-$(flag id)"
+            printf '%s\t%s\t%s/api/auth/sso/callback\n' "$(flag id)" "$(flag name)" "$(flag base-url | sed 's:/*$::')" >> "$MOCK_DIR/clients.tsv"
+            echo "Verwaltung \"$(flag id)\" angelegt." ;;
+          "account create-first")
+            if [ -f "$MOCK_DIR/accounts" ]; then echo "Fehler: Es gibt schon Konten" >&2; exit 1; fi
+            flag email > "$MOCK_DIR/accounts"
+            printf 'Erstes Konto (Portal-Administration) angelegt.\nEinrichtungslink (einmalig, 3 Tage gültig):\nhttps://portal.test/auth/setup?token=MOCK-EINMAL-TOKEN\n' ;;
+          "account set-role") echo "Rolle gesetzt." ;;
+          *) echo "mock: unbekannt $group $cmd" >&2; exit 2 ;;
+        esac
+        exit 0
+      fi
+    done
+    exit 0 ;;
+esac
+exit 0

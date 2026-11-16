@@ -8,6 +8,7 @@
 !**/.env.example
 installations
 portal/registry.json
+portal/registry/
 portal/portal.env
 .saas-instant-mode
 backups

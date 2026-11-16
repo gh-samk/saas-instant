@@ -9,6 +9,7 @@ import {
 import { ApiError, errorText, fetchCsrf } from '../lib/api-client';;
 import { logout as logoutCall, fetchState } from '../lib/api';
 import type { AccessState } from '../lib/api';
+import { setViaPortal } from '../lib/portal-session';
 import { useT } from '../i18n';
 
 interface AuthValues {
@@ -33,10 +34,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const reload = useCallback(async () => {
     try {
-      setState(await fetchState());
+      const next = await fetchState();
+      setViaPortal(next.viaPortal === true);
+      setState(next);
       setError(null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
+        setViaPortal(false);
         setState(null);
         setError(null);
         return;
@@ -64,11 +68,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [reload]);
 
   const logout = useCallback(async () => {
+    let portalLogoutUrl: string | undefined;
     try {
-      await logoutCall();
+      portalLogoutUrl = (await logoutCall())?.portalLogoutUrl;
     } finally {
+      setViaPortal(false);
       setState(null);
     }
+    // Portal-Sitzung: erst das Portal beendet seine Sitzung und meldet alle
+    // übrigen Verwaltungen per Front-Channel ab.
+    if (portalLogoutUrl) window.location.assign(portalLogoutUrl);
   }, []);
 
   return (
