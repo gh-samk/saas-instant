@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Children, type ReactNode } from 'react';
 import { Pencil } from 'lucide-react';
 import { Card, Button } from '@saas-instant/ui';
 import { useT } from '../i18n';
@@ -109,25 +109,51 @@ export function DetailBlock({
   );
 }
 
-/** Ein Feld im Ansichtsmodus. Leere Werte zeigen „—", nie eine leere Zeile. */
+/**
+ * Ein Feld im Ansichtsmodus.
+ *
+ * Leere Werte zeigen „—", nie eine leere Zeile. Mit `onAdd` wird aus dem
+ * Strich stattdessen die Einladung „+ Website hinzufügen": Ein leeres
+ * OPTIONALES Feld ist kein Befund, sondern etwas, das man nachtragen kann —
+ * und der Klick öffnet die Bearbeitung des Blocks. Ist `onAdd` nicht gesetzt
+ * (etwa, weil anderswo schon ein Block offen ist), bleibt es beim Strich.
+ */
 export function Field({
   label,
   children,
   wide = false,
+  onAdd,
 }: {
   label: string;
   children?: ReactNode;
   wide?: boolean;
+  onAdd?: () => void;
 }) {
-  const empty =
-    children === null || children === undefined || children === '';
+  const t = useT();
+  // `toArray` lässt null, undefined und Wahrheitswerte weg: Auch ein Feld,
+  // dessen Ausdrücke alle „nichts" ergeben, gilt als leer.
+  const empty = Children.toArray(children).every((child) => child === '');
   return (
     <div className={`min-w-0 ${wide ? 'sm:col-span-2' : ''}`}>
       <dt className="text-xs font-semibold uppercase tracking-wide text-leise">
         {label}
       </dt>
       <dd className="mt-0.5 break-words text-sm text-text">
-        {empty ? <span className="text-leise">—</span> : children}
+        {empty ? (
+          onAdd ? (
+            <button
+              type="button"
+              onClick={onAdd}
+              className="inline-flex min-h-11 items-center text-left text-primaer underline-offset-2 hover:text-primaer-hover hover:underline sm:min-h-0"
+            >
+              {t('components.detailBlock.addField', { label })}
+            </button>
+          ) : (
+            <span className="text-leise">—</span>
+          )
+        ) : (
+          children
+        )}
       </dd>
     </div>
   );

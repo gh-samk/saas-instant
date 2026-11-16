@@ -440,6 +440,9 @@ export function InstanceCard({
           setCreateOpen(false);
           setInstance(newValue);
           toast.show(t('components.instanceCard.text22'));
+          // Die Kopfzeile der Organisation richtet ihre Hauptaktion danach
+          // aus, ob es schon eine Instanz gibt.
+          onHistoryChanged?.();
         }}
       />
 
@@ -627,11 +630,11 @@ function DiscardButton({
       {instance.coolifyCreated && (
         <p className="mb-2 text-sm text-text">
           {t('components.instanceCard.text24')}{' '}
-          <code className="text-xs">{instance.subdomain}</code>{t('components.instanceCard.text25')}</p>
+          <code className="text-sm">{instance.subdomain}</code>{t('components.instanceCard.text25')}</p>
       )}
       <Button variant="secondary" onClick={onDiscard}>
         {t('components.instanceCard.button4')}</Button>
-      <p className="mt-1.5 text-xs text-leise">
+      <p className="mt-1.5 text-sm text-leise">
         {instance.coolifyCreated
           ? t('components.instanceCard.text26')
           : t('components.instanceCard.text27')}
@@ -677,7 +680,7 @@ function AgainCheckButton({ onAgainCheck }: { onAgainCheck: () => void }) {
     <div className="mt-3">
       <Button variant="secondary" onClick={onAgainCheck}>
         {t('components.instanceCard.button5')}</Button>
-      <p className="mt-1.5 text-xs text-leise">
+      <p className="mt-1.5 text-sm text-leise">
         {t('components.instanceCard.text30')}</p>
     </div>
   );
@@ -788,7 +791,7 @@ function Transition({
           {/* Kein „Erneut versuchen": ein Neustart wäre eine dritte
               Schreiboperation gegen Coolify (R1). Angeboten wird nur eine
               Leseanweisung nach außen. */}
-          <p className="mt-2 text-xs text-leise">
+          <p className="mt-2 text-sm text-leise">
             {t('components.instanceCard.text37')}</p>
         </div>
       </div>
@@ -816,7 +819,7 @@ function Transition({
         </p>
         {/* Nur noch für einen WIRKLICH laufenden Vorgang — die Endzustände
             sind oben abgefangen. */}
-        <p className="mt-2 text-xs text-leise">
+        <p className="mt-2 text-sm text-leise">
           {t('components.instanceCard.text42')}</p>
       </div>
     </div>
@@ -903,7 +906,7 @@ function Active({
                 </span>
               </Button>
             ) : (
-              <p className="mt-2 text-xs text-beschluss-text">
+              <p className="mt-2 text-sm text-beschluss-text">
                 {t('components.instanceCard.text46')}</p>
             )}
           </div>
@@ -988,7 +991,7 @@ function Active({
           und fällt nicht unter „kein Dauerhäkchen". Es gibt hier bewusst
           keinen Knopf zum Zurückspielen in die bestehende Instanz (E3-15);
           eine NEUE Instanz lässt sich im Bereich „Sicherungen" herstellen. */}
-      <p className="mt-2 text-xs text-leise">
+      <p className="mt-2 text-sm text-leise">
         {t('components.instanceCard.text47')}</p>
     </>
   );
@@ -1026,7 +1029,7 @@ function Archived({ instance }: { instance: InstanceDetail }) {
       {/* Genau diese Karte ist der Ort, an dem jemand Wochen später nachsieht,
           „was ist mit der alten Instanz von X". Die Antwort muss ohne
           Rückfrage aus ihr selbst hervorgehen. */}
-      <p className="mt-3 text-xs text-leise">
+      <p className="mt-3 text-sm text-leise">
         {t('components.instanceCard.text48')}</p>
     </>
   );

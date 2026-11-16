@@ -54,7 +54,7 @@ describe('Aufgabenquelle control_backup_missing', () => {
       kind: 'control_backup_missing',
       urgency: 'high',
       title: 'Sicherung der Verwaltung überfällig',
-      action: { target: '/settings' },
+      action: { target: '/settings?tab=backup' },
     });
     expect(tasks[0]?.reason).toContain('Rechnungsarchiv: noch nie gemeldet');
   });

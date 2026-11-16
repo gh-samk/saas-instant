@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, Mails, Plus, ShieldCheck } from 'lucide-react';
+import { Eye, Mails, Plus } from 'lucide-react';
 import {
   IconButton,
   Card,
@@ -17,7 +17,6 @@ import { useBroadcastNumbers } from '../lib/broadcast-numbers';
 import { TemplateCreateDialog } from '../components/TemplateCreateDialog';
 import { useT } from '../i18n';
 import { errorText } from '../lib/api-client';
-import { TEXT_BUTTON } from '../lib/styles';
 import { fetchTemplates, type Template } from '../lib/api';
 import { formatDate } from '../utils/date';
 
@@ -109,19 +108,6 @@ export function BroadcastPage() {
 
       <BroadcastTabs numbers={numbers} />
 
-      {/* DER SATZ BLEIBT, nur kürzer. Er ist die wichtigste Aussage der
-          Seite: Wer eine Rundmail bekommt, entscheidet nicht diese Liste,
-          sondern die Prüfung unmittelbar vor jeder einzelnen Mail. */}
-      <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-beschluss-rahmen-hell bg-beschluss-bg p-3.5">
-        <p className="flex min-w-0 items-start gap-2.5 text-sm text-beschluss-text">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          {t('rundmail.consentNotice')}
-        </p>
-        <Link to="/broadcast/consents" className={`shrink-0 ${TEXT_BUTTON}`}>
-          {t('rundmail.consentsLink')}
-        </Link>
-      </Card>
-
       {loadError ? (
         <Card className="p-6">
           <p role="alert" className="mb-3 text-sm text-gefahr">
@@ -184,7 +170,7 @@ export function BroadcastPage() {
                         <StatusPill kind="neutral">{t('rundmail.inactive')}</StatusPill>
                       )}
                     </span>
-                    <span className="block break-words text-xs text-leise">
+                    <span className="block break-words text-sm text-leise">
                       {template.subject}
                     </span>
                   </Link>

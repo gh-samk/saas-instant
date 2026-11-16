@@ -39,7 +39,7 @@ export const MAIL_TOKENS = {
   /** `--farbe-text` — Fliesstext. */
   text: '#0f172a',
   /** `--farbe-text-leise` — Fusszeile und Nebensätze. */
-  textMuted: '#475569',
+  textMuted: '#425064',
   /** `--farbe-rahmen` — Kartenrand und Trennlinie über der Fusszeile. */
   layout: '#e2e8f0',
   /** `--farbe-primaer` — Wortmarke und Verweise. */

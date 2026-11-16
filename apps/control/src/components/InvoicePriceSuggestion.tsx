@@ -243,7 +243,7 @@ export function InvoicePriceSuggestion({
                 {suggestion.customAmount === null &&
                   !suggestion.subscriptionCalculable &&
                   suggestion.subscriptionCalculableFrom !== null && (
-                    <p className="mt-2 text-xs text-leise">
+                    <p className="mt-2 text-sm text-leise">
                       {t('components.invoicePriceSuggestion.text8')}{' '}
                       <span className="ziffern-tabellarisch">
                         {formatDate(suggestion.subscriptionCalculableFrom)}
@@ -381,7 +381,7 @@ export function InvoicePriceSuggestion({
               </div>
 
               {!suggestion.subscriptionCalculable && suggestion.subscriptionCalculableFrom !== null && (
-                <p className="mt-2 text-xs text-leise">
+                <p className="mt-2 text-sm text-leise">
                   {t('components.invoicePriceSuggestion.text8')}{' '}
                   <span className="ziffern-tabellarisch">
                     {formatDate(suggestion.subscriptionCalculableFrom)}

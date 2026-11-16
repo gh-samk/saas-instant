@@ -63,7 +63,7 @@ const EVIDENCE = {
 };
 
 function setFetchReady(
-  options: { evidence?: unknown; evidenceStatus?: number } = {},
+  options: { evidence?: unknown; evidenceStatus?: number; empty?: boolean } = {},
 ) {
   const called = vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input);
@@ -82,7 +82,10 @@ function setFetchReady(
       );
     }
     if (path.includes('/api/broadcast/recipients')) {
-      return new Response(JSON.stringify(RECIPIENT), { status: 200 });
+      return new Response(
+        JSON.stringify(options.empty ? { ...RECIPIENT, count: 0, recipient: [] } : RECIPIENT),
+        { status: 200 },
+      );
     }
     return new Response('{}', { status: 200 });
   });
@@ -248,6 +251,15 @@ describe('Einwilligungen — was die Seite nicht anbietet', () => {
         'Vorhersage — maßgeblich ist die Prüfung vor dem Versand.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('zeigt bei 0 Adressen nur den Leerzustand, ohne große Kennzahl und ohne doppelte Zeile', async () => {
+    setFetchReady({ empty: true });
+    open();
+
+    expect(await screen.findByText('Noch niemand hat bestätigt')).toBeInTheDocument();
+    expect(screen.queryByText('bestätigte Adressen · Stand jetzt')).toBeNull();
+    expect(screen.queryByText('Adressen mit bestätigter Einwilligung — Stand jetzt.')).toBeNull();
   });
 
   it('verweist für den Widerspruch auf die Sperrseite', async () => {

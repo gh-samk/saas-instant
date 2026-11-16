@@ -123,7 +123,7 @@ export function Table({
                 // sonst über die Nachbarspalte. Bei `auto`-Layout (allen
                 // bisherigen Aufrufern) ändert die Regel nichts, weil die
                 // Spalte dort ohnehin mit ihrem Inhalt wächst.
-                className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide break-words"
+                className="px-4 py-2.5 text-[13px] font-semibold uppercase tracking-wide break-words"
               >
                 {columnsOnlyReadAloud?.[i] === true ? (
                   <span className="sr-only">{s}</span>

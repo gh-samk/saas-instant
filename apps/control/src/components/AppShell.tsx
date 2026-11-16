@@ -13,12 +13,17 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { useToast } from '@saas-instant/ui';
+import { CommandPalette } from './CommandPalette';
+import { CompanyCreateDialog } from './CompanyCreateDialog';
+import { CompanyPicker } from './CompanyPicker';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../context/AuthContext';
 import { useProduct } from '../context/ProductContext';
 import { useMediaQuery } from '../lib/use-media-query';
-import { fetchNavigationCounters, type NavigationCounters } from '../lib/api';
+import { fetchCompany, fetchNavigationCounters, type NavigationCounters } from '../lib/api';
+import { rememberCompany } from '../lib/recent-companies';
 import { t, useT } from '../i18n';
 
 /** Welcher Zähler an einem Ziel hängt — und in welcher Farbe. */
@@ -191,15 +196,17 @@ export function AppShell() {
   const showRole = state?.authMode === 'portal';
   const { productName, logoUrl, showBrand } = useProduct();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Ab `sm` steht das Suchfeld in der Kopfzeile; darunter wäre es auf ~90 px
-  // gestaucht (Platzhalter unsichtbar). Dort öffnet ein Such-Knopf (44 px) an
-  // seiner Stelle dasselbe Feld über die ganze Kopfzeile. Ein Feld im DOM, nie
-  // zwei: Sonst gäbe es zwei „Schnellsuche" für die Bildschirmleserin.
+  // Ab `sm` steht in der Kopfzeile ein Suchfeld-Knopf, darunter ein Such-Knopf
+  // (44 px). Beide öffnen dieselbe Kommandopalette; es gibt nur sie, nie ein
+  // zweites Eingabefeld für die Schnellsuche.
   const searchInline = useMediaQuery('(min-width: 640px)');
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const toast = useToast();
   const [counter, setCounter] = useState<NavigationCounters | null>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const lastRemembered = useRef<string | null>(null);
   const city = useLocation();
   const navigate = useNavigate();
 
@@ -235,56 +242,40 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, [drawerOpen]);
 
-  // Das Feld der schmalen Kopfzeile erscheint erst nach dem Klick: Fokus setzen.
+  /**
+   * ZULETZT GEÖFFNETE ORGANISATIONEN für die Palette: Wer unter
+   * `/companies/<id>…` steht, wird (einmal je Organisation und Besuch) mit
+   * Namen gemerkt. Der Name kommt vom Server, weil die Route nur die Kennung
+   * trägt; schlägt das fehl, fehlt der Eintrag eben.
+   */
   useEffect(() => {
-    if (searchOpen) searchRef.current?.focus();
-  }, [searchOpen]);
+    const match = /^\/companies\/([^/]+)/.exec(city.pathname);
+    const id = match?.[1];
+    if (!id || id === 'new') {
+      lastRemembered.current = null;
+      return;
+    }
+    if (lastRemembered.current === id) return;
+    lastRemembered.current = id;
+    fetchCompany(id)
+      .then((company) => {
+        if (typeof company?.name === 'string') rememberCompany({ id, name: company.name });
+      })
+      .catch(() => {});
+  }, [city.pathname]);
 
-  // Beim Wechsel auf die breite Kopfzeile liegt das Feld wieder dauerhaft dort.
-  useEffect(() => {
-    if (searchInline) setSearchOpen(false);
-  }, [searchInline]);
-
-  const goSearch = (raw: string) => {
-    const value = raw.trim();
-    setSearchOpen(false);
-    navigate(
-      value === '' ? '/companies' : `/companies?search=${encodeURIComponent(value)}`,
-    );
-  };
-
-  // ⌘K bzw. Strg+K springt ins Suchfeld. `preventDefault`, weil Firefox
-  // damit sonst seine eigene Schnellsuche öffnet.
+  // ⌘K bzw. Strg+K öffnet die Palette (und schließt sie wieder).
+  // `preventDefault`, weil Firefox damit sonst seine eigene Schnellsuche öffnet.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (searchRef.current) searchRef.current.focus();
-        else setSearchOpen(true);
+        setPaletteOpen((open) => !open);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-
-  const searchInput = (
-    <input
-      ref={searchRef}
-      type="search"
-      // NICHT „Organisationen durchsuchen": So heisst bereits das
-      // Feld AUF der Organisationsseite. Zwei Bedienelemente mit
-      // demselben Namen sind für eine Bildschirmleserin nicht
-      // unterscheidbar — und sie tun Verschiedenes: dieses hier
-      // springt zur Liste, jenes filtert die schon offene.
-      aria-label={t('components.appShell.ariaLabel2')}
-      placeholder={t('components.appShell.placeholder')}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') goSearch(e.currentTarget.value);
-        else if (e.key === 'Escape') setSearchOpen(false);
-      }}
-      className="min-h-11 w-full rounded-lg border border-rahmen-ui bg-flaeche-4 py-2 pl-9 pr-14 text-sm text-text placeholder:text-still sm:min-h-0"
-    />
-  );
 
   return (
     <div className="min-h-dvh bg-flaeche-2">
@@ -344,45 +335,34 @@ export function AppShell() {
               {productName}
             </span>
 
-            {searchInline ? (
+            {searchInline && (
               <div className="relative min-w-0 flex-1 lg:max-w-[460px]">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-still"
                   aria-hidden="true"
                 />
-                {/* SIE SUCHT WIRKLICH, und zwar genau das, was in der
-                    Beschriftung steht. Das Design nennt hier zusätzlich
-                    „Rechnungsnummer" — den Weg dorthin gibt es erst mit der
-                    globalen Rechnungsliste (Etappe 4). Ein Platzhalter, der
-                    mehr verspricht als das Feld findet, ist schlimmer als ein
-                    schmaleres Versprechen: Wer eine Rechnungsnummer eintippt
-                    und nichts bekommt, hält die Suche für kaputt. */}
-                {searchInput}
+                {/* DER „FELD"-KNOPF ÖFFNET DIE PALETTE. Optisch ein Suchfeld,
+                    damit niemand umlernen muss; die Eingabe selbst steht in
+                    der Palette (Organisationen live, dazu Aktionen). Der
+                    Name ist „Schnellsuche" und nicht „Organisationen
+                    durchsuchen": So heisst bereits das Feld AUF der
+                    Organisationsseite, und beide tun Verschiedenes. */}
+                <button
+                  type="button"
+                  onClick={() => setPaletteOpen(true)}
+                  aria-label={t('components.appShell.ariaLabel2')}
+                  aria-haspopup="dialog"
+                  className="min-h-0 w-full truncate rounded-lg border border-rahmen-ui bg-flaeche-4 py-2 pl-9 pr-14 text-left text-sm text-still"
+                >
+                  {t('components.appShell.placeholder')}
+                </button>
                 <span
                   className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-rahmen bg-flaeche px-1.5 py-0.5 text-[11px] font-semibold text-still lg:block"
                   aria-hidden="true"
                 >
                   {t('components.appShell.label10')}</span>
               </div>
-            ) : searchOpen ? (
-              <div className="absolute inset-0 z-10 flex items-center gap-2 bg-flaeche px-4">
-                <div className="relative min-w-0 flex-1">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-still"
-                    aria-hidden="true"
-                  />
-                  {searchInput}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSearchOpen(false)}
-                  aria-label={t('components.appShell.searchClose')}
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-text hover:bg-flaeche-3"
-                >
-                  <X className="h-5 w-5" aria-hidden="true" />
-                </button>
-              </div>
-            ) : null}
+            )}
 
             {/* `ml-auto` an der Gruppe schiebt Suche, Rolle und Abmelden an den
                 rechten Rand — das Feld ist ab `lg` auf 460 px gedeckelt, der
@@ -391,15 +371,16 @@ export function AppShell() {
               {!searchInline && (
                 <button
                   type="button"
-                  onClick={() => setSearchOpen(true)}
+                  onClick={() => setPaletteOpen(true)}
                   aria-label={t('components.appShell.searchOpen')}
+                  aria-haspopup="dialog"
                   className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-rahmen-ui text-leise transition-colors duration-150 hover:bg-flaeche-3 hover:text-text"
                 >
                   <Search className="h-[18px] w-[18px]" aria-hidden="true" />
                 </button>
               )}
               {showRole && (
-                <span className="shrink-0 text-xs text-leise">
+                <span className="shrink-0 text-sm text-leise">
                   {t('sso.roleLabel', {
                     role:
                       state?.accessRole === 'staff'
@@ -433,6 +414,31 @@ export function AppShell() {
           </main>
         </div>
       </div>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNewCompany={() => setCreateOpen(true)}
+        onNewInvoice={() => setPickerOpen(true)}
+      />
+      <CompanyCreateDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(company) => {
+          setCreateOpen(false);
+          toast.show(t('palette.created'));
+          // Wie auf der Organisationsliste: direkt auf die Detailseite.
+          navigate(`/companies/${company.id}`);
+        }}
+      />
+      <CompanyPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(company) => {
+          setPickerOpen(false);
+          navigate(`/companies/${company.id}/invoices/new`);
+        }}
+      />
 
       {drawerOpen && (
         <div

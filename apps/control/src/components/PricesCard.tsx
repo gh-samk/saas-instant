@@ -723,7 +723,7 @@ export function PricesCard({ totpPossible = false }: { totpPossible?: boolean })
 
       {archivedIndexes.length > 0 && (
         <details className="mt-6 rounded-lg border border-rahmen bg-flaeche-2 p-4">
-          <summary className="cursor-pointer text-base font-semibold text-text">
+          <summary className="cursor-pointer py-2.5 text-base font-semibold text-text sm:py-0">
             {t('einstellungen.pricesArchivedSummary', { count: archivedIndexes.length })}
           </summary>
           <p className="mb-3 mt-2 text-sm text-leise">{t('einstellungen.pricesArchivedHint')}</p>
@@ -759,7 +759,7 @@ export function PricesCard({ totpPossible = false }: { totpPossible?: boolean })
       )}
 
       <details className="mt-4 rounded-lg border border-rahmen bg-flaeche-2 p-4">
-        <summary className="cursor-pointer text-base font-semibold text-text">
+        <summary className="cursor-pointer py-2.5 text-base font-semibold text-text sm:py-0">
           {t('einstellungen.pricesTechTitle')}
         </summary>
         <p className="mb-3 mt-2 text-sm text-leise">{t('einstellungen.pricesTechHint')}</p>

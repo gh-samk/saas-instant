@@ -18,11 +18,20 @@ export const tableRow = {
   compact: 'px-4 py-2',
 } as const;
 
-/** Text-Hierarchie innerhalb einer Zelle (Primär-/Sekundärzeile). */
+/**
+ * Text-Hierarchie innerhalb einer Zelle (Primär-/Sekundärzeile).
+ *
+ * SEKUNDÄRTEXT NIE UNTER 13 PX (`text-sm` = 14 px) und im Kontrast geprüft
+ * (`scripts/contrast-check.mjs`, Art „small": >= 7:1 in Hell und Dunkel).
+ * NUTZDATEN IN TEXTFARBE: Was in einer Zeile gelesen wird (Organisation, Datum,
+ * Betrag) ist keine Nebensache und steht in `data`, nicht in Sekundärgrau.
+ * Grau bleibt für Beiwerk: Erklärungen, Zusatzzeilen, „—".
+ */
 export const tableText = {
   compact: {
     primary: 'text-sm font-medium text-text',
-    secondary: 'text-xs text-leise',
+    secondary: 'text-sm text-leise',
+    data: 'text-sm text-text',
   },
 } as const;
 

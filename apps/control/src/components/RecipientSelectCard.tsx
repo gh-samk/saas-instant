@@ -158,11 +158,15 @@ export function RecipientSelectCard({
             {select.count}
           </p>
           )}
-          <p className="text-sm text-leise">
-            {select.count === 1
-              ? t('components.recipientSelectCard.text4')
-              : t('components.recipientSelectCard.text5')}
-          </p>
+          {/* Ohne Kennzahl trägt schon die Überschrift diese Aussage; die
+              Bildunterzeile wiederholte sie wörtlich. */}
+          {!withoutMetric && (
+            <p className="text-sm text-leise">
+              {select.count === 1
+                ? t('components.recipientSelectCard.text4')
+                : t('components.recipientSelectCard.text5')}
+            </p>
+          )}
 
           {/* Der Satz des Servers, im Wortlaut. Er ist die Stelle, die weiss,
               wann die Prüfung wirklich stattfindet. */}
@@ -268,7 +272,7 @@ export function RecipientSelectCard({
                       <p className="break-all text-sm font-medium text-text">
                         {row.email}
                       </p>
-                      <p className="text-xs text-leise">
+                      <p className="text-sm text-leise">
                         {row.companyName !== null &&
                         row.companyId !== null ? (
                           <Link

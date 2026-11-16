@@ -185,13 +185,25 @@ describe('Rundmail — Übersicht der Vorlagen', () => {
     expect(screen.queryByText(/2026-08-20/)).toBeNull();
   });
 
-  it('sagt auf der Seite, dass nur bestätigte Einwilligungen Post bekommen', async () => {
+  it('hat kein Dauerband mehr: Der Hinweis steht im Versanddialog', async () => {
     mockFetch();
     openPage();
 
-    expect(
-      await screen.findByText(/Versand nur an bestätigte Einwilligungen/),
-    ).toBeInTheDocument();
+    await screen.findByRole('table');
+    expect(screen.queryByText(/Versand nur an bestätigte Einwilligungen/)).toBeNull();
+  });
+
+  it('nennt die Reiter Vorlagen, Einwilligungen, Sperrliste und blendet „0“ aus', async () => {
+    mockFetch();
+    openPage();
+
+    await screen.findByRole('table');
+    const nav = screen.getByRole('navigation', { name: 'Bereiche der Rundmail' });
+    const labels = within(nav)
+      .getAllByRole('link')
+      .map((link) => link.textContent?.replace(/\d+$/, ''));
+    expect(labels).toEqual(['Vorlagen', 'Einwilligungen', 'Sperrliste']);
+    expect(nav.textContent).not.toMatch(/(^|\D)0(\D|$)/);
   });
 
   it('bietet nirgends einen Import oder ein freies Adressfeld an (Abwesenheit)', async () => {

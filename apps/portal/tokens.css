@@ -29,7 +29,7 @@
   --farbe-flaeche-3: #f1f5f9;    /* Chips, Hover-Flächen, Segmented-Container */
   --farbe-flaeche-4: #fbfcfe;    /* abgesetzte Fläche: Tabellenkopf, Feldflächen */
   --farbe-text: #0f172a;         /* Primärtext */
-  --farbe-text-leise: #475569;   /* Sekundärtext */
+  --farbe-text-leise: #425064;   /* Sekundärtext */
   --farbe-text-still: #5b6b82;   /* Tertiärtext: Platzhalter, „—", Eyebrow */
   --farbe-read: #1e293b;         /* Fließtext (Vorschlags-/Zieltexte) */
   --farbe-rahmen: #e2e8f0;       /* Standard-Rahmen, Karten */
@@ -114,7 +114,7 @@
     --farbe-flaeche-3: #334155;
     --farbe-flaeche-4: #172033;
     --farbe-text: #f1f5f9;
-    --farbe-text-leise: #cbd5e1;
+    --farbe-text-leise: #d3dce8;
     --farbe-text-still: #a3b1c6;
     --farbe-read: #e2e8f0;
     --farbe-rahmen: #334155;
@@ -176,7 +176,7 @@
   --farbe-flaeche-3: #334155;
   --farbe-flaeche-4: #172033;
   --farbe-text: #f1f5f9;
-  --farbe-text-leise: #cbd5e1;
+  --farbe-text-leise: #d3dce8;
   --farbe-text-still: #a3b1c6;
   --farbe-read: #e2e8f0;
   --farbe-rahmen: #334155;

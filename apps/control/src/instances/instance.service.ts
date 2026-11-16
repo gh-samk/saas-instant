@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { dateStringFromDate, today, toDate } from '@saas-instant/shared';
+import { datePlusDays, dateStringFromDate, today, toDate } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { CoolifyConfigService, instanceHost } from '../coolify/coolify.config';
@@ -32,6 +32,7 @@ import {
   DATABASE_NAME,
   ENVIRONMENT_VARIABLES,
   PREVIEW_VALID_MINUTES,
+  BACKUP_MISSING_AFTER_DAYS,
 } from './instance.rules';
 import type { InstanceDetail, InstancePreviewResponse,
   InstanceStatus,
@@ -687,17 +688,68 @@ export class InstanceService {
         subdomain: true,
         status: true,
         createdAt: true,
+        appVersion: true,
         company: { select: { id: true, name: true } },
       },
     });
-    return rows.map((row) => ({
-      id: row.id,
-      subdomain: row.subdomain,
-      url: `https://${this.hostFor(row.subdomain)}`,
-      status: row.status as InstanceListenEntry['status'],
-      createdAt: row.createdAt.toISOString(),
-      company: row.company,
-    }));
+    if (rows.length === 0) return [];
+
+    // KEIN N+1: Sicherung und Kennzahl kommen je in EINER gruppierten Abfrage
+    // für alle Zeilen, nicht je Instanz. Die Kennzahlen-Historie wächst um
+    // eine Zeile je Tag; sie ganz zu laden, nur um die jüngste zu finden,
+    // wäre genau der falsche Weg.
+    const ids = rows.map((row) => row.id);
+    const lastBackups = await this.prisma.backup.groupBy({
+      by: ['instanceId'],
+      where: { instanceId: { in: ids } },
+      _max: { date: true },
+    });
+    const lastMetrics = await this.prisma.metric.groupBy({
+      by: ['instanceId'],
+      where: { instanceId: { in: ids }, fetchSuccessful: true },
+      _max: { date: true },
+    });
+    const latest = lastMetrics.length
+      ? await this.prisma.metric.findMany({
+          where: {
+            OR: lastMetrics.flatMap((m) =>
+              m._max.date === null
+                ? []
+                : [{ instanceId: m.instanceId, date: m._max.date }],
+            ),
+            fetchSuccessful: true,
+          },
+          select: { instanceId: true, activePersons: true },
+        })
+      : [];
+    const backupDay = new Map(
+      lastBackups.map((b) => [
+        b.instanceId,
+        b._max.date === null ? null : dateStringFromDate(b._max.date),
+      ]),
+    );
+    const persons = new Map(latest.map((m) => [m.instanceId, m.activePersons]));
+    const limit = datePlusDays(today(), -BACKUP_MISSING_AFTER_DAYS);
+
+    return rows.map((row) => {
+      const lastBackupAt = backupDay.get(row.id) ?? null;
+      const active = row.status === 'active';
+      return {
+        id: row.id,
+        subdomain: row.subdomain,
+        url: `https://${this.hostFor(row.subdomain)}`,
+        status: row.status as InstanceListenEntry['status'],
+        createdAt: row.createdAt.toISOString(),
+        company: row.company,
+        appVersion: row.appVersion,
+        activePersons: active ? (persons.get(row.id) ?? null) : null,
+        lastBackupAt,
+        // Dieselbe Aussage wie `toBackup` und die Aufgabe „Sicherung
+        // überfällig": nie gesichert oder älter als die Frist — aber nur bei
+        // einer laufenden Instanz.
+        backupMissing: active && (lastBackupAt === null || lastBackupAt < limit),
+      };
+    });
   }
 
   /** Der Vorschlag aus dem Organisationsnamen, für das leere Formularfeld. */

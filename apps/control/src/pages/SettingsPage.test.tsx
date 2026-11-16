@@ -171,6 +171,16 @@ const EVENTS = [
     flagged: false,
     ip: '203.0.113.9',
   },
+  {
+    // Altdatum: vor der Normalisierung auf dem Server geschrieben.
+    id: 'a3',
+    timestamp: '2026-08-30T08:00:00.000Z',
+    action: 'login.password.success',
+    text: 'Anmeldung mit Passwort (alt)',
+    actor: 'sam',
+    flagged: false,
+    ip: '::ffff:127.0.0.1',
+  },
 ];
 
 const ACCOUNTS = [
@@ -372,7 +382,7 @@ function stubNarrow() {
 }
 
 describe('Einstellungen — Bereichswahl auf dem Telefon', () => {
-  it('ersetzt die Chipleiste unter 640 px durch eine Auswahlliste mit allen Bereichen', async () => {
+  it('ersetzt die Navigation unter 768 px durch eine Auswahlliste mit allen Bereichen', async () => {
     stubNarrow();
     setFetchReady(STATE);
     window.history.pushState({}, '', '/settings');
@@ -380,8 +390,8 @@ describe('Einstellungen — Bereichswahl auf dem Telefon', () => {
 
     const select = await screen.findByLabelText('Bereich der Einstellungen');
     expect(select.tagName).toBe('SELECT');
-    // Chips und Liste nie zugleich.
-    expect(screen.queryByRole('group', { name: 'Bereich der Einstellungen' })).toBeNull();
+    // Navigation und Liste nie zugleich.
+    expect(screen.queryByRole('navigation', { name: 'Bereich der Einstellungen' })).toBeNull();
     expect(within(select).getAllByRole('option').length).toBeGreaterThanOrEqual(6);
   });
 
@@ -398,13 +408,160 @@ describe('Einstellungen — Bereichswahl auf dem Telefon', () => {
     expect(screen.getByLabelText('Bereich der Einstellungen')).toHaveValue('user');
   });
 
-  it('behält ab 640 px die Chips (Gruppe, aria-pressed)', async () => {
+  it('zeigt die Bereiche in zwei Gruppen (optgroup), „Mein Konto" vor „Betrieb"', async () => {
+    stubNarrow();
     setFetchReady(STATE);
     window.history.pushState({}, '', '/settings');
     renderWithI18n(<App />);
 
-    const group = await screen.findByRole('group', { name: 'Bereich der Einstellungen' });
-    expect(within(group).getAllByRole('button')[0]).toHaveAttribute('aria-pressed');
+    const select = await screen.findByLabelText('Bereich der Einstellungen');
+    const groups = Array.from(select.querySelectorAll('optgroup'));
+    expect(groups.map((g) => g.label)).toEqual(['Mein Konto', 'Betrieb']);
+    expect(
+      Array.from(groups[0].querySelectorAll('option')).map((o) => o.value),
+    ).toEqual(['credentials', 'security', 'devices']);
+    expect(
+      Array.from(groups[1].querySelectorAll('option')).map((o) => o.value),
+    ).toEqual(['company', 'prices', 'backup', 'user', 'features']);
+  });
+
+  it('zeigt ab 768 px die Navigation links: zwei Gruppen, offener Bereich markiert', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings?tab=prices');
+    renderWithI18n(<App />);
+
+    const nav = await screen.findByRole('navigation', { name: 'Bereich der Einstellungen' });
+    const account = within(nav).getByRole('group', { name: 'Mein Konto' });
+    const operation = within(nav).getByRole('group', { name: 'Betrieb' });
+    expect(within(account).getAllByRole('button').map((b) => b.textContent?.replace(/\d+$/, ''))).toEqual([
+      'Zugangsdaten',
+      'Sicherheit',
+      'Geräte',
+    ]);
+    expect(within(operation).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'Firmendaten',
+      'Preise',
+      'Sicherung',
+      'Nutzer',
+      'Funktionen',
+    ]);
+    expect(within(operation).getByRole('button', { name: 'Preise' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(account).getByRole('button', { name: 'Sicherheit' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    // Keine Auswahlliste daneben.
+    expect(screen.queryByLabelText('Bereich der Einstellungen', { selector: 'select' })).toBeNull();
+  });
+
+  it('wechselt über die Navigation den Bereich und schreibt ?tab= in die URL', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    const nav = await screen.findByRole('navigation', { name: 'Bereich der Einstellungen' });
+    fireEvent.click(within(nav).getByRole('button', { name: 'Nutzer' }));
+    await waitFor(() => expect(window.location.search).toContain('tab=user'));
+    expect(await screen.findByRole('heading', { name: 'Nutzer' })).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'Nutzer' })).toHaveAttribute('aria-current', 'page');
+
+    // Der erste Bereich ist die Vorgabe und braucht keinen Parameter.
+    fireEvent.click(within(nav).getByRole('button', { name: 'Zugangsdaten' }));
+    await waitFor(() => expect(window.location.search).not.toContain('tab='));
+  });
+
+  it('nennt im Untertitel auch Firmendaten, Preise und Sicherung', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    const intro = await screen.findByText(/Unter „Mein Konto"/);
+    for (const word of ['Firmendaten', 'Preise', 'Sicherung', 'Nutzer', 'Geräte']) {
+      expect(intro.textContent).toContain(word);
+    }
+  });
+
+  it('verbirgt in einer Portal-Sitzung die Kontobereiche Zugangsdaten und Geräte', async () => {
+    setFetchReady({ ...STATE, viaPortal: true, accessRole: 'admin' });
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    const nav = await screen.findByRole('navigation', { name: 'Bereich der Einstellungen' });
+    const account = within(nav).getByRole('group', { name: 'Mein Konto' });
+    expect(within(account).getAllByRole('button').map((b) => b.textContent)).toEqual(['Sicherheit']);
+    expect(within(nav).queryByRole('button', { name: 'Zugangsdaten' })).toBeNull();
+  });
+
+  it('zeigt ab 768 px die Navigation statt der Auswahlliste', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    await screen.findByRole('navigation', { name: 'Bereich der Einstellungen' });
     expect(screen.queryByRole('combobox', { name: 'Bereich der Einstellungen' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Bereich der Einstellungen' })).toBeNull();
+  });
+});
+
+describe('Passkey-Zeile in den Anmeldemethoden', () => {
+  afterEach(() => {
+    // @ts-expect-error Testaufbau: WebAuthn wird nur für diese Fälle vorgetäuscht.
+    delete window.PublicKeyCredential;
+  });
+
+  it('bietet ohne Passkey einen Knopf „Passkey hinzufügen", der den Nachweis-Dialog startet', async () => {
+    // @ts-expect-error Testaufbau
+    window.PublicKeyCredential = function PublicKeyCredential() {};
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    // Mehrere Zeilen sind „Nicht eingerichtet": gesucht wird die mit dem Titel „Passkey".
+    const passkeyRow = (await screen.findAllByRole('listitem')).find(
+      (li) => li.textContent?.includes('Passkey') && li.textContent.includes('Nicht eingerichtet'),
+    );
+    expect(passkeyRow).toBeDefined();
+
+    fireEvent.click(within(passkeyRow!).getByRole('button', { name: 'Passkey hinzufügen' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Passkey hinzufügen' });
+    expect(within(dialog).getByLabelText('Aktuelles Passwort')).toBeInTheDocument();
+  });
+
+  it('führt mit eingerichteten Passkeys zur Geräteliste, ohne den Dialog zu öffnen', async () => {
+    // @ts-expect-error Testaufbau
+    window.PublicKeyCredential = function PublicKeyCredential() {};
+    setFetchReady({ ...STATE, passkeyCount: 2 });
+    window.history.pushState({}, '', '/settings');
+    renderWithI18n(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'In der Geräteliste verwalten' }));
+    await waitFor(() => expect(window.location.search).toContain('tab=devices'));
+    expect(screen.queryByRole('dialog', { name: 'Passkey hinzufügen' })).toBeNull();
+  });
+});
+
+describe('Sicherheitsprotokoll — Anzeige der Adresse', () => {
+  it('zeigt IPv4-gemappte Altdaten als IPv4', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings?tab=security');
+    renderWithI18n(<App />);
+
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('127.0.0.1')).toBeInTheDocument();
+    expect(within(table).queryByText(/::ffff:/)).toBeNull();
+  });
+
+  it('lädt das Protokoll beim Öffnen des Bereichs ohne Zutun', async () => {
+    setFetchReady(STATE);
+    window.history.pushState({}, '', '/settings?tab=security');
+    renderWithI18n(<App />);
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    const fetched = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+      ([u]) => String(u).includes('/api/audit/security'),
+    );
+    expect(fetched).toHaveLength(1);
   });
 });

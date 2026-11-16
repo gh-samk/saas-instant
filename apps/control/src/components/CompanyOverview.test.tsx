@@ -25,7 +25,7 @@ vi.mock('../lib/api', async (importOriginal) => ({
 const NEW_COMPANY = {
   id: 'c1',
   name: 'Neue Organisation',
-  status: 'inquiry',
+  status: 'pilot_approved',
   priceTier: null,
   paymentInterval: null,
   pilotDecisionDate: null,
@@ -78,6 +78,15 @@ describe('setupSteps: woran „erledigt" erkannt wird', () => {
       ['instance', true],
       ['invoice', false],
       ['deputy', true],
+    ]);
+  });
+
+  it('lässt Instanz und Rechnung bei Anfrage und Demo aus', () => {
+    for (const status of ['inquiry', 'demo'] as const) {
+      expect(setupSteps({ ...base, status }, false, false).map((s) => s.id)).toEqual(['contract', 'deputy']);
+    }
+    expect(setupSteps({ ...base, status: 'pilot_approved' }, false, false).map((s) => s.id)).toEqual([
+      'contract', 'instance', 'invoice', 'deputy',
     ]);
   });
 
@@ -152,6 +161,13 @@ describe('CompanyOverview: geführter Überblick', () => {
     fetchInstance.mockRejectedValue(new Error('x'));
     fetchInvoices.mockRejectedValue(new Error('x'));
     show();
+    await screen.findByRole('button', { name: 'Vertrag festlegen' });
+    expect(screen.queryByRole('button', { name: 'Instanz anlegen' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Erste Rechnung anlegen' })).toBeNull();
+  });
+
+  it('zeigt bei einer Anfrage keinen Knopf „Instanz anlegen"', async () => {
+    show({ ...NEW_COMPANY, status: 'inquiry' } as Company);
     await screen.findByRole('button', { name: 'Vertrag festlegen' });
     expect(screen.queryByRole('button', { name: 'Instanz anlegen' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Erste Rechnung anlegen' })).toBeNull();

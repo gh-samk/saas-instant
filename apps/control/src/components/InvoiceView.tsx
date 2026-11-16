@@ -336,7 +336,7 @@ export function InvoiceView({
                   wie die übrigen Knöpfe, und wer danach sucht, findet das Wort
                   trotzdem. */}
               <span>{t('components.invoiceView.button3')}</span>
-              <span className="text-xs font-normal text-leise">
+              <span className="text-sm font-normal text-leise">
                 ({t('components.invoiceView.reminderSubtitle')})
               </span>
             </Button>
@@ -516,7 +516,7 @@ export function InvoiceView({
                   {formatAmount(p.grossAmount)}
                 </span>
               </div>
-              <p className="text-xs text-leise ziffern-tabellarisch">
+              <p className="text-sm text-leise ziffern-tabellarisch">
                 {formatQuantity(p.quantity)} × {formatAmount(p.unitPriceNet)}
                 {' · '}
                 {t('components.invoiceView.columns4')} {formatPercent(p.taxRate)}

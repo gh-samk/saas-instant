@@ -351,7 +351,7 @@ export function CompaniesPage() {
                         className={`h-[7px] w-[7px] shrink-0 rounded-full ${INSTANCE_STATUS[o.instanceStatus].surface} ${INSTANCE_STATUS[o.instanceStatus].border} border`}
                         aria-hidden="true"
                       />
-                      <span className={tableText.compact.secondary}>
+                      <span className={tableText.compact.data}>
                         {INSTANCE_STATUS[o.instanceStatus].label}
                       </span>
                     </span>
@@ -376,7 +376,7 @@ export function CompaniesPage() {
                 </td>
 
                 <td
-                  className={`${tableRow.compact} whitespace-nowrap ${tableText.compact.secondary}`}
+                  className={`${tableRow.compact} whitespace-nowrap ${tableText.compact.data}`}
                 >
                   {o.reviewDueDate
                     ? formatDate(o.reviewDueDate)

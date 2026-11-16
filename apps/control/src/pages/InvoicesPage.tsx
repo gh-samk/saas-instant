@@ -336,7 +336,7 @@ export function InvoicesPage() {
                     className={`${tableRow.compact} whitespace-nowrap ${
                       r.paymentState === 'overdue'
                         ? 'font-semibold text-gefahr'
-                        : tableText.compact.secondary
+                        : tableText.compact.data
                     }`}
                   >
                     {r.paymentState === 'draft' ? '—' : formatDate(r.dueDate)}

@@ -200,20 +200,20 @@ export function InvoiceFinalizeDialog({
               {t('components.invoiceFinalizeDialog.text4')}</p>
             <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="min-w-0">
-                <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text5')}</dt>
+                <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text5')}</dt>
                 <dd className="ziffern-tabellarisch text-sm font-medium text-text">
                   {formatDate(invoice.servicePeriodFrom)} –{' '}
                   {formatDate(invoice.servicePeriodUntil)}
                 </dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text6')}</dt>
+                <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text6')}</dt>
                 <dd className="break-words text-sm font-medium text-text">
                   {invoice.lines.map((p) => p.label).join(', ')}
                 </dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text7')}</dt>
+                <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text7')}</dt>
                 <dd className="whitespace-pre-line break-words text-sm font-medium text-text">
                   {recipient.name}
                   {recipient.address !== '' && `\n${recipient.address}`}
@@ -224,19 +224,19 @@ export function InvoiceFinalizeDialog({
 
           <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text8')}</dt>
+              <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text8')}</dt>
               <dd className="ziffern-tabellarisch text-sm text-text">
                 {formatDate(invoice.invoiceDate)}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text9')}</dt>
+              <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text9')}</dt>
               <dd className="ziffern-tabellarisch text-sm text-text">
                 {formatDate(invoice.dueDate)}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text10')}</dt>
+              <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text10')}</dt>
               <dd className="ziffern-tabellarisch text-sm text-text">
                 {formatAmount(invoice.sumNet)}
               </dd>
@@ -246,13 +246,13 @@ export function InvoiceFinalizeDialog({
                 unumkehrbaren Schritt genau die Zahl ist, bei der ein falscher
                 Steuersatz auffällt. */}
             <div>
-              <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text11')}</dt>
+              <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text11')}</dt>
               <dd className="ziffern-tabellarisch text-sm text-text">
                 {formatAmount(invoice.sumTax)}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-leise">{t('components.invoiceFinalizeDialog.text12')}</dt>
+              <dt className="text-sm text-leise">{t('components.invoiceFinalizeDialog.text12')}</dt>
               <dd className="ziffern-tabellarisch text-sm font-semibold text-text">
                 {formatAmount(invoice.sumGross)}
               </dd>
@@ -307,7 +307,9 @@ export function InvoiceFinalizeDialog({
                       {t('components.invoiceFinalizeDialog.text17')}</p>
                   ) : (
                     <p className="mt-1 text-sm text-leise">
-                      {t('components.invoiceFinalizeDialog.text18')}</p>
+                      {t('components.invoiceFinalizeDialog.text18')}{' '}
+                      <Link to="/settings?tab=company" className={TEXT_BUTTON}>
+                        {t('components.invoiceFinalizeDialog.issuerLink')}</Link>.</p>
                   )}
                 </div>
               ))}

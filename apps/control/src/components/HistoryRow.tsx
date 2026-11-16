@@ -122,7 +122,7 @@ export function HistoryRow({
               <button
                 type="button"
                 onClick={() => setEdit(true)}
-                className={`mt-1 text-xs ${TEXT_BUTTON}`}
+                className={`mt-1 text-sm ${TEXT_BUTTON}`}
               >
                 {t('components.historyRow.button3')}</button>
             )}
@@ -130,7 +130,7 @@ export function HistoryRow({
         )}
       </div>
 
-      <span className="ziffern-tabellarisch shrink-0 text-xs text-leise">
+      <span className="ziffern-tabellarisch shrink-0 text-sm text-leise">
         {formatDate(entry.date)}
       </span>
     </li>

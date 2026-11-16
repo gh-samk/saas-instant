@@ -23,8 +23,9 @@ import { t, useT } from '../i18n';
  * Einwilligungen zu laden, nur um ihre Länge über der Sperrliste anzuzeigen,
  * wäre ein Datensatz je Zahl.
  *
- * `null` als Zahl heisst „noch nicht geladen" und zeigt nichts. Eine `0` an
- * dieser Stelle wäre eine Aussage, und zwar eine falsche.
+ * `null` als Zahl heisst „noch nicht geladen" und zeigt nichts. Eine `0`
+ * zeigt ebenfalls nichts: Drei „0" nebeneinander sind Lärm, und die leere
+ * Seite dahinter sagt dasselbe deutlicher.
  */
 
 export interface BroadcastNumbers {
@@ -68,7 +69,7 @@ export function BroadcastTabs({ numbers }: { numbers: BroadcastNumbers }) {
             }`}
           >
             {tabs.label}
-            {number !== null && (
+            {number !== null && number > 0 && (
               <span className="ml-1.5 ziffern-tabellarisch font-normal text-still">
                 {number}
               </span>

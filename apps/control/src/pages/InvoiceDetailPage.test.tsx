@@ -498,7 +498,7 @@ describe('Festschreiben — unumkehrbar, deshalb Wort UND zweiter Faktor', () =>
       await screen.findByText('Umsatzsteuer-Identifikationsnummer'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/fehlen am Aussteller, nicht an dieser Rechnung/),
+      screen.getByText(/fehlen an deinen Firmendaten, nicht an dieser Rechnung/),
     ).toBeInTheDocument();
     // Der Dialog bleibt offen — die Liste wäre sonst weg.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -839,18 +839,18 @@ describe('Zahlung — hinter dem zweiten Faktor', () => {
     });
   });
 
-  it('schickt ganze Cent, nie eine Gleitkommazahl', async () => {
+  it('schickt bei „Voll bezahlt“ (Vorauswahl) die ganze Rechnungssumme in Cent', async () => {
     const called = setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
     fireEvent.click(await screen.findByRole('button', { name: /Zahlung erfassen/ }));
-    // Vorbelegt ist der volle Betrag als Feldwert mit Punkt.
+    const dialog = await screen.findByRole('dialog');
     expect(
-      await screen.findByLabelText('Gezahlter Betrag (EUR, gesamt)'),
-    ).toHaveValue(583.1);
-    fireEvent.click(
-      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Zahlung erfassen' }),
-    );
+      within(dialog).getByRole('radio', { name: /Voll bezahlt/ }),
+    ).toBeChecked();
+    // Das Betragsfeld gibt es erst bei „Teilzahlung“.
+    expect(within(dialog).queryByLabelText('Betrag dieser Zahlung (EUR)')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zahlung erfassen' }));
 
     await waitFor(() => {
       const first = called.mock.calls.find(([path]) =>
@@ -858,6 +858,30 @@ describe('Zahlung — hinter dem zweiten Faktor', () => {
       );
       expect(JSON.parse(String(first?.[1]?.body))).toMatchObject({
         paidAmountCent: 58310,
+      });
+    });
+  });
+
+  it('rechnet eine Teilzahlung auf den kumulierten Gesamtstand um, ohne Gleitkomma', async () => {
+    const called = setFetchReady({ invoice: FINALIZED });
+    open(FINALIZED_ID);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Zahlung erfassen/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Teilzahlung/ }));
+    expect(within(dialog).getByText(/Bisher bezahlt:/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Betrag dieser Zahlung (EUR)'), {
+      target: { value: '19.99' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zahlung erfassen' }));
+
+    await waitFor(() => {
+      const first = called.mock.calls.find(([path]) =>
+        String(path).includes('/payment'),
+      );
+      // Nichts bisher bezahlt: Gesamtstand = diese Zahlung.
+      expect(JSON.parse(String(first?.[1]?.body))).toMatchObject({
+        paidAmountCent: 1999,
       });
     });
   });
@@ -1278,10 +1302,13 @@ describe('[K3] Fehlende Pflichtangaben — wo sie gepflegt werden', () => {
     expect(screen.queryByText(/Server-Konfiguration/)).toBeNull();
   });
 
-  it('schickt bei einer Ausstellerangabe weiterhin zur Server-Konfiguration', async () => {
+  it('verlinkt bei einer Ausstellerangabe direkt auf die Firmendaten', async () => {
     await openWith(['Umsatzsteuer-Identifikationsnummer']);
 
-    expect(screen.getByText(/Server-Konfiguration/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Einstellungen → Firmendaten' }),
+    ).toHaveAttribute('href', '/settings?tab=company');
+    expect(screen.queryByText(/Server-Konfiguration/)).toBeNull();
     expect(screen.queryByRole('link', { name: /öffnen/ })).toBeNull();
   });
 
@@ -1293,7 +1320,9 @@ describe('[K3] Fehlende Pflichtangaben — wo sie gepflegt werden', () => {
     ]);
 
     expect(screen.getByText(/stehen an der Organisation/)).toBeInTheDocument();
-    expect(screen.getByText(/Server-Konfiguration/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Einstellungen → Firmendaten' }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/Das fehlt an dieser Rechnung/),
     ).toBeInTheDocument();

@@ -185,7 +185,7 @@ export function Dialog({
             <button
               onClick={onClose}
               aria-label={uiT('dialog.close')}
-              className="absolute right-4 top-4 z-10 rounded-lg border border-rahmen bg-flaeche p-1.5 text-leise hover:bg-flaeche-3"
+              className="absolute right-4 top-4 z-10 inline-flex size-11 items-center justify-center rounded-lg border border-rahmen bg-flaeche text-leise hover:bg-flaeche-3 sm:size-auto sm:p-1.5"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
@@ -195,7 +195,7 @@ export function Dialog({
                 {head ?? (
                   <>
                     {eyebrow && (
-                      <p className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-leise">
+                      <p className="mb-0.5 text-[13px] font-semibold uppercase tracking-wide text-leise">
                         {eyebrow}
                       </p>
                     )}
@@ -215,7 +215,7 @@ export function Dialog({
               <button
                 onClick={onClose}
                 aria-label={uiT('dialog.close')}
-                className="shrink-0 rounded-md p-1 text-leise hover:bg-flaeche-3"
+                className="-mr-2 -mt-2 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-leise hover:bg-flaeche-3 sm:mr-0 sm:mt-0 sm:size-auto sm:p-1"
               >
                 <X className="h-5 w-5" aria-hidden="true" />
               </button>

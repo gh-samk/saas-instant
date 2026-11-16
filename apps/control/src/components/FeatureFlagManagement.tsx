@@ -92,7 +92,7 @@ export function FeatureFlagManagement() {
                   <p id={descriptionId} className="mt-1 text-sm text-leise">
                     {e.description}
                   </p>
-                  <p className="mt-2 text-xs text-leise">
+                  <p className="mt-2 text-sm text-leise">
                     {e.changedAt
                       ? t('components.featureFlagManagement.text4', { value: dayFrom(e.changedAt) })
                       : t('components.featureFlagManagement.text5', { value: e.defaultValue ? t('components.featureFlagManagement.defaultOn') : t('components.featureFlagManagement.defaultOff') })}

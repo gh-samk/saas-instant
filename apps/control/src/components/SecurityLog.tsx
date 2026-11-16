@@ -7,6 +7,8 @@ import {
   type SecurityEvent,
 } from '../lib/api';
 import { useT } from '../i18n';
+import { displayIp } from '../lib/ip-address';
+import { useMediaQuery } from '../lib/use-media-query';
 
 /**
  * ===========================================================================
@@ -60,13 +62,19 @@ function ActorText({ actor }: { actor: string }) {
   );
 }
 
+/** Ab `sm` steht das Protokoll als Tabelle, darunter als Kartenzeilen. */
+const TABLE_QUERY = '(min-width: 640px)';
+
 export function SecurityLog({ className }: { className?: string }) {
   const t = useT();
+  const asTable = useMediaQuery(TABLE_QUERY);
   const [rows, setRows] = useState<SecurityEvent[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setLoadError(null);
+    setRefreshing(true);
     try {
       const response = await fetchSecurityLog();
       // Die Form wird geprüft, nicht geglaubt: Ein `.map` auf etwas, das
@@ -80,9 +88,13 @@ export function SecurityLog({ className }: { className?: string }) {
     } catch (f) {
       setLoadError(errorText(f, t('components.securityLog.text2')));
       setRows(null);
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
+  // Das Protokoll wird beim Öffnen des Reiters geholt; „Neu abfragen" ist nur
+  // für den Fall gedacht, dass man auf neue Ereignisse wartet.
   useEffect(() => {
     void load();
   }, [load]);
@@ -92,7 +104,7 @@ export function SecurityLog({ className }: { className?: string }) {
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[17px] font-semibold text-text">
           {t('components.securityLog.heading')}</h2>
-        <Button variant="secondary" onClick={() => void load()}>
+        <Button variant="secondary" loading={refreshing} onClick={() => void load()}>
           {t('components.securityLog.button')}</Button>
       </div>
       <p className="mb-4 text-sm text-leise">
@@ -118,6 +130,39 @@ export function SecurityLog({ className }: { className?: string }) {
           title={t('components.securityLog.title')}
           notice={t('components.securityLog.notice')}
         />
+      ) : !asTable ? (
+        // Schmal: eine Karte je Ereignis, Texte brechen um statt seitwärts zu
+        // scrollen. Dieselben vier Angaben wie in der Tabelle.
+        <ul
+          aria-label={t('components.securityLog.label')}
+          className="divide-y divide-rahmen overflow-hidden rounded-xl border border-rahmen"
+        >
+          {rows.map((row) => (
+            <li key={row.id} className="flex flex-col gap-1.5 px-3 py-3 text-sm">
+              <span className="ziffern-tabellarisch text-leise">
+                {asTimestamp(row.timestamp)}
+              </span>
+              {row.suspicious ? (
+                <span className="flex items-start gap-1.5 break-words font-medium text-bedenken-text">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  {row.text}
+                </span>
+              ) : (
+                <span className="break-words text-text">{row.text}</span>
+              )}
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-leise">
+                <dt>{t('components.securityLog.columns3')}</dt>
+                <dd className="min-w-0 break-words" title={row.actor}>
+                  <ActorText actor={row.actor} />
+                </dd>
+                <dt>{t('components.securityLog.columns4')}</dt>
+                <dd className="ziffern-tabellarisch min-w-0 break-all">
+                  {displayIp(row.ip) ?? '—'}
+                </dd>
+              </dl>
+            </li>
+          ))}
+        </ul>
       ) : (
         <div className="overflow-hidden rounded-xl border border-rahmen">
           <Table
@@ -129,7 +174,7 @@ export function SecurityLog({ className }: { className?: string }) {
           >
             {rows.map((row) => (
               <tr key={row.id}>
-                <td className="ziffern-tabellarisch px-3 py-2.5 text-sm text-leise">
+                <td className="ziffern-tabellarisch px-3 py-2.5 text-sm text-text">
                   {asTimestamp(row.timestamp)}
                 </td>
                 <td className="px-3 py-2.5 text-sm">
@@ -153,7 +198,7 @@ export function SecurityLog({ className }: { className?: string }) {
                   <ActorText actor={row.actor} />
                 </td>
                 <td className="ziffern-tabellarisch break-all px-3 py-2.5 text-sm text-leise">
-                  {row.ip ?? '—'}
+                  {displayIp(row.ip) ?? '—'}
                 </td>
               </tr>
             ))}

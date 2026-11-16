@@ -175,7 +175,7 @@ export function IntakeCard({ companyId, totpPossible }: Props) {
               <p className="mb-2 text-leise">
                 {t('components.intakeCard.text13')}</p>
               <div className="flex items-start gap-2">
-                <code className="min-w-0 flex-1 break-all text-xs">{link}</code>
+                <code className="min-w-0 flex-1 break-all text-sm">{link}</code>
                 <Button variant="ghost" onClick={() => void copy(link)}>
                   <Copy className="size-4" aria-hidden="true" />
                   {t('components.intakeCard.button2')}</Button>

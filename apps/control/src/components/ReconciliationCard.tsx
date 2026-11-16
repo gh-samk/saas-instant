@@ -133,7 +133,7 @@ export function ReconciliationCard({
                   <p className="min-w-0 break-words text-sm font-medium text-text">
                     {instanceHost(a.subdomain)}
                   </p>
-                  <span className="shrink-0 whitespace-nowrap text-xs text-leise">
+                  <span className="shrink-0 whitespace-nowrap text-sm text-leise">
                     {t('components.reconciliationCard.label2')}{' '}
                     <span className="ziffern-tabellarisch">
                       {formatDate(a.detectedAt)}
@@ -150,7 +150,7 @@ export function ReconciliationCard({
                     href={a.coolifyUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-primaer underline underline-offset-2 hover:text-primaer-hover"
+                    className="mt-1 inline-flex items-center gap-1 text-sm text-primaer underline underline-offset-2 hover:text-primaer-hover"
                   >
                     {t('components.reconciliationCard.text8')}<ExternalLink className="h-3 w-3" aria-hidden="true" />
                   </a>

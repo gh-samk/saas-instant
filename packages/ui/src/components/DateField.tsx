@@ -12,6 +12,8 @@ interface Props {
   required?: boolean;
   error?: string;
   helperText?: string;
+  /** Fokus beim Einblenden hierher (z. B. erste Eingabe eines Dialogs). */
+  autoFocus?: boolean;
 }
 
 /**
@@ -21,7 +23,7 @@ interface Props {
  */
 export const DateField = forwardRef<HTMLInputElement, Props>(
   function DateField(
-    { label, value, onChange, name, id, min, max, required, error, helperText },
+    { label, value, onChange, name, id, min, max, required, error, helperText, autoFocus },
     ref,
   ) {
     const fieldId = id ?? name ?? 'date';
@@ -40,6 +42,7 @@ export const DateField = forwardRef<HTMLInputElement, Props>(
           min={min}
           max={max}
           required={required}
+          autoFocus={autoFocus}
           aria-invalid={error ? true : undefined}
           aria-describedby={errorId}
           onChange={(e) => onChange?.(e.target.value)}

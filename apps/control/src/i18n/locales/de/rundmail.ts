@@ -4,9 +4,6 @@ export default {
   title: 'Rundmail',
   createTemplate: 'Vorlage anlegen',
   retry: 'Erneut versuchen',
-  consentNotice:
-    'Versand nur an bestätigte Einwilligungen — geprüft unmittelbar vor jeder Mail.',
-  consentsLink: 'Einwilligungen',
   loadFailed: 'Die Vorlagen konnten nicht geladen werden.',
   unexpectedShape: 'Die Vorlagenliste kam in einer unerwarteten Form.',
   emptyTitle: 'Noch keine Vorlagen',

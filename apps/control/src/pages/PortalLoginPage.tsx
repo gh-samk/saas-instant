@@ -52,7 +52,7 @@ export function PortalLoginPage({ failed, returnPath }: Props) {
           {failed ? t('sso.retry') : t('sso.loginButton')}
         </Button>
       </a>
-      <p className="mt-4 text-center text-xs">
+      <p className="mt-4 text-center text-sm">
         <Link to="/login?notfall=1" className={TEXT_BUTTON}>
           {t('sso.emergencyLink')}
         </Link>

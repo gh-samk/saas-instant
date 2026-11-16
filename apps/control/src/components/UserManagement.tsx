@@ -246,7 +246,7 @@ export function UserManagement() {
                     <td className="px-3 py-2.5 text-sm font-medium text-text">
                       {row.name}
                       {row.self && (
-                        <span className="ml-2 text-xs font-normal text-still">
+                        <span className="ml-2 text-sm font-normal text-still">
                           {t('components.userManagement.label3')}</span>
                       )}
                     </td>
@@ -259,7 +259,7 @@ export function UserManagement() {
                       </StatusPill>
                       {row.state === 'active' &&
                         row.lastLoginAt !== null && (
-                          <span className="ziffern-tabellarisch mt-1 block text-xs text-still">
+                          <span className="ziffern-tabellarisch mt-1 block text-sm text-still">
                             {t('components.userManagement.label4')}{formatDate(row.lastLoginAt)}
                           </span>
                         )}
@@ -444,7 +444,7 @@ export function UserManagement() {
           {t('components.userManagement.text14')}{' '}
           <span className="font-medium text-text">{t('components.userManagement.label9')}</span>{t('components.userManagement.text15')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <code className="min-w-0 flex-1 break-all rounded-lg border border-rahmen bg-flaeche-3 px-3 py-2 text-xs">
+          <code className="min-w-0 flex-1 break-all rounded-lg border border-rahmen bg-flaeche-3 px-3 py-2 text-sm">
             {link?.link}
           </code>
           <Button

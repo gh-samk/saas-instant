@@ -172,11 +172,11 @@ export function BroadcastSendRunCard({
             <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               {NUMBERS.map((number) => (
                 <div key={number.key} className="min-w-0">
-                  <dt className="text-xs text-leise">{number.label}</dt>
+                  <dt className="text-sm text-leise">{number.label}</dt>
                   <dd className="ziffern-tabellarisch text-sm font-medium text-text">
                     {result[number.key]}
                   </dd>
-                  <dd className="text-xs text-leise">{number.declaration}</dd>
+                  <dd className="text-sm text-leise">{number.declaration}</dd>
                 </div>
               ))}
             </dl>

@@ -13,7 +13,6 @@ import {
 import {
   Badge,
   Dialog,
-  FilterChips,
   Select,
   InputField,
   Card,
@@ -114,26 +113,54 @@ function inGroupsOfFour(secret: string): string {
 }
 
 /**
- * Die fünf Reiter der Einstellungen.
+ * Die Bereiche der Einstellungen, in zwei Gruppen.
  *
- * DIE REIHENFOLGE IST DIE DES ENTWURFS und folgt der Häufigkeit: Zugangsdaten
- * ändert man am ehesten, Geräte sieht man am seltensten an. „Sicherheit"
- * steht dazwischen, weil dort das Protokoll liegt — der Reiter, den man im
- * Verdachtsfall sucht. „Funktionen" (Schalter für alle Instanzen) steht
- * hinten: Er betrifft nicht das eigene Konto, sondern den Betrieb.
+ * „MEIN KONTO" ist das, was nur die angemeldete Person betrifft (Zugangsdaten,
+ * Sicherheitsprotokoll, Geräte); „BETRIEB" gilt für die ganze Verwaltung
+ * (Firmendaten, Preise, Sicherung, Nutzer, Funktionen). Vorher standen acht
+ * Reiter in einer Reihe, und wer Preise suchte, suchte unter „Konto".
+ *
+ * Der Wert ist der `?tab=`-Parameter; er bleibt unverändert, damit bestehende
+ * Verweise (Aufgaben, Mails, Lesezeichen) weiter treffen.
  */
-const TABS = [
-  { value: 'credentials', label: t('einstellungen.tabCredentials') },
-  { value: 'security', label: t('einstellungen.tabSecurity') },
-  { value: 'user', label: t('einstellungen.tabUsers') },
-  { value: 'devices', label: t('einstellungen.tabDevices') },
-  { value: 'features', label: t('einstellungen.tabFeatures') },
-  { value: 'company', label: t('einstellungen.tabCompany') },
-  { value: 'prices', label: t('einstellungen.tabPrices') },
-  { value: 'backup', label: t('backup.settingsTitle') },
-] as const;
+type TabsValue =
+  | 'credentials'
+  | 'security'
+  | 'devices'
+  | 'company'
+  | 'prices'
+  | 'backup'
+  | 'user'
+  | 'features';
 
-type TabsValue = (typeof TABS)[number]['value'];
+interface TabGroup {
+  value: string;
+  label: string;
+  tabs: readonly { value: TabsValue; label: string }[];
+}
+
+const TAB_GROUPS: readonly TabGroup[] = [
+  {
+    value: 'account',
+    label: t('einstellungen.groupAccount'),
+    tabs: [
+      { value: 'credentials', label: t('einstellungen.tabCredentials') },
+      { value: 'security', label: t('einstellungen.tabSecurity') },
+      { value: 'devices', label: t('einstellungen.tabDevices') },
+    ],
+  },
+  {
+    value: 'operation',
+    label: t('einstellungen.groupOperation'),
+    tabs: [
+      { value: 'company', label: t('einstellungen.tabCompany') },
+      { value: 'prices', label: t('einstellungen.tabPrices') },
+      { value: 'backup', label: t('backup.settingsTitle') },
+      { value: 'user', label: t('einstellungen.tabUsers') },
+      { value: 'features', label: t('einstellungen.tabFeatures') },
+    ],
+  },
+];
 
 export function SettingsPage() {
   const t = useT();
@@ -145,9 +172,13 @@ export function SettingsPage() {
   // Portal-Sitzung: Passwort, zweiter Faktor, Passkeys und Merk-Geräte liegen
   // beim Portal; die Reiter dafür entfallen.
   const viaPortal = state?.viaPortal === true;
-  const visibleTabs = viaPortal
-    ? TABS.filter((r) => r.value !== 'credentials' && r.value !== 'devices')
-    : TABS;
+  const visibleGroups = TAB_GROUPS.map((g) => ({
+    ...g,
+    tabs: g.tabs.filter(
+      (r) => !(viaPortal && (r.value === 'credentials' || r.value === 'devices')),
+    ),
+  })).filter((g) => g.tabs.length > 0);
+  const visibleTabs = visibleGroups.flatMap((g) => g.tabs);
 
   /**
    * DER OFFENE REITER STEHT IN DER URL, nicht nur im Zustand.
@@ -172,8 +203,8 @@ export function SettingsPage() {
     );
   };
 
-  // Ab `sm` die Chipleiste, darunter eine Auswahlliste (siehe unten).
-  const tabsInline = useMediaQuery('(min-width: 640px)');
+  // Ab `md` die Navigation links, darunter eine Auswahlliste (siehe unten).
+  const tabsInline = useMediaQuery('(min-width: 768px)');
   const [devices, setDevices] = useState<DeviceEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [revocationFor, setRevocationFor] = useState<DeviceEntry | null>(null);
@@ -337,6 +368,15 @@ export function SettingsPage() {
     } finally {
       setRevocationLoading(false);
     }
+  }
+
+  /** Öffnet den Nachweis-Dialog, mit dem die Passkey-Registrierung beginnt. */
+  function startPasskeyAdd(): void {
+    setEvidenceKind('password');
+    setEvidencePassword('');
+    setEvidenceCode('');
+    setEvidenceError(undefined);
+    setEvidenceOpen(true);
   }
 
   /**
@@ -678,30 +718,63 @@ export function SettingsPage() {
         id="settings-title"
         className="text-2xl font-semibold tracking-tight text-text mb-1"
       >{t('einstellungen.title')}</h1>
-      <p className="mb-4 text-sm text-leise">{t('einstellungen.intro')}</p>
+      <p className="mb-5 text-sm text-leise">{t('einstellungen.intro')}</p>
       {viaPortal && (
         <p role="note" className="mb-4 text-sm text-leise">{t('sso.portalFactorsHint')}</p>
       )}
 
-      {/* UNTER `sm` EINE AUSWAHLLISTE statt acht Chips: Acht Knöpfe brechen bei
-          375 px in drei, vier Zeilen um (oder verschwinden hinter einem
-          Seitwärtswischen); die Liste braucht eine Zeile, zeigt alle Bereiche
-          auf einmal, hat von Haus aus 44 px Trefferfläche und eine
-          Bedienung, die das Telefon schon kennt. Ab `sm` bleiben die Chips. */}
+      {/* AB `md` STEHT DIE NAVIGATION LINKS, in zwei Gruppen mit Überschrift.
+          Darunter eine Auswahlliste mit `<optgroup>`: Acht Knöpfe brechen bei
+          375 px in drei, vier Zeilen um; die Liste braucht eine Zeile, zeigt
+          alle Bereiche auf einmal, hat von Haus aus 44 px Trefferfläche und
+          eine Bedienung, die das Telefon schon kennt. */}
+      <div
+        className={
+          tabsInline ? 'grid grid-cols-[13rem_minmax(0,1fr)] items-start gap-8' : undefined
+        }
+      >
       {tabsInline ? (
-        <FilterChips
-          className="mb-5"
-          label={t('einstellungen.sectionCaption')}
-          active={tabs}
-          onSelect={setTabs}
-          chips={visibleTabs.map((r) => ({
-            value: r.value,
-            label: r.label,
-            ...(r.value === 'devices' && devices !== null
-              ? { count: devices.length }
-              : {}),
-          }))}
-        />
+        <nav
+          aria-label={t('einstellungen.sectionCaption')}
+          className="sticky top-20 flex flex-col gap-5"
+        >
+          {visibleGroups.map((g) => (
+            <div key={g.value} role="group" aria-labelledby={`settings-group-${g.value}`}>
+              <p
+                id={`settings-group-${g.value}`}
+                className="mb-1 px-2.5 text-xs font-semibold uppercase tracking-wide text-leise"
+              >
+                {g.label}
+              </p>
+              <ul className="flex flex-col gap-0.5">
+                {g.tabs.map((r) => {
+                  const active = r.value === tabs;
+                  return (
+                    <li key={r.value}>
+                      <button
+                        type="button"
+                        onClick={() => setTabs(r.value)}
+                        aria-current={active ? 'page' : undefined}
+                        className={`flex min-h-10 w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors duration-150 ${
+                          active
+                            ? 'bg-primaer-soft font-semibold text-primaer-softtext'
+                            : 'font-medium text-text hover:bg-primaer-softer'
+                        }`}
+                      >
+                        {r.label}
+                        {r.value === 'devices' && devices !== null && (
+                          <span className="ziffern-tabellarisch text-sm text-leise">
+                            {devices.length}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
       ) : (
         <div className="mb-5">
           <label htmlFor="settings-section" className="mb-1 block text-sm font-medium text-text">
@@ -713,16 +786,21 @@ export function SettingsPage() {
             onChange={(e) => setTabs(e.target.value)}
             className="[&_select]:min-h-11"
           >
-            {visibleTabs.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-                {r.value === 'devices' && devices !== null ? ` (${devices.length})` : ''}
-              </option>
+            {visibleGroups.map((g) => (
+              <optgroup key={g.value} label={g.label}>
+                {g.tabs.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                    {r.value === 'devices' && devices !== null ? ` (${devices.length})` : ''}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </Select>
         </div>
       )}
 
+      <div className="min-w-0">
       {/* ============================================== Reiter „Geräte" */}
       {tabs === 'devices' && (
       <div>
@@ -761,12 +839,12 @@ export function SettingsPage() {
                 {g.label}
               </td>
               <td
-                className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.secondary}`}
+                className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.data}`}
               >
                 {formatDate(g.createdAt)}
               </td>
               <td
-                className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.secondary}`}
+                className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.data}`}
               >
                 {g.lastSeenAt ? (
                   formatDate(g.lastSeenAt)
@@ -775,7 +853,7 @@ export function SettingsPage() {
                 )}
               </td>
               <td
-                className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.secondary}`}
+                className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.data}`}
               >
                 {g.validUntil ? (
                   formatDate(g.validUntil)
@@ -809,7 +887,7 @@ export function SettingsPage() {
       )}
 
       {devices && devices.length > 0 && (
-        <p className="mt-2 text-xs text-leise md:hidden">{t('einstellungen.tableScrollHint')}</p>
+        <p className="mt-2 text-sm text-leise md:hidden">{t('einstellungen.tableScrollHint')}</p>
       )}
 
       <div className="mt-3 flex flex-wrap items-start gap-3">
@@ -819,13 +897,7 @@ export function SettingsPage() {
             label={t('einstellungen.addAnotherPasskey')}
             loadingLabel={t('einstellungen.waitingForConfirmation')}
             errorText={passkeyError ?? undefined}
-            onClick={() => {
-              setEvidenceKind('password');
-              setEvidencePassword('');
-              setEvidenceCode('');
-              setEvidenceError(undefined);
-              setEvidenceOpen(true);
-            }}
+            onClick={startPasskeyAdd}
             variant="compact"
           />
         )}
@@ -860,7 +932,7 @@ export function SettingsPage() {
               />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-text">{t('einstellungen.emailCodeTitle')}</p>
-                <p className="text-xs text-leise">
+                <p className="text-sm text-leise">
                   {emailActive ? (
                     <>
                       {t('einstellungen.emailCodeActiveAt', { email: maskEmail(state?.loginCodeEmail ?? '') })}<button
@@ -877,7 +949,7 @@ export function SettingsPage() {
             </div>
             {emailActive ? (
               lastMethod === 'email' ? (
-                <p className="text-xs text-leise">{t('einstellungen.onlyMethodHint')}</p>
+                <p className="text-sm text-leise">{t('einstellungen.onlyMethodHint')}</p>
               ) : (
                 <Button
                   variant="secondary"
@@ -905,7 +977,7 @@ export function SettingsPage() {
               />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-text">{t('einstellungen.authenticatorApp')}</p>
-                <p className="text-xs text-leise">
+                <p className="text-sm text-leise">
                   {totpActive ? (
                     <>
                       {/* [DW1]: Für einen AKTIVEN Faktor fehlte hier jeder Weg
@@ -930,7 +1002,7 @@ export function SettingsPage() {
             </div>
             {totpActive ? (
               lastMethod === 'totp' ? (
-                <p className="text-xs text-leise">{t('einstellungen.onlyMethodHint')}</p>
+                <p className="text-sm text-leise">{t('einstellungen.onlyMethodHint')}</p>
               ) : (
                 <Button
                   variant="secondary"
@@ -958,26 +1030,34 @@ export function SettingsPage() {
               />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-text">{t('einstellungen.passkey')}</p>
-                <p className="text-xs text-leise">
+                <p className="text-sm text-leise">
                   {passkeyCount > 0
                     ? t('einstellungen.passkeysSetUp', { count: passkeyCount })
                     : t('einstellungen.notSetUp')}
                 </p>
               </div>
             </div>
-            {/* Kein eigener Knopf: Welchen Passkey ein „Entfernen" hier
-                träfe, wäre bei mehreren nicht zu sagen. Hinzufügen und
-                Widerruf leben in der Geräteliste, hier steht nur der
-                Sprunglink dorthin. */}
-            <button
-              type="button"
-              className={`shrink-0 text-sm ${TEXT_BUTTON_TOUCH}`}
-              onClick={() =>
-                document
-                  .getElementById('device-list')
-                  ?.scrollIntoView({ behavior: 'smooth' })
-              }
-            >{t('einstellungen.manageInDeviceList')}</button>
+            {/* Ohne Passkey steht hier der Knopf zum Anlegen (derselbe Ablauf
+                wie in der Geräteliste: erst Nachweis, dann Registrierung).
+                Mit Passkeys bleibt es beim Sprunglink: Welchen Passkey ein
+                „Entfernen" hier träfe, wäre nicht zu sagen — Widerruf lebt in
+                der Geräteliste. */}
+            {passkeyCount === 0 && passkeysPossible() ? (
+              <PasskeyButton
+                state={passkeyState}
+                label={t('einstellungen.addPasskey')}
+                loadingLabel={t('einstellungen.waitingForConfirmation')}
+                errorText={passkeyError ?? undefined}
+                onClick={startPasskeyAdd}
+                variant="compact"
+              />
+            ) : (
+              <button
+                type="button"
+                className={`shrink-0 text-sm ${TEXT_BUTTON_TOUCH}`}
+                onClick={() => setTabs('devices')}
+              >{t('einstellungen.manageInDeviceList')}</button>
+            )}
           </li>
         </ul>
       </Card>
@@ -1126,6 +1206,8 @@ export function SettingsPage() {
       {/* =============================================== Reiter „Sicherung" */}
       {tabs === 'backup' && <BackupSettingsCard totpPossible={state?.totpSetUp ?? false} />}
       </fieldset>
+      </div>
+      </div>
 
       {/* --- Dialoge ------------------------------------------------------ */}
       <Dialog

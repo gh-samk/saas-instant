@@ -178,7 +178,7 @@ export function Menu({
   }
 
   const itemClass = (tone: MenuItem['tone']) =>
-    `flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm outline-none hover:bg-flaeche-3 focus-visible:bg-flaeche-3 ${
+    `flex min-h-11 w-full flex-col items-start justify-center gap-0.5 px-3 py-2 text-left sm:min-h-0 sm:justify-start text-sm outline-none hover:bg-flaeche-3 focus-visible:bg-flaeche-3 ${
       tone === 'danger' ? 'text-gefahr' : 'text-text'
     }`;
 
@@ -231,7 +231,7 @@ export function Menu({
                   )}
                 </span>
                 {item.description !== undefined && (
-                  <span className="text-xs font-normal text-leise">
+                  <span className="text-[13px] font-normal text-leise">
                     {item.description}
                   </span>
                 )}

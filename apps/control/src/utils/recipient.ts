@@ -34,11 +34,23 @@ function row(...parts: (string | null | undefined)[]): string {
     .join(' ');
 }
 
-export function recipientPreview(o: Company): RecipientPreview {
-  const ownBillingAddress =
+/**
+ * Hat die Organisation eine EIGENE Rechnungsanschrift? Dieselben drei Felder
+ * entscheiden wie im Backend (Straße, PLZ, Ort); Name, Hausnummer, Land und
+ * E-Mail allein machen noch keine eigene Anschrift.
+ */
+export function hasOwnBillingAddress(
+  o: Pick<Company, 'billingStreet' | 'billingPostalCode' | 'billingCity'>,
+): boolean {
+  return (
     (o.billingStreet ?? '').trim() !== '' ||
     (o.billingPostalCode ?? '').trim() !== '' ||
-    (o.billingCity ?? '').trim() !== '';
+    (o.billingCity ?? '').trim() !== ''
+  );
+}
+
+export function recipientPreview(o: Company): RecipientPreview {
+  const ownBillingAddress = hasOwnBillingAddress(o);
 
   const parts = ownBillingAddress
     ? {

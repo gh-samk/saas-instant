@@ -52,7 +52,7 @@ export const PAGES_TOKENS = {
   /** `--farbe-text` — Primärtext. */
   text: '#0f172a',
   /** `--farbe-text-leise` — Sekundärtext. */
-  textMuted: '#475569',
+  textMuted: '#425064',
   /** `--farbe-rahmen` — Standardrahmen. */
   layout: '#e2e8f0',
   /** `--farbe-primaer` — Akzent: Wortmarke, Knopf, Fokus. */

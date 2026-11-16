@@ -44,6 +44,8 @@ import { t, useT } from '../i18n';
  *             archivierte war angelegt, die Aufgabe ist also nicht mehr
  *             „anlegen").
  * - Rechnung: mindestens eine Rechnung, auch ein Entwurf.
+ *   (Instanz und Rechnung entfallen bei Anfrage und Demo — sie folgen dem
+ *   Pilotbeschluss.)
  * - Stellvertretung: Name oder E-Mail der Stellvertretung stehen im Datensatz.
  *
  * `hasInstance`/`hasInvoice` sind `null`, wenn das Laden scheiterte: Dann ist
@@ -61,7 +63,8 @@ export function setupSteps(
   company: Pick<
     Company,
     'priceTier' | 'paymentInterval' | 'deputyName' | 'deputyEmail'
-  >,
+  > &
+    Partial<Pick<Company, 'status'>>,
   hasInstance: boolean | null,
   hasInvoice: boolean | null,
 ): SetupStep[] {
@@ -73,8 +76,11 @@ export function setupSteps(
         company.paymentInterval !== null,
     },
   ];
-  if (hasInstance !== null) steps.push({ id: 'instance', done: hasInstance });
-  if (hasInvoice !== null) steps.push({ id: 'invoice', done: hasInvoice });
+  // Vor dem Pilotbeschluss gibt es weder Instanz noch Rechnung anzulegen
+  // (der Reiter „Instanz" sagt es genauso): Die Schritte kämen zu früh.
+  const early = company.status === 'inquiry' || company.status === 'demo';
+  if (!early && hasInstance !== null) steps.push({ id: 'instance', done: hasInstance });
+  if (!early && hasInvoice !== null) steps.push({ id: 'invoice', done: hasInvoice });
   steps.push({
     id: 'deputy',
     done:
@@ -385,7 +391,7 @@ export function CompanyOverview({
                     openSteps.length > 0 ? 'mt-3 border-t border-rahmen-leise pt-3' : ''
                   }`}
                 >
-                  <summary className="flex cursor-pointer items-center gap-2 rounded text-[13px] text-leise list-none [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fokus">
+                  <summary className="flex min-h-11 cursor-pointer items-center gap-2 rounded text-[13px] sm:min-h-0 text-leise list-none [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fokus">
                     <Check className="h-4 w-4 shrink-0 text-erfolg-text" aria-hidden="true" />
                     {t('components.companyOverview.stepsDone', {
                       done: doneSteps.length,

@@ -180,7 +180,7 @@ export function VaultSecurityCard() {
                       {name}
                       {own && <span className="font-normal text-leise"> · {t('vault.entryOwn')}</span>}
                     </p>
-                    <p className="text-xs text-leise">
+                    <p className="text-sm text-leise">
                       {isKey
                         ? t('vault.entryRecoveryCreated', { date: formatDate(entry.createdAt) })
                         : t('vault.entryPassphraseCreated', { date: formatDate(entry.createdAt) })}

@@ -100,7 +100,7 @@ export const controlBackupMissing: TaskSource = {
       action: {
         kind: 'company_open',
         label: 'Sicherung prüfen',
-        target: '/settings',
+        target: '/settings?tab=backup',
       },
     };
     return { tasks: [task], total: 1 };

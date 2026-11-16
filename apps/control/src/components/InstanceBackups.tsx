@@ -211,7 +211,7 @@ export function InstanceBackups({
           {backups.map((b) => (
             <tr key={b.id} className="transition-colors hover:bg-flaeche-3">
               <td className={`${tableRow.compact} ${tableText.compact.primary}`}>{formatDate(b.date)}</td>
-              <td className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.secondary}`}>{formatSize(b.sizeBytes)}</td>
+              <td className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.data}`}>{formatSize(b.sizeBytes)}</td>
               <td className={`${tableRow.compact} ${tableText.compact.secondary}`}>
                 {b.verified ? (
                   <StatusPill kind="confirmed">{t('backup.verifiedYes')}</StatusPill>

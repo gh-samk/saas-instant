@@ -92,7 +92,13 @@ export function ConsentsPage() {
           die Tabelle darunter (`onGeladen`) — zwei eigene Abfragen liefen
           auseinander, und ausgerechnet die Zahl über der Liste wäre dann die
           ältere. */}
-      <div className="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
+      {/* Bei 0 Adressen steht die Zahl nicht groß über dem Leerzustand: Der
+          sagt dasselbe in Worten, und eine große „0" wäre nur Lärm. */}
+      <div
+        className={`mb-5 grid gap-4 ${
+          count === 0 ? '' : 'lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]'
+        }`}
+      >
       <ErrorBoundary area={t('einwilligungen.evidenceSearchArea')}>
         <Card className="h-full p-[18px]">
           <div className="mb-1 flex items-center gap-2">
@@ -166,6 +172,7 @@ export function ConsentsPage() {
         </Card>
       </ErrorBoundary>
 
+        {count !== 0 && (
         <Card className="h-full p-[18px]">
           <p className="ziffern-tabellarisch text-3xl font-semibold leading-none text-text">
             {count ?? '—'}
@@ -176,6 +183,7 @@ export function ConsentsPage() {
             <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             {t('einwilligungen.forecastHint')}</p>
         </Card>
+        )}
       </div>
 
       <ErrorBoundary area={t('einwilligungen.recipientListArea')}>

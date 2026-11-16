@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, ShieldCheck, X } from 'lucide-react';
 import { Dialog, InputField, Button } from '@saas-instant/ui';
 import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
 import { ApiError, errorText } from '../lib/api-client';
@@ -166,31 +166,36 @@ export function BroadcastSendDialog({
           }}
           noValidate
         >
+          <p className="mb-3 flex items-start gap-2 text-sm text-beschluss-text">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            {t('components.broadcastSendDialog.consentNotice')}
+          </p>
+
           <div className="mb-4 rounded-lg border-2 border-primaer bg-primaer-soft p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-primaer-softtext">
               {t('components.broadcastSendDialog.text2')}</p>
             <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="min-w-0">
-                <dt className="text-xs text-leise">{t('components.broadcastSendDialog.text3')}</dt>
+                <dt className="text-sm text-leise">{t('components.broadcastSendDialog.text3')}</dt>
                 <dd className="break-words text-sm font-medium text-text">
                   {template.name}
                 </dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-xs text-leise">{t('components.broadcastSendDialog.text4')}</dt>
+                <dt className="text-sm text-leise">{t('components.broadcastSendDialog.text4')}</dt>
                 <dd className="break-words text-sm font-medium text-text">
                   {template.subject}
                 </dd>
               </div>
               <div className="min-w-0 sm:col-span-2">
-                <dt className="text-xs text-leise">
+                <dt className="text-sm text-leise">
                   {t('components.broadcastSendDialog.text5')}</dt>
                 <dd className="ziffern-tabellarisch text-sm font-medium text-text">
                   {recipientCount === null
                     ? t('components.broadcastSendDialog.dd')
                     : `${recipientCount}`}
                 </dd>
-                <dd className="text-xs text-leise">
+                <dd className="text-sm text-leise">
                   {t('components.broadcastSendDialog.text6')}</dd>
               </div>
             </dl>

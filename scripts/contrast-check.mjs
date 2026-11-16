@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Prüft die Farbpaare aus packages/ui/src/tokens.css auf WCAG-AA-Kontrast,
- * für Hell UND Dunkel. Text braucht >= 4.5:1, UI-Elemente >= 3:1.
+ * für Hell UND Dunkel. Text braucht >= 4.5:1, UI-Elemente >= 3:1,
+ * kleiner Sekundärtext (13-14 px, --farbe-text-leise) >= 7:1 (AAA).
  * Prüft außerdem, dass die beiden Dunkel-Blöcke (Medienabfrage + data-theme)
  * identische Werte tragen.
  *
@@ -52,10 +53,13 @@ function ratio(a, b) {
 }
 
 const SURFACES = ['farbe-flaeche', 'farbe-flaeche-2', 'farbe-flaeche-3', 'farbe-flaeche-4'];
-/** [Vordergrund, Hintergründe[], Art] — Art: 'text' (4.5) oder 'ui' (3). */
+/** [Vordergrund, Hintergründe[], Art] — Art: 'text' (4.5), 'small' (7) oder 'ui' (3). */
 const PAIRS = [
   ['farbe-text', SURFACES, 'text'],
   ['farbe-text-leise', SURFACES, 'text'],
+  // Sekundärtext steht in Tabellen und Hinweisen bei 13-14 px (lib/density.ts):
+  // bei dieser Größe zählt der Abstand strenger, nicht nur die AA-Grenze.
+  ['farbe-text-leise', SURFACES, 'small'],
   ['farbe-text-still', SURFACES, 'text'],
   ['farbe-read', SURFACES, 'text'],
   ['farbe-primaer', ['farbe-flaeche', 'farbe-flaeche-2', 'farbe-flaeche-4'], 'text'],
@@ -107,14 +111,14 @@ for (const [mode, tokens] of [['Hell', light], ['Dunkel', { ...light, ...darkAtt
         continue;
       }
       const r = ratio(tokens[fg], tokens[bg]);
-      const min = kind === 'text' ? 4.5 : 3;
+      const min = kind === 'small' ? 7 : kind === 'text' ? 4.5 : 3;
       const ok = r >= min;
       if (!ok) {
         console.error(`FEHLER [${mode}] --${fg} ${tokens[fg]} auf --${bg} ${tokens[bg]}: ${r.toFixed(2)}:1 (< ${min})`);
         failures++;
       }
       rows[mode].push(
-        `| \`--${fg}\` ${tokens[fg]} | \`--${bg}\` ${tokens[bg]} | ${kind === 'text' ? 'Text' : 'UI'} | ${r.toFixed(2)}:1 | ${ok ? 'ok' : 'FEHLER'} |`,
+        `| \`--${fg}\` ${tokens[fg]} | \`--${bg}\` ${tokens[bg]} | ${kind === 'small' ? 'Text klein' : kind === 'text' ? 'Text' : 'UI'} | ${r.toFixed(2)}:1 | ${ok ? 'ok' : 'FEHLER'} |`,
       );
     }
   }

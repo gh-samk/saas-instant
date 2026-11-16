@@ -877,6 +877,14 @@ export interface InstanceListEntry {
   status: InstanceStatus;
   createdAt: string;
   company: { id: string; name: string };
+  /** Zuletzt gemeldete Version, `null` = unbekannt. */
+  appVersion: string | null;
+  /** Aktive Personen laut letzter erfolgreicher Abfrage; `null` = unbekannt oder nicht laufend. */
+  activePersons: number | null;
+  /** Tag der letzten Sicherung (`YYYY-MM-DD`), `null` = noch nie. */
+  lastBackupAt: string | null;
+  /** Fertig vom Server berechnet (laufende Instanz, Sicherung älter als die Frist oder nie). */
+  backupMissing: boolean;
 }
 
 /** Alle Instanzen, sortiert nach Subdomain. */

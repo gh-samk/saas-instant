@@ -51,28 +51,28 @@ export function ConsentEvidence({ evidence }: { evidence: Evidence }) {
         <p className="mt-1 whitespace-pre-line break-words text-sm text-text">
           {evidence.formText}
         </p>
-        <p className="mt-2 text-xs text-leise">
+        <p className="mt-2 text-sm text-leise">
           {t('components.consentEvidence.text2')}</p>
       </Card>
 
       <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="min-w-0">
-          <dt className="text-xs text-leise">{t('components.consentEvidence.text3')}</dt>
+          <dt className="text-sm text-leise">{t('components.consentEvidence.text3')}</dt>
           <dd className="ziffern-tabellarisch text-sm text-text">
             {evidence.subscribedAt ? formatDate(evidence.subscribedAt) : '—'}
           </dd>
-          <dd className="break-all text-xs text-leise">
+          <dd className="break-all text-sm text-leise">
             {evidence.ipAtSubscription
               ? t('components.consentEvidence.dd', { ipAtSubscription: evidence.ipAtSubscription })
               : t('components.consentEvidence.dd2')}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-leise">{t('components.consentEvidence.text4')}</dt>
+          <dt className="text-sm text-leise">{t('components.consentEvidence.text4')}</dt>
           <dd className="ziffern-tabellarisch text-sm text-text">
             {evidence.confirmedAt ? formatDate(evidence.confirmedAt) : '—'}
           </dd>
-          <dd className="break-all text-xs text-leise">
+          <dd className="break-all text-sm text-leise">
             {evidence.confirmedAt === null
               ? t('components.consentEvidence.dd3')
               : evidence.ipAtConfirmation
@@ -81,25 +81,25 @@ export function ConsentEvidence({ evidence }: { evidence: Evidence }) {
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-leise">{t('components.consentEvidence.text5')}</dt>
+          <dt className="text-sm text-leise">{t('components.consentEvidence.text5')}</dt>
           <dd className="ziffern-tabellarisch text-sm text-text">
             {evidence.unsubscribedAt ? formatDate(evidence.unsubscribedAt) : '—'}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-leise">{t('components.consentEvidence.text6')}</dt>
+          <dt className="text-sm text-leise">{t('components.consentEvidence.text6')}</dt>
           <dd className="ziffern-tabellarisch text-sm text-text">
             {evidence.deactivatedAt ? formatDate(evidence.deactivatedAt) : '—'}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-leise">{t('components.consentEvidence.text7')}</dt>
+          <dt className="text-sm text-leise">{t('components.consentEvidence.text7')}</dt>
           <dd className="break-words text-sm text-text">
             {evidence.origin ?? t('components.consentEvidence.dd5')}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-leise">{t('components.consentEvidence.text8')}</dt>
+          <dt className="text-sm text-leise">{t('components.consentEvidence.text8')}</dt>
           <dd className="text-sm text-text">
             {evidence.unsubscribeTokenPresent
               ? t('components.consentEvidence.dd6')
@@ -108,7 +108,7 @@ export function ConsentEvidence({ evidence }: { evidence: Evidence }) {
         </div>
       </dl>
 
-      <p className="mt-3 text-xs text-leise">
+      <p className="mt-3 text-sm text-leise">
         {t('components.consentEvidence.text9')}</p>
     </div>
   );

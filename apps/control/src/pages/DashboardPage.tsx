@@ -91,7 +91,7 @@ function TaskHeader({ task }: { task: Task }) {
             {/* NICHT jede Aufgabe hängt an einer Organisation: Die
                 Aufbewahrungsfrist des Audit-Logs gilt für den ganzen
                 Bestand. */}
-            {companyLink && <p className="mt-1 text-xs">{companyLink}</p>}
+            {companyLink && <p className="mt-1 text-sm">{companyLink}</p>}
           </>
         )}
       </div>
@@ -122,7 +122,7 @@ function TaskDue({
   // Tagen"). Hier bleibt nur das exakte Datum — die Aussage nicht doppelt.
   if (task.kind === 'invoice_overdue') {
     return (
-      <p className={`ziffern-tabellarisch ${tableText.compact.secondary}`}>
+      <p className={`ziffern-tabellarisch ${tableText.compact.data}`}>
         {t('dashboard.dueOn', { date: formatDate(task.dueAt) })}
       </p>
     );
@@ -138,7 +138,7 @@ function TaskDue({
       >
         {dueNotice(task.dueAt, todayDay)}
       </p>
-      <p className={`ziffern-tabellarisch ${tableText.compact.secondary}`}>
+      <p className={`ziffern-tabellarisch ${tableText.compact.data}`}>
         {formatDate(task.dueAt)}
       </p>
     </div>
@@ -182,7 +182,7 @@ function TruncationHint({
           </li>
         ))}
       </ul>
-      <p className="mt-1 text-xs text-leise">
+      <p className="mt-1 text-sm text-leise">
         {t('dashboard.truncationLimit', { limit: limitPerKind })}</p>
     </div>
   );
@@ -326,7 +326,7 @@ export function DashboardPage() {
           className="text-2xl font-semibold tracking-tight text-text"
         >{t('dashboard.title')}</h1>
         {data && (
-          <span className="text-sm text-still ziffern-tabellarisch">
+          <span className="text-sm text-text ziffern-tabellarisch">
             {formatDate(data.state.day)}
           </span>
         )}
@@ -423,8 +423,8 @@ export function DashboardPage() {
             limitPerKind={data.state.limitPerKind}
           />
 
-          <p className="mt-3 text-xs text-leise">{t('dashboard.stateLabel')}{' '}
-            <span className="ziffern-tabellarisch">
+          <p className="mt-3 text-sm text-leise">{t('dashboard.stateLabel')}{' '}
+            <span className="ziffern-tabellarisch text-text">
               {formatDate(data.state.day)}
             </span>{t('dashboard.statusChangeNotice')}{' '}
             <span className="ziffern-tabellarisch">

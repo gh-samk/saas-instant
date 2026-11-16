@@ -55,6 +55,12 @@ export default {
   country: 'Land',
   createCompany: 'Organisation anlegen',
   createInvoice: 'Rechnung anlegen',
+  createInstance: 'Instanz anlegen',
+  moreActions: 'Weitere ⋯',
+  einvoiceSetup: 'E-Rechnung für Behörden einrichten',
+  intakeShow: 'Aufnahmeformular anzeigen',
+  likeMasterData: 'wie die Stammdaten',
+  matchesMasterData: 'Rechnungsadresse: wie die Stammdaten.',
   created: 'Organisation angelegt.',
   createdOn: 'angelegt am',
   dates: 'Termine',
@@ -90,7 +96,6 @@ export default {
   mainContactHint:
     'Die Hauptansprechpartnerin wird über „Wechseln" geändert — der Wechsel erscheint im Verlauf und lässt sich deshalb nicht nebenbei hier eintragen.',
   masterData: 'Stammdaten',
-  matchesAddress: 'Entspricht der Anschrift.',
   monthly: 'Monatlich',
   monthlyDirectDebitOnly:
     'Monatlich geht nur per Lastschrift — zwölf einzelne Überweisungen im Jahr sind für beide Seiten Aufwand ohne Gegenwert.',
@@ -100,7 +105,6 @@ export default {
   nextDeadline: 'Nächste Frist',
   noAddressStored: 'keine Adresse hinterlegt',
   noConsent: 'Keine Einwilligung',
-  noEmailStored: 'Keine E-Mail-Adresse hinterlegt',
   noInfo: 'Keine Angabe',
   noResultsHint: 'Passe die Suche oder den Status-Filter an.',
   noResultsTitle: 'Keine Organisationen gefunden',

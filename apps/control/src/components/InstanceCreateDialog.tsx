@@ -17,7 +17,7 @@ import {
   normalizeSubdomain,
   subdomainFormatError,
 } from '../utils/subdomain';
-import { TEXT_BUTTON } from '../lib/styles';
+import { TEXT_BUTTON, TEXT_BUTTON_TOUCH } from '../lib/styles';
 import { useT } from '../i18n';
 
 type Step = 'subdomain' | 'preview';
@@ -374,7 +374,7 @@ export function InstanceCreateDialog({
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>{t('components.instanceCreateDialog.unknown')}</span>
               </span>
-              <button type="button" className={TEXT_BUTTON} onClick={() => setRecheck((n) => n + 1)}>
+              <button type="button" className={TEXT_BUTTON_TOUCH} onClick={() => setRecheck((n) => n + 1)}>
                 {t('components.instanceCreateDialog.recheck')}
               </button>
             </p>
@@ -406,7 +406,7 @@ export function InstanceCreateDialog({
                   soll auffallen, ohne eine legitime Entscheidung wie einen
                   Fehler aussehen zu lassen. */}
               {preview.deviatesBySuggestionFrom && (
-                <p className="mt-1.5 text-xs text-leise">
+                <p className="mt-1.5 text-sm text-leise">
                   {t('components.instanceCreateDialog.text9')}{preview.suggestedSubdomain}
                   {t('components.instanceCreateDialog.text10')}</p>
               )}
@@ -427,14 +427,14 @@ export function InstanceCreateDialog({
                 <code className="font-mono text-xs break-all">
                   {preview.environmentVariables.join(' · ')}
                 </code>
-                <span className="mt-0.5 block text-xs text-leise">
+                <span className="mt-0.5 block text-sm text-leise">
                   {t('components.instanceCreateDialog.label5')}</span>
               </Field>
               <Field label={t('components.instanceCreateDialog.label6')}>
                 {t('components.instanceCreateDialog.text11')}</Field>
             </dl>
 
-            <p className="mt-4 text-xs text-leise">
+            <p className="mt-4 text-sm text-leise">
               {t('components.instanceCreateDialog.text12')}</p>
 
             {createError && (

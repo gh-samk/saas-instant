@@ -76,8 +76,8 @@ export interface InstanceDetail {
 /**
  * Eine Zeile der Übersicht „Instanzen".
  *
- * NUR, WAS DIE LISTE ZEIGT: keine Geheimnisse, keine Kennzahlen, keine
- * Meldung. Wer mehr wissen will, geht in die Organisation — genau dorthin
+ * NUR, WAS DIE LISTE ZEIGT: keine Geheimnisse, keine Meldung; von den
+ * Kennzahlen nur die Zahl der aktiven Personen. Wer mehr wissen will, geht in die Organisation — genau dorthin
  * führt jede Zeile.
  */
 export interface InstanceListenEntry {
@@ -89,6 +89,21 @@ export interface InstanceListenEntry {
   /** Technischer Zeitstempel (ISO). */
   createdAt: string;
   company: { id: string; name: string };
+  /** Zuletzt gemeldete Version; `null`, solange keine bekannt ist. */
+  appVersion: string | null;
+  /**
+   * Aktive Personen laut letzter ERFOLGREICHER Kennzahlenabfrage; `null` bei
+   * nicht laufenden Instanzen und solange nie eine Zahl ankam.
+   */
+  activePersons: number | null;
+  /** Tag der letzten Sicherung (`YYYY-MM-DD`), `null` = noch nie. */
+  lastBackupAt: string | null;
+  /**
+   * Fertig berechnet, mit derselben Schwelle wie Detailkarte und Aufgabe
+   * „Sicherung überfällig" (`BACKUP_MISSING_AFTER_DAYS`). Nur laufende
+   * Instanzen können sie verpassen — alle anderen: `false`.
+   */
+  backupMissing: boolean;
 }
 
 /** Was die Pflicht-Vorschau vor dem Anlegen zeigt. */

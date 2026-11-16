@@ -98,8 +98,28 @@ const HISTORY = [
   },
 ];
 
+const INSTANCE_DETAIL = {
+  id: 'i1',
+  companyId: IDENTIFIER,
+  subdomain: 'solawi-rheintal',
+  status: 'active',
+  appVersion: '0.5.2',
+  createdAt: '2026-06-01T09:00:00.000Z',
+  archivedAt: null,
+  message: null,
+  metrics: null,
+  backup: { last: null, missing: false },
+  invitationOpen: false,
+  configuredAt: null,
+  coolifyCreated: false,
+};
+
 interface Options {
   website?: string | null;
+  /** Überschreibt Felder der Organisation (Empfängerart, Leitweg-ID …). */
+  company?: Record<string, unknown>;
+  /** Die Organisation hat bereits eine Instanz. */
+  instance?: boolean;
   companyStatus?: number;
   notePatch?: () => Response;
   paymentDetailsStatus?: number;
@@ -198,6 +218,9 @@ function setFetchReady(options: Options = {}) {
       // Zu dieser Organisation gehört keine Instanz. Ohne diesen Zweig fiele
       // die Abfrage in den Sammelzweig weiter unten und die Karte bekäme eine
       // Organisation als Instanz gereicht.
+      if (options.instance === true) {
+        return new Response(JSON.stringify(INSTANCE_DETAIL), { status: 200 });
+      }
       return new Response('null', { status: 200 });
     }
     if (path.includes('/contact-person')) {
@@ -233,7 +256,7 @@ function setFetchReady(options: Options = {}) {
         );
       }
       return new Response(
-        JSON.stringify({ ...COMPANY, website: options.website ?? null }),
+        JSON.stringify({ ...COMPANY, website: options.website ?? null, ...options.company }),
         { status: 200 },
       );
     }
@@ -477,8 +500,10 @@ describe('Organisations-Detailseite', () => {
     open('contract');
 
     await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    // Eine Organisation ohne Behörde und ohne Leitweg-ID zeigt die Karte
+    // nicht, aber einen Link, der sie öffnet.
     fireEvent.click(
-      screen.getByRole('button', { name: 'E-Rechnung bearbeiten' }),
+      screen.getByRole('button', { name: 'E-Rechnung für Behörden einrichten' }),
     );
     fireEvent.change(await screen.findByLabelText('Art der Empfängerin'), {
       target: { value: 'authority' },
@@ -513,15 +538,36 @@ describe('Organisations-Detailseite', () => {
     });
   });
 
-  it('zeigt die E-Rechnungsdaten in der Übersicht', async () => {
-    setFetchReady();
+  it('zeigt die E-Rechnungs-Karte bei einer Behörde samt Daten', async () => {
+    setFetchReady({
+      company: { buyerType: 'authority', buyerReference: '04011000-1234512345-06' },
+    });
     open('contract');
 
     await screen.findByRole('heading', { name: 'Solawi Rheintal' });
     expect(
       screen.getByRole('heading', { name: 'E-Rechnung' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Unternehmen')).toBeInTheDocument();
+    expect(screen.getByText('Behörde / öffentlicher Auftraggeber')).toBeInTheDocument();
+    expect(screen.getByText('04011000-1234512345-06')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'E-Rechnung für Behörden einrichten' }),
+    ).toBeNull();
+  });
+
+  it('blendet die E-Rechnungs-Karte ohne Behörde und Leitweg-ID aus und lässt den Weg dorthin offen', async () => {
+    setFetchReady();
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    expect(screen.queryByRole('heading', { name: 'E-Rechnung' })).toBeNull();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'E-Rechnung für Behörden einrichten' }),
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'E-Rechnung' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByLabelText('Art der Empfängerin')).toBeInTheDocument();
   });
 
   it('zeigt bei 404 einen benannten Weg zurück, keinen leeren Bildschirm', async () => {
@@ -638,6 +684,117 @@ describe('Organisations-Detailseite', () => {
     // … und keine Kennung kommt doppelt vor.
     const all = [...document.querySelectorAll('[id]')].map((e) => e.id);
     expect(new Set(all).size).toBe(all.length);
+  });
+});
+
+describe('Organisations-Detailseite — Kopf und leere Felder', () => {
+  it('zeigt ohne Instanz „Instanz anlegen" als Hauptaktion und den Rest im Menü „Weitere"', async () => {
+    setFetchReady();
+    open();
+
+    expect(
+      await screen.findByRole('button', { name: 'Instanz anlegen' }),
+    ).toBeInTheDocument();
+    // Nicht mehr als drei beschriftungslose Symbole nebeneinander.
+    expect(screen.queryByRole('button', { name: /Stammdaten bearbeiten/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Weitere/ }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Rechnung anlegen' })).toBeInTheDocument();
+    expect(
+      within(menu).getByRole('menuitem', { name: 'E-Mail an contact@example.com' }),
+    ).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Stammdaten bearbeiten' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Status ändern' })).toBeInTheDocument();
+  });
+
+  it.each(['inquiry', 'demo'])(
+    'zeigt bei Status %s „Status ändern" als Hauptaktion statt „Instanz anlegen"',
+    async (status) => {
+      setFetchReady({ company: { status } });
+      open();
+      fireEvent.click(await screen.findByRole('button', { name: 'Status ändern' }));
+      expect(screen.queryByRole('button', { name: 'Instanz anlegen' })).toBeNull();
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    },
+  );
+
+  it('„Instanz anlegen" führt in den Reiter Instanz und öffnet den Anlegen-Dialog', async () => {
+    setFetchReady();
+    open();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Instanz anlegen' }));
+    expect(window.location.search).toContain('tab=instance');
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('öffnet mit ?create=instance den Anlegen-Dialog und entfernt den Parameter', async () => {
+    setFetchReady();
+    open('instance&create=instance');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).not.toContain('create='));
+    expect(window.location.search).toContain('tab=instance');
+  });
+
+  it('zeigt „Rechnung anlegen" als Hauptaktion, sobald es eine Instanz gibt', async () => {
+    setFetchReady({ instance: true });
+    open();
+
+    expect(
+      await screen.findByRole('button', { name: 'Rechnung anlegen' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Instanz anlegen' })).toBeNull();
+  });
+
+  it('bietet statt „—" bei leeren optionalen Feldern „+ … hinzufügen" an, das den Block öffnet', async () => {
+    setFetchReady();
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    fireEvent.click(screen.getByRole('button', { name: '+ Website hinzufügen' }));
+    expect(await screen.findByLabelText('Website')).toBeInTheDocument();
+  });
+
+  it('zeigt bei gesetzter Rechnungs-E-Mail ohne Anschrift „wie die Stammdaten" für Name und Anschrift', async () => {
+    setFetchReady({ company: { billingEmail: 'buchhaltung@example.com' } });
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    expect(screen.getByText('buchhaltung@example.com')).toBeInTheDocument();
+    expect(screen.getAllByText('wie die Stammdaten')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: '+ Name hinzufügen' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Anschrift hinzufügen' })).toBeNull();
+  });
+
+  it('fasst die Rechnungsadresse „wie die Stammdaten" in eine Zeile', async () => {
+    setFetchReady();
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    expect(screen.getByText('Rechnungsadresse: wie die Stammdaten.')).toBeInTheDocument();
+  });
+
+  it('zeigt das Aufnahmeformular nur bei „Pilot beschlossen" und nach den Stammdaten', async () => {
+    setFetchReady({ company: { status: 'pilot_approved' } });
+    open('contract');
+
+    const intake = await screen.findByRole('heading', { name: 'Aufnahmeformular' });
+    const master = screen.getByRole('heading', { name: 'Stammdaten' });
+    expect(
+      master.compareDocumentPosition(intake) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('blendet das Aufnahmeformular später aus und lässt es per Link zurückholen', async () => {
+    setFetchReady();
+    open('contract');
+
+    await screen.findByRole('heading', { name: 'Solawi Rheintal' });
+    expect(screen.queryByRole('heading', { name: 'Aufnahmeformular' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Aufnahmeformular anzeigen' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Aufnahmeformular' }),
+    ).toBeInTheDocument();
   });
 });
 

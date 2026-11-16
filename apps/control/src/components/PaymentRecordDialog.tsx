@@ -8,7 +8,8 @@ import {
   type Invoice,
   type SecondFactorEvidence,
 } from '../lib/api';
-import { centAsFieldValue, centFromInput, formatAmount } from '../utils/amount';
+import { centFromInput, formatAmount, formatAmountCent } from '../utils/amount';
+import { cumulativePaidCent, type PaymentMode } from '../utils/payment';
 import { useT } from '../i18n';
 
 /**
@@ -26,10 +27,12 @@ import { useT } from '../i18n';
  * erst OHNE Nachweis rufen (bei einer Sitzung unter zehn Minuten lässt der
  * Server ihn weg), und erst bei `401` den Nachweis-Dialog aufklappen.
  *
- * DER BETRAG IST DER KUMULIERTE GESAMTSTAND, nicht die einzelne Überweisung.
- * Ein Modell mit Einzelbuchungen bräuchte einen Weg, eine falsch erfasste
- * Buchung zurückzunehmen — also einen Löschpfad an einem Beleg, den es
- * ausdrücklich nicht gibt.
+ * DER SERVER NIMMT DEN KUMULIERTEN GESAMTSTAND, nicht die einzelne
+ * Überweisung. Ein Modell mit Einzelbuchungen bräuchte einen Weg, eine falsch
+ * erfasste Buchung zurückzunehmen — also einen Löschpfad an einem Beleg, den
+ * es ausdrücklich nicht gibt. Der Dialog fragt trotzdem in der Sprache der
+ * Überweisung („voll bezahlt“ / „Teilzahlung“) und rechnet vor dem Senden
+ * auf den Gesamtstand um (`cumulativePaidCent`).
  */
 export function PaymentRecordDialog({
   open,
@@ -47,6 +50,7 @@ export function PaymentRecordDialog({
   const t = useT();
   const todayDay = today();
   const [paymentDate, setPaymentDate] = useState(todayDay);
+  const [mode, setMode] = useState<PaymentMode>('full');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,17 +61,27 @@ export function PaymentRecordDialog({
   useEffect(() => {
     if (!open) return;
     setPaymentDate(today());
-    // Vorbelegung ist der VOLLE Betrag: Der häufigste Fall ist die
-    // vollständige Zahlung. Wer teilweise erfasst, überschreibt die Zahl.
-    setAmount(centAsFieldValue(invoice.sumGrossCent));
+    // Vorauswahl ist „voll bezahlt“: Der häufigste Fall ist die vollständige
+    // Zahlung. Erst „Teilzahlung“ öffnet das Betragsfeld.
+    setMode('full');
+    setAmount('');
     setError(null);
     setAmountError(undefined);
     setEvidenceOpen(false);
     setDialogError(undefined);
   }, [open, invoice.sumGrossCent]);
 
+  // Was bereits erfasst ist, in Cent — die Teilzahlung wird darauf addiert.
+  const alreadyPaidCent =
+    invoice.paidAmount === null ? 0 : (centFromInput(invoice.paidAmount) ?? 0);
+
   async function record(evidence?: SecondFactorEvidence) {
-    const cent = centFromInput(amount);
+    const cent = cumulativePaidCent(
+      mode,
+      invoice.sumGrossCent,
+      alreadyPaidCent,
+      amount,
+    );
     if (cent === null) {
       setAmountError(
         t('components.paymentRecordDialog.text'),
@@ -125,7 +139,7 @@ export function PaymentRecordDialog({
               form="zahlung-formular"
               type="submit"
               loading={loading}
-              disabled={paymentDate === '' || amount.trim() === ''}
+              disabled={paymentDate === '' || (mode === 'partial' && amount.trim() === '')}
             >
               {t('components.paymentRecordDialog.button2')}</Button>
           </>
@@ -144,17 +158,7 @@ export function PaymentRecordDialog({
             <span className="ziffern-tabellarisch font-medium text-text">
               {formatAmount(invoice.sumGross)}
             </span>{' '}
-            {t('components.paymentRecordDialog.text6')}{invoice.paidAmount !== null && (
-              <>
-                {' '}
-                {t('components.paymentRecordDialog.text7')}{' '}
-                <span className="ziffern-tabellarisch font-medium text-text">
-                  {formatAmount(invoice.paidAmount)}
-                </span>
-                .
-              </>
-            )}
-          </p>
+            {t('components.paymentRecordDialog.text6')}</p>
 
           <DateField
             id="zahlung-zahldatum"
@@ -163,22 +167,60 @@ export function PaymentRecordDialog({
             onChange={setPaymentDate}
             max={todayDay}
             required
+            autoFocus
           />
 
-          <InputField
-            id="zahlung-betrag"
-            name="zahlung-betrag"
-            label={t('components.paymentRecordDialog.label2')}
-            type="number"
-            step="0.01"
-            inputMode="decimal"
-            autoComplete="off"
-            value={amount}
-            disabled={loading}
-            onChange={(ev) => setAmount(ev.target.value)}
-            helperText={t('components.paymentRecordDialog.helperText')}
-            error={amountError}
-          />
+          <fieldset className="mt-4" disabled={loading}>
+            <legend className="mb-2 text-sm font-medium text-text">
+              {t('components.paymentRecordDialog.legend')}
+            </legend>
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-text">
+              <input
+                type="radio"
+                name="zahlung-art"
+                className="size-4 accent-primaer"
+                checked={mode === 'full'}
+                onChange={() => {
+                  setMode('full');
+                  setAmountError(undefined);
+                }}
+              />
+              <span>
+                {t('components.paymentRecordDialog.full')}{' '}
+                <span className="ziffern-tabellarisch">
+                  ({formatAmount(invoice.sumGross)})
+                </span>
+              </span>
+            </label>
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-text">
+              <input
+                type="radio"
+                name="zahlung-art"
+                className="size-4 accent-primaer"
+                checked={mode === 'partial'}
+                onChange={() => setMode('partial')}
+              />
+              <span>{t('components.paymentRecordDialog.partial')}</span>
+            </label>
+          </fieldset>
+
+          {mode === 'partial' && (
+            <InputField
+              id="zahlung-betrag"
+              name="zahlung-betrag"
+              label={t('components.paymentRecordDialog.label2')}
+              type="number"
+              step="0.01"
+              inputMode="decimal"
+              autoComplete="off"
+              autoFocus
+              value={amount}
+              disabled={loading}
+              onChange={(ev) => setAmount(ev.target.value)}
+              helperText={`${t('components.paymentRecordDialog.paidSoFar')} ${formatAmountCent(alreadyPaidCent)} · ${t('components.paymentRecordDialog.open')} ${formatAmount(invoice.openAmount)}`}
+              error={amountError}
+            />
+          )}
 
           {error && (
             <p role="alert" className="mt-2 text-sm text-gefahr">

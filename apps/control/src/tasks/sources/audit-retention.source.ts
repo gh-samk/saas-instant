@@ -79,7 +79,7 @@ export const auditRetention: TaskSource = {
           action: {
             kind: 'retention_check',
             label: 'Aufbewahrung prüfen',
-            target: '/settings',
+            target: '/settings?tab=security',
           },
         },
       ],

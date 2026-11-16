@@ -360,7 +360,7 @@ export function LoginPage() {
           onChange={(e) => setRememberedDevice(e.target.checked)}
           className="mt-0.5 h-4 w-4 rounded border-rahmen-ui text-primaer"
         />
-        <span>{t('auth.trustDeviceLabel')}<span className="block text-xs font-normal text-leise">{t('auth.trustDeviceHint')}</span>
+        <span>{t('auth.trustDeviceLabel')}<span className="block text-sm font-normal text-leise">{t('auth.trustDeviceHint')}</span>
         </span>
       </label>
     );

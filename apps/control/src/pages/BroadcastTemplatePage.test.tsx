@@ -332,6 +332,18 @@ describe('Vorlagenseite — der Versand ist unumkehrbar', () => {
     ).toBeInTheDocument();
   });
 
+  it('sagt im Versanddialog in einer Zeile, dass nur bestätigte Einwilligungen Post bekommen', async () => {
+    mockFetch();
+    openPage();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Rundmail versenden …/ }),
+    );
+    expect(
+      await screen.findByText(/Versand nur an bestätigte Einwilligungen/),
+    ).toBeInTheDocument();
+  });
+
   it('hält den Knopf gesperrt, bis das Bestätigungswort stimmt', async () => {
     const called = mockFetch();
     openPage();

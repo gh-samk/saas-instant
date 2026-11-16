@@ -95,7 +95,7 @@ export function BroadcastPreview({
       </button>
       {onlyTextOpen && (
         <div className="mt-2 rounded-lg border border-rahmen bg-flaeche px-4 py-3">
-          <p className="mb-2 text-xs text-leise">
+          <p className="mb-2 text-sm text-leise">
             {t('components.broadcastPreview.text8')}</p>
           <pre className="whitespace-pre-wrap break-words font-mono text-sm text-text">
             {preview.text}
@@ -111,11 +111,11 @@ export function BroadcastPreview({
             {used.map(([name, value]) => (
               <div key={name} className="flex min-w-0 flex-wrap gap-x-2">
                 <dt className="font-mono text-xs text-leise">{`{{${name}}}`}</dt>
-                <dd className="min-w-0 break-all text-xs text-text">{value}</dd>
+                <dd className="min-w-0 break-all text-sm text-text">{value}</dd>
               </div>
             ))}
           </dl>
-          <p className="mt-1 text-xs text-leise">
+          <p className="mt-1 text-sm text-leise">
             {t('components.broadcastPreview.text10')}</p>
         </div>
       )}

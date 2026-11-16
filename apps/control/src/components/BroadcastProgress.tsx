@@ -171,11 +171,11 @@ export function BroadcastProgress({
           },
         ].map((number) => (
           <div key={number.label} className="min-w-0">
-            <dt className="text-xs text-leise">{number.label}</dt>
+            <dt className="text-sm text-leise">{number.label}</dt>
             <dd className="ziffern-tabellarisch text-sm font-medium text-text">
               {number.value}
             </dd>
-            <dd className="text-xs text-leise">{number.notice}</dd>
+            <dd className="text-sm text-leise">{number.notice}</dd>
           </div>
         ))}
       </dl>

@@ -223,24 +223,31 @@ describe('Kopfleiste — Suche auf dem Telefon', () => {
     expect(screen.queryByLabelText('Schnellsuche')).not.toBeInTheDocument();
   });
 
-  it('öffnet beim Klick das Feld mit Fokus; Enter sucht, Schließen räumt auf', async () => {
+  it('öffnet beim Klick die Palette mit Fokus; Enter sucht, Schließen räumt auf', async () => {
     narrow();
     arrangeFetch({ tasksUrgent: 0, invoicesOpen: 0 });
     window.history.pushState({}, '', '/');
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Suche öffnen' }));
-    const field = await screen.findByLabelText('Schnellsuche');
+    const trigger = await screen.findByRole('button', { name: 'Suche öffnen' });
+    // jsdom fokussiert beim Klick nicht von selbst, ein Browser schon.
+    trigger.focus();
+    fireEvent.click(trigger);
+    const field = await screen.findByRole('combobox', { name: 'Schnellsuche' });
     expect(field).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: 'Suche schließen' }));
-    expect(screen.queryByLabelText('Schnellsuche')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Schnellsuche und Aktionen' })).not.toBeInTheDocument();
+    // Der Fokus kehrt zum Knopf zurück, der die Palette geöffnet hat.
+    expect(screen.getByRole('button', { name: 'Suche öffnen' })).toHaveFocus();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Suche öffnen' }));
-    const second = await screen.findByLabelText('Schnellsuche');
+    const again = screen.getByRole('button', { name: 'Suche öffnen' });
+    again.focus();
+    fireEvent.click(again);
+    const second = await screen.findByRole('combobox', { name: 'Schnellsuche' });
     fireEvent.change(second, { target: { value: 'Muster' } });
     fireEvent.keyDown(second, { key: 'Enter' });
     await waitFor(() => expect(window.location.search).toBe('?search=Muster'));
-    expect(screen.queryByLabelText('Schnellsuche')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Schnellsuche' })).not.toBeInTheDocument();
   });
 });

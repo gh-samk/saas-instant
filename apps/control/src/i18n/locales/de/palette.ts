@@ -1,0 +1,23 @@
+/** Namespace `palette`: Kommandopalette (⌘K / Strg+K). */
+export default {
+  title: 'Schnellsuche und Aktionen',
+  inputLabel: 'Schnellsuche',
+  placeholder: 'Organisation suchen oder Aktion wählen',
+  close: 'Suche schließen',
+  listLabel: 'Treffer und Aktionen',
+  searchAll: 'Alle Organisationen mit „{query}" suchen',
+  groupCompanies: 'Organisationen',
+  groupActions: 'Aktionen',
+  groupRecent: 'Zuletzt geöffnet',
+  searching: 'Suche läuft …',
+  loadFailed: 'Die Treffer konnten nicht geladen werden.',
+  none: 'Nichts gefunden.',
+  newCompany: 'Neue Organisation',
+  newInvoice: 'Rechnung anlegen',
+  recordPayment: 'Zahlung erfassen',
+  recordPaymentHint: 'offene Rechnungen',
+  today: 'Heute',
+  settings: 'Einstellungen',
+  created: 'Organisation angelegt.',
+  hint: '↑↓ wählen · Enter öffnen · Esc schließen',
+} as const;

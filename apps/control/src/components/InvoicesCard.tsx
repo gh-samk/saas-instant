@@ -130,11 +130,11 @@ export function InvoicesCard({
                     <p className="text-sm font-medium text-text">
                       {r.invoiceNumber ?? t('components.invoicesCard.text3')}
                       {r.isCancellation && (
-                        <span className="ml-1.5 text-xs text-leise">
+                        <span className="ml-1.5 text-sm text-leise">
                           {t('components.invoicesCard.label')}</span>
                       )}
                     </p>
-                    <p className="text-xs text-leise">
+                    <p className="text-sm text-leise">
                       <span className="ziffern-tabellarisch">
                         {formatDate(r.invoiceDate)}
                       </span>

@@ -131,7 +131,7 @@ export function IssuerBranding({
                     className="max-h-full max-w-full object-contain"
                   />
                 </div>
-                <figcaption className="mt-1 text-xs text-leise">{box.label}</figcaption>
+                <figcaption className="mt-1 text-sm text-leise">{box.label}</figcaption>
               </figure>
             ))}
           </div>

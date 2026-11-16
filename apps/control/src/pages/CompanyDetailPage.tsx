@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, FilePlus2, Mail, Pencil, SearchX, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, SearchX, Trash2 } from 'lucide-react';
 import {
   DateField,
   InputField,
   FilterChips,
   DangerCard,
-  IconButton,
   Card,
   Button,
   EmptyState,
   Switch,
+  Menu,
+  type MenuItem,
   Skeleton,
   StatusPill,
   useToast,
@@ -20,6 +21,7 @@ import { ContactPersonDialog } from '../components/ContactPersonDialog';
 import { DetailBlock, Field } from '../components/DetailBlock';
 import { HelpHint, SelectField, TextArea } from '../components/FormFields';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { hasOwnBillingAddress } from '../utils/recipient';
 import { IntakeCard } from '../components/IntakeCard';
 import { InstanceCard } from '../components/InstanceCard';
 import { ConsentStatusBadge } from '../components/ConsentStatusBadge';
@@ -36,6 +38,7 @@ import { ApiError, errorText } from '../lib/api-client';
 import {
   updateCompany,
   fetchCompany,
+  fetchInstance,
   type Source,
   type BuyerType,
   type Company,
@@ -241,6 +244,18 @@ export function CompanyDetailPage() {
    * sich der Dialog bei jedem späteren Zurückkehren auf den Reiter von neuem.
    */
   const [instanceCreateRequested, setInstanceCreateRequested] = useState(false);
+  /**
+   * Gibt es schon eine Instanz? Davon hängt die Hauptaktion im Kopf ab
+   * („Instanz anlegen" oder „Rechnung anlegen"). `loading` zeigt noch keine,
+   * statt erst die eine und dann die andere aufblitzen zu lassen; scheitert
+   * die Abfrage, bleibt es bei „Rechnung anlegen" — das ist nie falsch.
+   */
+  const [instanceState, setInstanceState] = useState<
+    'loading' | 'yes' | 'no' | 'unknown'
+  >('loading');
+  /** Aufgeklappt per Link, obwohl die Karte nach der Regel verborgen wäre. */
+  const [einvoiceShown, setEinvoiceShown] = useState(false);
+  const [intakeShown, setIntakeShown] = useState(false);
 
   /**
    * Der offene Reiter steht IN DER URL, nicht nur im Zustand.
@@ -290,6 +305,39 @@ export function CompanyDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const checkInstance = useCallback(async () => {
+    try {
+      // Ohne Instanz antwortet der Server mit `null` ODER mit leerem Körper.
+      setInstanceState((await fetchInstance(id)) == null ? 'no' : 'yes');
+    } catch {
+      setInstanceState('unknown');
+    }
+  }, [id]);
+
+  useEffect(() => {
+    setInstanceState('loading');
+    setEinvoiceShown(false);
+    setIntakeShown(false);
+    void checkInstance();
+  }, [checkInstance]);
+
+  // „+ Instanz" aus der Instanzliste: `?create=instance` öffnet den
+  // Anlegen-Dialog im Reiter „Instanz". Der Parameter wird sofort entfernt,
+  // damit ein Neuladen oder Zurückspringen den Dialog nicht erneut öffnet.
+  const createWanted = parameter.get('create') === 'instance';
+  useEffect(() => {
+    if (!createWanted || company === null) return;
+    setInstanceCreateRequested(true);
+    setParameter(
+      (alt) => {
+        const updated = new URLSearchParams(alt);
+        updated.delete('create');
+        return updated;
+      },
+      { replace: true },
+    );
+  }, [createWanted, company, setParameter]);
 
   function editStart(block: Blockname, o: Company) {
     setDraft(draftFrom(o));
@@ -385,6 +433,64 @@ export function CompanyDetailPage() {
   const setField = (field: keyof Draft) => (value: string) =>
     setDraft((alt) => (alt === null ? alt : { ...alt, [field]: value }));
 
+  const createInvoice = () => navigate(`/companies/${o.id}/invoices/new`);
+  const createInstance = () => {
+    setInstanceCreateRequested(true);
+    setTab('instance');
+  };
+  // Die Hauptaktion folgt dem Status: Solange nur angefragt oder vorgeführt
+  // wurde, gibt es nichts anzulegen (die Instanz kommt erst mit dem Beschluss
+  // zum Piloten) — der nächste Schritt ist der Statuswechsel. Danach gilt:
+  // ohne Instanz „Instanz anlegen", sonst „Rechnung anlegen".
+  const statusPrimary = o.status === 'inquiry' || o.status === 'demo';
+  const primaryAction = statusPrimary
+    ? { label: t('organisationen.changeStatus'), run: () => setStatusOpen(true) }
+    : instanceState === 'loading'
+      ? null
+      : instanceState === 'no' && o.status !== 'ended' && o.status !== 'dormant'
+        ? { label: t('organisationen.createInstance'), run: createInstance }
+        : { label: t('organisationen.createInvoice'), run: createInvoice };
+  // Was nicht Hauptaktion ist, steht im Menü: E-Mail nur, wenn es eine
+  // Adresse gibt (ein Eintrag, der nichts tun kann, wäre Lärm), und
+  // „Rechnung anlegen" auch dann, wenn gerade „Instanz anlegen" vorn steht.
+  const moreItems: MenuItem[] = [
+    ...(primaryAction?.run !== createInvoice
+      ? [{ id: 'invoice', label: t('organisationen.createInvoice'), onSelect: createInvoice }]
+      : []),
+    ...(o.contactEmail
+      ? [
+          {
+            id: 'email',
+            label: t('organisationen.emailTo', { email: o.contactEmail }),
+            onSelect: () => {
+              window.location.href = `mailto:${o.contactEmail ?? ''}`;
+            },
+          },
+        ]
+      : []),
+    {
+      id: 'edit',
+      label: t('organisationen.editMasterData'),
+      onSelect: () => {
+        setTab('contract');
+        editStart('masterData', o);
+      },
+    },
+    ...(statusPrimary
+      ? []
+      : [
+          {
+            id: 'status',
+            label: t('organisationen.changeStatus'),
+            onSelect: () => setStatusOpen(true),
+          },
+        ]),
+  ];
+
+  /** Leeres optionales Feld → „+ … hinzufügen", das den Block öffnet (nicht, solange ein anderer offen ist). */
+  const add = (block: Blockname) =>
+    openBlock === null ? () => editStart(block, o) : undefined;
+
   return (
     <section aria-labelledby="company-title">
       <Link
@@ -422,38 +528,24 @@ export function CompanyDetailPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button variant="secondary" onClick={() => setStatusOpen(true)}>
-                {t('organisationen.changeStatus')}
-              </Button>
-              {/* Die drei Direktwege des Designs. Sie FÜHREN nur — keiner
-                  löst etwas aus, alle drei landen dort, wo die Handlung
-                  bewusst bestätigt wird. */}
-              <IconButton
-                Icon={FilePlus2}
-                label={t('organisationen.createInvoice')}
-                onClick={() =>
-                  navigate(`/companies/${o.id}/invoices/new`)
-                }
-              />
-              <IconButton
-                Icon={Mail}
-                label={
-                  o.contactEmail
-                    ? t('organisationen.emailTo', { email: o.contactEmail })
-                    : t('organisationen.noEmailStored')
-                }
-                disabled={!o.contactEmail}
-                onClick={() => {
-                  window.location.href = `mailto:${o.contactEmail ?? ''}`;
-                }}
-              />
-              <IconButton
-                Icon={Pencil}
-                label={t('organisationen.editMasterData')}
-                onClick={() => {
-                  setTab('contract');
-                  editStart('masterData', o);
-                }}
+              {/* EINE Hauptaktion mit Text, der Rest im Menü — ebenfalls mit
+                  Text. Vorher standen hier drei Icons ohne sichtbare
+                  Beschriftung; sehende Nutzerinnen mussten raten. Die
+                  Hauptaktion folgt dem Status: Anfrage und Demo
+                  „Status ändern", danach ohne Instanz „Instanz anlegen",
+                  sonst „Rechnung anlegen". Alle FÜHREN nur — gelöst wird
+                  erst im Dialog bzw. im Entwurf. */}
+              {primaryAction && (
+                <Button onClick={primaryAction.run} className="w-full sm:w-auto">
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  {primaryAction.label}
+                </Button>
+              )}
+              <Menu
+                label={t('organisationen.moreActions')}
+                hideChevron
+                items={moreItems}
+                className="w-full sm:w-auto"
               />
             </div>
           </div>
@@ -516,7 +608,10 @@ export function CompanyDetailPage() {
             companyName={o.name}
             contactEmail={o.contactEmail}
             totpPossible={totpPossible}
-            onHistoryChanged={() => setHistoryState((n) => n + 1)}
+            onHistoryChanged={() => {
+              setHistoryState((n) => n + 1);
+              void checkInstance();
+            }}
             createRequested={instanceCreateRequested}
             onCreateRequestHandled={() => setInstanceCreateRequested(false)}
           />
@@ -542,22 +637,6 @@ export function CompanyDetailPage() {
       {/* ==================================== Reiter „Kontakt & Vertrag" */}
       {tab.value === 'contract' && (
         <>
-        {/* -------------------------------------------------- Aufnahmeformular */}
-        {/* HIER UND NICHT BEI DER INSTANZ: Das Formular sammelt genau die
-            Angaben dieses Reiters — Anschrift, Ansprechpartnerin, Zahlung,
-            Mandat. Wer wissen will, warum ein Feld leer ist, sieht daneben,
-            ob das Formular überhaupt schon hinausging.
-
-            AB `pilot_beschlossen`, weil dort der Automatikversand hängt.
-            Früher wäre die Karte eine Aufforderung, etwas zu tun, wofür es
-            noch keinen Anlass gibt; später bleibt sie sichtbar, damit der
-            Nachweis des Versands nicht mit dem Status verschwindet. */}
-        {o.status !== 'inquiry' && o.status !== 'demo' && (
-          <ErrorBoundary area={t('organisationen.sectionIntakeForm')}>
-            <IntakeCard companyId={o.id} totpPossible={totpPossible} />
-          </ErrorBoundary>
-        )}
-
         {/* ------------------------------------------------------ Stammdaten */}
         <DetailBlock
           title={t('organisationen.masterData')}
@@ -681,8 +760,10 @@ export function CompanyDetailPage() {
           }
         >
           <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={t('organisationen.legalForm')}>{o.legalForm}</Field>
-            <Field label={t('organisationen.website')}>
+            <Field label={t('organisationen.legalForm')} onAdd={add('masterData')}>
+              {o.legalForm}
+            </Field>
+            <Field label={t('organisationen.website')} onAdd={add('masterData')}>
               {o.website && safeHref(o.website) === null && o.website}
               {safeHref(o.website) !== null && (
                 <a
@@ -695,7 +776,7 @@ export function CompanyDetailPage() {
                 </a>
               )}
             </Field>
-            <Field label={t('organisationen.address')} wide>
+            <Field label={t('organisationen.address')} wide onAdd={add('masterData')}>
               {o.street || o.postalCode || o.city ? (
                 <>
                   {[o.street, o.houseNumber].filter(Boolean).join(' ')}
@@ -710,13 +791,37 @@ export function CompanyDetailPage() {
                 </>
               ) : null}
             </Field>
-            <Field label={t('organisationen.otherNotes')} wide>
+            <Field label={t('organisationen.otherNotes')} wide onAdd={add('masterData')}>
               {o.notes ? (
                 <span className="whitespace-pre-line">{o.notes}</span>
               ) : null}
             </Field>
           </dl>
         </DetailBlock>
+
+        {/* -------------------------------------------------- Aufnahmeformular */}
+        {/* NUR IN DER AUFNAHMEPHASE UND NACH DEN STAMMDATEN. Das Formular
+            sammelt Anschrift, Ansprechperson, Zahlung und Mandat und wird
+            genau einmal gebraucht: Der Link geht beim Wechsel auf „Pilot
+            beschlossen" hinaus. Davor gibt es keinen Anlass, danach steht die
+            Karte nicht mehr im Weg — wer ihren Nachweis oder den Link später
+            braucht, holt sie über den dezenten Link darunter zurück (ein
+            Wegblenden ohne Rückweg wäre ein verlorener Nachweis des Versands). */}
+        {o.status === 'pilot_approved' || intakeShown ? (
+          <ErrorBoundary area={t('organisationen.sectionIntakeForm')}>
+            <IntakeCard companyId={o.id} totpPossible={totpPossible} />
+          </ErrorBoundary>
+        ) : o.status !== 'inquiry' && o.status !== 'demo' ? (
+          <p className="mt-4">
+            <button
+              type="button"
+              onClick={() => setIntakeShown(true)}
+              className="inline-flex min-h-11 items-center text-sm text-leise underline underline-offset-2 hover:text-text sm:min-h-0"
+            >
+              {t('organisationen.intakeShow')}
+            </button>
+          </p>
+        ) : null}
 
         {/* ------------------------------------------------ Rechnungsadresse */}
         <DetailBlock
@@ -843,14 +948,26 @@ export function CompanyDetailPage() {
         >
           {noBillingAddress(o) ? (
             <p className="text-sm text-leise">
-              {t('organisationen.matchesAddress')}
+              {t('organisationen.matchesMasterData')}
             </p>
           ) : (
             <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={t('organisationen.name')}>{o.billingName}</Field>
-              <Field label={t('organisationen.invoiceEmail')}>{o.billingEmail}</Field>
+              {/* Name und Anschrift fallen einzeln auf die Stammdaten zurück
+                  (wie `utils/recipient.ts`); die E-Mail steht für sich. */}
+              <Field label={t('organisationen.name')}>
+                {o.billingName?.trim() ? (
+                  o.billingName
+                ) : (
+                  <span className="text-leise">
+                    {t('organisationen.likeMasterData')}
+                  </span>
+                )}
+              </Field>
+              <Field label={t('organisationen.invoiceEmail')} onAdd={add('invoice')}>
+                {o.billingEmail}
+              </Field>
               <Field label={t('organisationen.address')} wide>
-                {o.billingStreet || o.billingPostalCode || o.billingCity ? (
+                {hasOwnBillingAddress(o) ? (
                   <>
                     {[o.billingStreet, o.billingHouseNumber]
                       .filter(Boolean)
@@ -867,131 +984,164 @@ export function CompanyDetailPage() {
                       </>
                     ) : null}
                   </>
-                ) : null}
+                ) : (
+                  <span className="text-leise">
+                    {t('organisationen.likeMasterData')}
+                  </span>
+                )}
               </Field>
             </dl>
           )}
         </DetailBlock>
 
         {/* ----------------------------------------------------- E-Rechnung */}
-        <DetailBlock
-          title={t('organisationen.einvoice')}
-          id="e-rechnung"
-          edit={openBlock === 'einvoice'}
-          blocked={blocked('einvoice')}
-          loading={saving}
-          error={saveError}
-          onEditStart={() => editStart('einvoice', o)}
-          onCancel={cancel}
-          onSave={() => {
-            if (!e) return;
-            if (e.buyerType === 'authority' && text(e.buyerReference) === null) {
-              setSaveError(t('organisationen.leitwegRequired'));
-              return;
-            }
-            const address = text(e.electronicAddress);
-            void save({
-              buyerType: e.buyerType as BuyerType,
-              vatId: text(e.vatId)?.toUpperCase().replace(/\s+/g, '') ?? null,
-              buyerReference: e.buyerType === 'consumer' ? null : text(e.buyerReference),
-              electronicAddress: address,
-              electronicAddressScheme: address ? e.electronicAddressScheme : null,
-            });
-          }}
-          form={
-            e && (
-              <>
-                <SelectField
-                  label={t('organisationen.buyerType')}
-                  id="buyerType"
-                  value={e.buyerType}
-                  onChange={setField('buyerType')}
-                  helperText={t('organisationen.buyerTypeHint')}
-                >
-                  <option value="business">{t('organisationen.buyerTypeBusiness')}</option>
-                  <option value="authority">{t('organisationen.buyerTypeAuthority')}</option>
-                  <option value="consumer">{t('organisationen.buyerTypeConsumer')}</option>
-                </SelectField>
-                {e.buyerType !== 'consumer' && (
-                  <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-                    <InputField
-                      label={t('organisationen.vatId')}
-                      name="vatId"
-                      value={e.vatId}
-                      onChange={(ev) => setField('vatId')(ev.target.value)}
-                      helperText={t('organisationen.vatIdHint')}
-                    />
-                    <div className="relative">
+        {/* NUR BEI BEHÖRDEN ODER GESETZTER LEITWEG-ID. Für alle anderen ist die
+            Karte Rauschen: Empfängerart „Unternehmen" und lauter leere
+            Felder. Während sie bearbeitet wird, bleibt sie in jedem Fall
+            stehen, sonst verschwände das Formular unter den Händen (etwa
+            beim Wechsel der Empfängerart). Wer sie sonst braucht, kommt über
+            den Link darunter hin — und mit ihr auf den Anker `#e-rechnung`. */}
+        {o.buyerType === 'authority' ||
+        o.buyerReference !== null ||
+        einvoiceShown ||
+        openBlock === 'einvoice' ? (
+          <DetailBlock
+            title={t('organisationen.einvoice')}
+            id="e-rechnung"
+            edit={openBlock === 'einvoice'}
+            blocked={blocked('einvoice')}
+            loading={saving}
+            error={saveError}
+            onEditStart={() => editStart('einvoice', o)}
+            onCancel={cancel}
+            onSave={() => {
+              if (!e) return;
+              if (e.buyerType === 'authority' && text(e.buyerReference) === null) {
+                setSaveError(t('organisationen.leitwegRequired'));
+                return;
+              }
+              const address = text(e.electronicAddress);
+              void save({
+                buyerType: e.buyerType as BuyerType,
+                vatId: text(e.vatId)?.toUpperCase().replace(/\s+/g, '') ?? null,
+                buyerReference: e.buyerType === 'consumer' ? null : text(e.buyerReference),
+                electronicAddress: address,
+                electronicAddressScheme: address ? e.electronicAddressScheme : null,
+              });
+            }}
+            form={
+              e && (
+                <>
+                  <SelectField
+                    label={t('organisationen.buyerType')}
+                    id="buyerType"
+                    value={e.buyerType}
+                    onChange={setField('buyerType')}
+                    helperText={t('organisationen.buyerTypeHint')}
+                  >
+                    <option value="business">{t('organisationen.buyerTypeBusiness')}</option>
+                    <option value="authority">{t('organisationen.buyerTypeAuthority')}</option>
+                    <option value="consumer">{t('organisationen.buyerTypeConsumer')}</option>
+                  </SelectField>
+                  {e.buyerType !== 'consumer' && (
+                    <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
                       <InputField
-                        label={
-                          e.buyerType === 'authority'
-                            ? t('organisationen.leitwegIdRequired')
-                            : t('organisationen.buyerReference')
-                        }
-                        name="buyerReference"
-                        required={e.buyerType === 'authority'}
-                        value={e.buyerReference}
-                        onChange={(ev) => setField('buyerReference')(ev.target.value)}
-                        helperText={
-                          e.buyerType === 'authority'
-                            ? t('organisationen.leitwegIdAuthorityHint')
-                            : t('organisationen.buyerReferenceHint')
-                        }
+                        label={t('organisationen.vatId')}
+                        name="vatId"
+                        value={e.vatId}
+                        onChange={(ev) => setField('vatId')(ev.target.value)}
+                        helperText={t('organisationen.vatIdHint')}
                       />
-                      {/* Das Icon sitzt in der Beschriftungszeile des Feldes. */}
-                      <span className="absolute right-6 top-0">
-                        <HelpHint text={t('organisationen.leitwegHelp')} />
-                      </span>
+                      <div className="relative">
+                        <InputField
+                          label={
+                            e.buyerType === 'authority'
+                              ? t('organisationen.leitwegIdRequired')
+                              : t('organisationen.buyerReference')
+                          }
+                          name="buyerReference"
+                          required={e.buyerType === 'authority'}
+                          value={e.buyerReference}
+                          onChange={(ev) => setField('buyerReference')(ev.target.value)}
+                          helperText={
+                            e.buyerType === 'authority'
+                              ? t('organisationen.leitwegIdAuthorityHint')
+                              : t('organisationen.buyerReferenceHint')
+                          }
+                        />
+                        {/* Das Icon sitzt in der Beschriftungszeile des Feldes. */}
+                        <span className="absolute right-6 top-0">
+                          <HelpHint text={t('organisationen.leitwegHelp')} />
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}
-                {e.buyerType !== 'consumer' && (
-                  <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-                    <InputField
-                      label={t('organisationen.electronicAddress')}
-                      name="electronicAddress"
-                      value={e.electronicAddress}
-                      onChange={(ev) => setField('electronicAddress')(ev.target.value)}
-                      helperText={t('organisationen.electronicAddressHint')}
-                    />
-                    <SelectField
-                      label={t('organisationen.electronicAddressScheme')}
-                      id="electronicAddressScheme"
-                      value={e.electronicAddressScheme}
-                      onChange={setField('electronicAddressScheme')}
-                    >
-                      {ELECTRONIC_ADDRESS_SCHEMES.map((scheme) => (
-                        <option key={scheme} value={scheme}>
-                          {t(`organisationen.scheme_${scheme}`)}
-                        </option>
-                      ))}
-                    </SelectField>
-                  </div>
-                )}
-              </>
-            )
-          }
-        >
-          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={t('organisationen.buyerType')}>
-              {t(BUYER_TYPE_KEY[o.buyerType ?? 'business'])}
-            </Field>
-            <Field label={t('organisationen.vatId')}>{o.vatId}</Field>
-            <Field label={t('organisationen.buyerReference')}>{o.buyerReference}</Field>
-            <Field label={t('organisationen.electronicAddress')}>
-              {o.electronicAddress
-                ? `${o.electronicAddress}${
-                    o.electronicAddressScheme ? ` (${o.electronicAddressScheme})` : ''
-                  }`
-                : null}
-            </Field>
-          </dl>
-          {o.buyerType === 'authority' && !o.buyerReference && (
-            <p className="mt-3 text-sm text-gefahr" role="status">
-              {t('organisationen.leitwegMissing')}
-            </p>
-          )}
-        </DetailBlock>
+                  )}
+                  {e.buyerType !== 'consumer' && (
+                    <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+                      <InputField
+                        label={t('organisationen.electronicAddress')}
+                        name="electronicAddress"
+                        value={e.electronicAddress}
+                        onChange={(ev) => setField('electronicAddress')(ev.target.value)}
+                        helperText={t('organisationen.electronicAddressHint')}
+                      />
+                      <SelectField
+                        label={t('organisationen.electronicAddressScheme')}
+                        id="electronicAddressScheme"
+                        value={e.electronicAddressScheme}
+                        onChange={setField('electronicAddressScheme')}
+                      >
+                        {ELECTRONIC_ADDRESS_SCHEMES.map((scheme) => (
+                          <option key={scheme} value={scheme}>
+                            {t(`organisationen.scheme_${scheme}`)}
+                          </option>
+                        ))}
+                      </SelectField>
+                    </div>
+                  )}
+                </>
+              )
+            }
+          >
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label={t('organisationen.buyerType')}>
+                {t(BUYER_TYPE_KEY[o.buyerType ?? 'business'])}
+              </Field>
+              <Field label={t('organisationen.vatId')} onAdd={add('einvoice')}>
+                {o.vatId}
+              </Field>
+              <Field label={t('organisationen.buyerReference')} onAdd={add('einvoice')}>
+                {o.buyerReference}
+              </Field>
+              <Field label={t('organisationen.electronicAddress')} onAdd={add('einvoice')}>
+                {o.electronicAddress
+                  ? `${o.electronicAddress}${
+                      o.electronicAddressScheme ? ` (${o.electronicAddressScheme})` : ''
+                    }`
+                  : null}
+              </Field>
+            </dl>
+            {o.buyerType === 'authority' && !o.buyerReference && (
+              <p className="mt-3 text-sm text-gefahr" role="status">
+                {t('organisationen.leitwegMissing')}
+              </p>
+            )}
+          </DetailBlock>
+        ) : (
+          <p className="mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setEinvoiceShown(true);
+                editStart('einvoice', o);
+              }}
+              disabled={openBlock !== null}
+              className="inline-flex min-h-11 items-center text-sm text-leise underline underline-offset-2 hover:text-text disabled:no-underline disabled:opacity-60 sm:min-h-0"
+            >
+              {t('organisationen.einvoiceSetup')}
+            </button>
+          </p>
+        )}
 
         {/* ---------------------------------------------------------- Kontakte */}
         <DetailBlock
@@ -1062,7 +1212,10 @@ export function CompanyDetailPage() {
         >
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div className="min-w-0">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              {/* Beide Spaltenköpfe haben dieselbe Mindesthöhe (die des
+                  Knopfes), damit Überschriften und die Felder darunter auf
+                  einer Linie stehen — auch in der Spalte ohne Knopf. */}
+              <div className="mb-3 flex min-h-11 flex-wrap items-center justify-between gap-2 sm:min-h-10">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-leise">
                   {t('organisationen.mainContact')}
                 </h3>
@@ -1099,9 +1252,11 @@ export function CompanyDetailPage() {
             </div>
 
             <div className="min-w-0">
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-leise">
-                {t('organisationen.deputy')}
-              </h3>
+              <div className="mb-3 flex min-h-11 items-center sm:min-h-10">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-leise">
+                  {t('organisationen.deputy')}
+                </h3>
+              </div>
               {o.deputyName ||
               o.deputyEmail ||
               o.deputyPhone ||
@@ -1239,8 +1394,10 @@ export function CompanyDetailPage() {
             {t('organisationen.terms')}
           </h3>
           <dl className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={t('organisationen.priceTier')}>{o.priceTier}</Field>
-            <Field label={t('organisationen.paymentInterval')}>
+            <Field label={t('organisationen.priceTier')} onAdd={add('contract')}>
+              {o.priceTier}
+            </Field>
+            <Field label={t('organisationen.paymentInterval')} onAdd={add('contract')}>
               {o.paymentInterval ? PAYMENT_INTERVAL_LABEL[o.paymentInterval] : null}
             </Field>
           </dl>
@@ -1249,7 +1406,7 @@ export function CompanyDetailPage() {
             {t('organisationen.dates')}
           </h3>
           <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Field label={t('organisationen.pilotDecisionDate')}>
+            <Field label={t('organisationen.pilotDecisionDate')} onAdd={add('contract')}>
               {o.pilotDecisionDate && (
                 <span className="ziffern-tabellarisch">
                   {formatDate(o.pilotDecisionDate)}
@@ -1277,21 +1434,21 @@ export function CompanyDetailPage() {
                       denselben Sachverhalt zu behaupten, und einer davon bliebe
                       liegen. */}
                   {o.reviewDoneAt ? (
-                    <span className="ml-2 text-xs text-leise">
+                    <span className="ml-2 text-sm text-leise">
                       {t('organisationen.doneOn')}{' '}
                       <span className="ziffern-tabellarisch">
                         {formatDate(o.reviewDoneAt)}
                       </span>
                     </span>
                   ) : (
-                    <span className="ml-2 text-xs text-leise">
+                    <span className="ml-2 text-sm text-leise">
                       {t('organisationen.computedOpen')}
                     </span>
                   )}
                 </>
               ) : null}
             </Field>
-            <Field label={t('organisationen.instanceStart')}>
+            <Field label={t('organisationen.instanceStart')} onAdd={add('contract')}>
               {o.instanceStartDate && (
                 <span className="ziffern-tabellarisch">
                   {formatDate(o.instanceStartDate)}

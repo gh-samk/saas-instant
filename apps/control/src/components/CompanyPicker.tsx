@@ -135,7 +135,7 @@ export function CompanyPicker({
                     {company.name}
                   </span>
                   {company.city && (
-                    <span className="block text-xs text-leise">
+                    <span className="block text-sm text-leise">
                       {company.city}
                     </span>
                   )}

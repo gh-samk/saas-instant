@@ -47,7 +47,7 @@ export function RestoreStatus({
         </StatusPill>
       </div>
       {currentIndex >= 0 && (
-        <ol aria-label={t('backup.restoreStepsLabel')} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-leise">
+        <ol aria-label={t('backup.restoreStepsLabel')} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-leise">
           {STEPS.map((step, index) => (
             <li
               key={step}

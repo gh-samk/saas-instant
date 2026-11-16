@@ -208,7 +208,7 @@ export function PaymentDetailsCard({
               <Eye className="h-4 w-4" aria-hidden="true" />
               {t('components.paymentDetailsCard.button3')}</Button>
             {!stored && (
-              <span className="self-center text-xs text-leise">
+              <span className="self-center text-sm text-leise">
                 {t('components.paymentDetailsCard.label')}</span>
             )}
           </div>
@@ -285,15 +285,27 @@ export function PaymentDetailsCard({
             <Field label="IBAN" wide>
               {data.iban}
             </Field>
-            <Field label={t('components.paymentDetailsCard.label5')}>{data.sepaMandateReference}</Field>
-            <Field label={t('components.paymentDetailsCard.label6')}>
+            <Field
+              label={t('components.paymentDetailsCard.label5')}
+              onAdd={() => setDraft(draftFrom(data))}
+            >
+              {data.sepaMandateReference}
+            </Field>
+            <Field
+              label={t('components.paymentDetailsCard.label6')}
+              onAdd={() => setDraft(draftFrom(data))}
+            >
               {data.sepaMandateDate && (
                 <span className="ziffern-tabellarisch">
                   {formatDate(data.sepaMandateDate)}
                 </span>
               )}
             </Field>
-            <Field label={t('components.paymentDetailsCard.label7')} wide>
+            <Field
+              label={t('components.paymentDetailsCard.label7')}
+              wide
+              onAdd={() => setDraft(draftFrom(data))}
+            >
               {data.customAmount && formatAmount(data.customAmount)}
             </Field>
           </dl>

@@ -346,7 +346,7 @@ export function FormSection({
             aria-expanded={open}
             aria-controls={open ? bodyId : undefined}
             onClick={() => onToggle(!open)}
-            className="flex w-full items-center justify-between gap-3 text-left"
+            className="flex min-h-11 w-full items-center justify-between gap-3 text-left sm:min-h-0"
           >
             <span>{title}</span>
             <span className="flex shrink-0 items-center gap-2 text-sm font-normal text-leise">

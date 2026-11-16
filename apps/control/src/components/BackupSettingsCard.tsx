@@ -597,7 +597,7 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
             aria-controls="sicherung-erweitert"
             disabled={retentionBad || deviates}
             onClick={() => setAdvancedOpen((open) => !open)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-text"
+            className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-text sm:min-h-0"
           >
             <ChevronRight className={`h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none ${advancedShown ? 'rotate-90' : ''}`} aria-hidden="true" />
             {t('backup.advancedTitle')}

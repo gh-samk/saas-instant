@@ -1033,7 +1033,7 @@ export function InvoiceDraftForm({
                 </dd>
               </div>
             </dl>
-            <p className="mt-1 text-right text-xs text-leise">
+            <p className="mt-1 text-right text-sm text-leise">
               {t('components.invoiceDraftForm.text15')}</p>
           </Card>
 

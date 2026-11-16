@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Company } from '../lib/api';
-import { recipientPreview } from './recipient';
+import { hasOwnBillingAddress, recipientPreview } from './recipient';
 
 /** Eine Organisation mit ausschließlich leeren Feldern als Ausgangspunkt. */
 function company(part: Partial<Company>): Company {
@@ -110,5 +110,15 @@ describe('empfaengerVorschau', () => {
       ).email,
     ).toBe('vorstand@example.com');
     expect(recipientPreview(company({})).email).toBeNull();
+  });
+});
+
+describe('hasOwnBillingAddress', () => {
+  it('entscheidet nach Straße, PLZ und Ort — wie das Backend', () => {
+    expect(hasOwnBillingAddress(company({}))).toBe(false);
+    expect(hasOwnBillingAddress(company({ billingEmail: 'a@example.com', billingName: 'Buchhaltung', billingCountry: 'DE' }))).toBe(false);
+    expect(hasOwnBillingAddress(company({ billingStreet: 'Weg' }))).toBe(true);
+    expect(hasOwnBillingAddress(company({ billingPostalCode: '10115' }))).toBe(true);
+    expect(hasOwnBillingAddress(company({ billingCity: ' ' }))).toBe(false);
   });
 });

@@ -239,7 +239,7 @@ function IntegrityCard({
   return (
     <Card className="mt-6 p-4 sm:p-6">
       <details open={problem || undefined} className="group">
-        <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-2 rounded-md text-lg font-semibold text-text [&::-webkit-details-marker]:hidden">
+        <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-2 rounded-md text-lg font-semibold text-text sm:min-h-0 [&::-webkit-details-marker]:hidden">
           <ChevronRight
             className="h-4 w-4 shrink-0 text-leise transition-transform group-open:rotate-90"
             aria-hidden="true"
@@ -267,7 +267,7 @@ function IntegrityCard({
                 : t('gobd.retentionNone')}
             </span>
           </p>
-          <p className="mt-1 text-xs text-leise">{t('gobd.retentionNote')}</p>
+          <p className="mt-1 text-sm text-leise">{t('gobd.retentionNote')}</p>
 
           <h3 className="mb-3 mt-6 flex items-center gap-2 text-base font-semibold text-text">
             <HistoryIcon className="h-4 w-4 text-leise" aria-hidden="true" />
@@ -346,7 +346,7 @@ function IntegrityDetails({ result }: { result: IntegrityResult }) {
             ))}
         </ul>
       )}
-      <p className="ziffern-tabellarisch mt-2 text-xs text-leise">
+      <p className="ziffern-tabellarisch mt-2 text-sm text-leise">
         {t('gobd.integrityCheckedAt', { at: localStamp(result.checkedAt) })}
       </p>
     </div>
