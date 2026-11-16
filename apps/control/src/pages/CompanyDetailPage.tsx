@@ -18,7 +18,7 @@ import {
 } from '@saas-instant/ui';
 import { ContactPersonDialog } from '../components/ContactPersonDialog';
 import { DetailBlock, Field } from '../components/DetailBlock';
-import { SelectField, TextArea } from '../components/FormFields';
+import { HelpHint, SelectField, TextArea } from '../components/FormFields';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { IntakeCard } from '../components/IntakeCard';
 import { InstanceCard } from '../components/InstanceCard';
@@ -895,22 +895,28 @@ export function CompanyDetailPage() {
                       onChange={(ev) => setField('vatId')(ev.target.value)}
                       helperText={t('organisationen.vatIdHint')}
                     />
-                    <InputField
-                      label={
-                        e.buyerType === 'authority'
-                          ? t('organisationen.leitwegIdRequired')
-                          : t('organisationen.buyerReference')
-                      }
-                      name="buyerReference"
-                      required={e.buyerType === 'authority'}
-                      value={e.buyerReference}
-                      onChange={(ev) => setField('buyerReference')(ev.target.value)}
-                      helperText={
-                        e.buyerType === 'authority'
-                          ? t('organisationen.leitwegIdAuthorityHint')
-                          : t('organisationen.buyerReferenceHint')
-                      }
-                    />
+                    <div className="relative">
+                      <InputField
+                        label={
+                          e.buyerType === 'authority'
+                            ? t('organisationen.leitwegIdRequired')
+                            : t('organisationen.buyerReference')
+                        }
+                        name="buyerReference"
+                        required={e.buyerType === 'authority'}
+                        value={e.buyerReference}
+                        onChange={(ev) => setField('buyerReference')(ev.target.value)}
+                        helperText={
+                          e.buyerType === 'authority'
+                            ? t('organisationen.leitwegIdAuthorityHint')
+                            : t('organisationen.buyerReferenceHint')
+                        }
+                      />
+                      {/* Das Icon sitzt in der Beschriftungszeile des Feldes. */}
+                      <span className="absolute right-6 top-0">
+                        <HelpHint text={t('organisationen.leitwegHelp')} />
+                      </span>
+                    </div>
                   </div>
                 )}
                 {e.buyerType !== 'consumer' && (

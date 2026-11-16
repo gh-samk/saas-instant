@@ -139,7 +139,7 @@ describe('Rechnungsliste — Aktionen passen zum Zustand', () => {
       row.getByRole('button', { name: /Zahlung zu 2026-0151 erfassen/ }),
     ).toBeInTheDocument();
     expect(
-      row.getByRole('button', { name: /Erinnerung zu 2026-0151 senden/ }),
+      row.getByRole('button', { name: /Zahlungserinnerung \(Mahnung\) zu 2026-0151 senden/ }),
     ).toBeInTheDocument();
   });
 

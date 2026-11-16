@@ -66,11 +66,12 @@ describe('InstanceBackups', () => {
     adoptInstanceRestore.mockReset();
   });
 
-  it('listet Sicherungen mit Datum, Art, Größe und Prüfstand', async () => {
+  it('listet Sicherungen mit Datum, Größe und Prüfstand', async () => {
     show();
     expect(await screen.findByText('01.11.2026')).toBeInTheDocument();
     expect(screen.getByText('2,4 GB')).toBeInTheDocument();
-    expect(screen.getAllByText('Geprüft')).toHaveLength(2); // Spaltenkopf und Zelle
+    expect(screen.getAllByText('Geprüft')).toHaveLength(2); // Spaltenkopf und Badge
+    expect(screen.queryByRole('columnheader', { name: 'Art' })).not.toBeInTheDocument();
   });
 
   it('„Jetzt sichern" zeigt den Jobstatus bis zum Ende und lädt die Liste neu', async () => {
@@ -103,28 +104,47 @@ describe('InstanceBackups', () => {
     expect(await screen.findByText(/Sicherungs-Agent ist nicht erreichbar/)).toBeInTheDocument();
   });
 
-  it('Wiederherstellen: Bestätigung erst bei richtigem Instanznamen, Schlüssel geht an den Server', async () => {
+  it('Wiederherstellen: ohne Tippbestätigung, Name der neuen Subdomain im Knopf, Schlüssel geht an den Server', async () => {
     startInstanceRestore.mockResolvedValue({ ...RESTORE, status: 'provisioning' });
     show();
-    fireEvent.click(await screen.findByRole('button', { name: 'Als neue Instanz wiederherstellen' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Wiederherstellen …/ }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/bestehende Instanz bleibt unverändert/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/zur Bestätigung eintippen/)).not.toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText('Neue Subdomain'), { target: { value: 'verein-neu' } });
+    const submit = within(dialog).getByRole('button', { name: 'Als „verein-neu“ wiederherstellen' });
+    expect(submit).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText('Privater Schlüssel (Entschlüsselung)'), { target: { value: `# Kommentar\n${KEY}\n` } });
-    const submit = within(dialog).getByRole('button', { name: 'Wiederherstellung starten' });
-    expect(submit).toBeDisabled();
-    fireEvent.change(within(dialog).getByLabelText('Instanzname zur Bestätigung eintippen'), { target: { value: 'falsch' } });
-    expect(submit).toBeDisabled();
-    fireEvent.change(within(dialog).getByLabelText('Instanzname zur Bestätigung eintippen'), { target: { value: 'verein-alt' } });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
     await waitFor(() => expect(startInstanceRestore).toHaveBeenCalled());
+    // Der Server verlangt den Namen der bestehenden Instanz weiter; die Oberfläche liefert ihn selbst.
     expect(startInstanceRestore.mock.calls[0]?.[1]).toEqual({
       backupId: BACKUP.id, newSubdomain: 'verein-neu', ageIdentity: KEY, confirmName: 'verein-alt',
     });
     expect(await screen.findByText('Neue Instanz verein-neu')).toBeInTheDocument();
     // Der Schlüssel steht nirgends mehr im Dokument.
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument();
+  });
+
+  it('Wiederherstellen: Schlüsseldatei lässt sich ablegen, eine zu große Datei wird abgewiesen', async () => {
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: /^Wiederherstellen …/ }));
+    const dialog = await screen.findByRole('dialog');
+    const drop = within(dialog).getByText('Schlüsseldatei hierher ziehen oder wählen');
+    // jsdom kennt `File.text()` nicht; der Browser schon.
+    const content = `# c\n${KEY}\n`;
+    const file = Object.assign(new File([content], 'schluessel.txt', { type: 'text/plain' }), {
+      text: async () => content,
+    });
+    fireEvent.drop(drop, { dataTransfer: { files: [file] } });
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('Privater Schlüssel (Entschlüsselung)')).toHaveValue(`# c\n${KEY}`),
+    );
+    expect(within(dialog).getByText(/Gewählt: schluessel\.txt/)).toBeInTheDocument();
+    const big = new File(['x'.repeat(70 * 1024)], 'gross.txt');
+    fireEvent.drop(within(dialog).getByText(/Gewählt: schluessel\.txt/), { dataTransfer: { files: [big] } });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/zu groß für einen Schlüssel/);
   });
 
   it('Übernehmen erklärt „gestoppt, nicht gelöscht" und verlangt den Nachweis', async () => {

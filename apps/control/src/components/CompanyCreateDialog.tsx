@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Dialog, InputField, Button } from '@saas-instant/ui';
-import { SelectField } from './FormFields';
+import { RequiredLegend, SelectField, fieldLabel } from './FormFields';
 import { errorText } from '../lib/api-client';
 import { createCompany, type Source, type Company } from '../lib/api';
 import { SOURCE_LABEL } from '../lib/company-status';
@@ -113,8 +113,9 @@ export function CompanyCreateDialog({
         }}
         noValidate
       >
+        <RequiredLegend />
         <InputField
-          label={t('components.companyCreateDialog.label')}
+          label={fieldLabel(t('components.companyCreateDialog.label'), 'required')}
           name="organisation-name"
           autoFocus
           required
@@ -122,27 +123,27 @@ export function CompanyCreateDialog({
           onChange={(e) => setName(e.target.value)}
         />
         <InputField
-          label={t('components.companyCreateDialog.label2')}
+          label={fieldLabel(t('components.companyCreateDialog.label2'), 'optional')}
           name="organisation-ansprechpartnerin"
           value={contactName}
           onChange={(e) => setContactPersonName(e.target.value)}
         />
         <InputField
-          label={t('components.companyCreateDialog.label3')}
+          label={fieldLabel(t('components.companyCreateDialog.label3'), 'optional')}
           name="organisation-email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <InputField
-          label={t('components.companyCreateDialog.label4')}
+          label={fieldLabel(t('components.companyCreateDialog.label4'), 'optional')}
           name="organisation-telefon"
           type="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
         />
         <SelectField
-          label={t('components.companyCreateDialog.label5')}
+          label={fieldLabel(t('components.companyCreateDialog.label5'), 'optional')}
           id="organisation-herkunft"
           value={source}
           onChange={setSource}

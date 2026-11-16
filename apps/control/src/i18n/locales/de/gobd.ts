@@ -42,7 +42,7 @@ export default {
   historySendFailed: 'Versand fehlgeschlagen',
   historyReminder: 'Zahlungserinnerung versendet',
   historyCancelled: 'Storniert',
-  historyPaid: 'Zahlung vermerkt (bezahlt)',
+  historyPaid: 'Zahlung erfasst (bezahlt)',
   historyTransfer: 'Übertragungsvermerk gesetzt',
   historyIntegrityFailed: 'Abweichung bei Integritätsprüfung',
   historyOther: 'Ereignis ({action})',

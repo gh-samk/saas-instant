@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SUBDOMAIN_MAX,
+  alternativeSubdomains,
   normalizeSubdomain,
   subdomainFormatError,
 } from './subdomain';
@@ -66,5 +67,24 @@ describe('Subdomain-Eingabe', () => {
     // als 400 aus der Verfügbarkeitsprüfung.
     expect(subdomainFormatError('www')).toBeNull();
     expect(serverError('www')).toContain('reserviert');
+  });
+});
+
+describe('alternativeSubdomains', () => {
+  it('zählt ab -2 hoch und setzt eine vorhandene Endzahl fort', () => {
+    expect(alternativeSubdomains('muster-testverein', 3)).toEqual([
+      'muster-testverein-2',
+      'muster-testverein-3',
+      'muster-testverein-4',
+    ]);
+    expect(alternativeSubdomains('muster-2', 2)).toEqual(['muster-3', 'muster-4']);
+  });
+
+  it('bleibt unter der Höchstlänge und ist als Subdomain zulässig', () => {
+    const long = 'a'.repeat(SUBDOMAIN_MAX);
+    for (const candidate of alternativeSubdomains(long)) {
+      expect(candidate.length).toBeLessThanOrEqual(SUBDOMAIN_MAX);
+      expect(subdomainFormatError(candidate)).toBeNull();
+    }
   });
 });

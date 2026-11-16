@@ -72,8 +72,14 @@ export function NoticeBar({
       className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm ${style.surface} ${style.layout} ${style.text} ${className ?? ''}`}
     >
       <style.Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1">{children}</span>
-      {action}
+      {/* Unter 640 px steht der Satz oben (Breite abzüglich Icon), der Knopf
+          darunter in voller Breite; erst darüber sitzt er rechts in der Zeile. */}
+      <span
+        className={`min-w-0 flex-1 ${action ? 'basis-[calc(100%-1.875rem)] sm:basis-0' : ''}`}
+      >
+        {children}
+      </span>
+      {action && <div className="w-full sm:w-auto">{action}</div>}
     </div>
   );
 }

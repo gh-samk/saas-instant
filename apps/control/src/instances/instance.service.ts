@@ -189,26 +189,38 @@ export class InstanceService {
    * hier nie eingetragen wurde (genau der Fall, den der Abgleich als „verwaist"
    * meldet). Sie zu überschreiben wäre der stille Datenverlust, um den es geht.
    */
-  async checkSubdomain(value: string): Promise<{ available: boolean }> {
+  async checkSubdomain(
+    value: string,
+  ): Promise<{ available: boolean; reason?: 'taken' | 'unverifiable' }> {
     const subdomain = normalizeSubdomain(value);
     const reason = subdomainError(subdomain);
     if (reason !== null) throw new SubdomainInvalidError(reason);
-    return { available: !(await this.isTaken(subdomain)) };
+    const state = await this.availability(subdomain);
+    // `reason` trennt „gehört schon jemandem" von „ließ sich nicht prüfen":
+    // `available` ist in beiden Fällen `false` (im Zweifel vergeben), die
+    // Oberfläche aber soll das eine nicht als das andere melden.
+    return state === 'free' ? { available: true } : { available: false, reason: state };
   }
 
   private async isTaken(subdomain: string): Promise<boolean> {
+    return (await this.availability(subdomain)) !== 'free';
+  }
+
+  private async availability(subdomain: string): Promise<'free' | 'taken' | 'unverifiable'> {
     const inCrm = await this.prisma.instance.findUnique({
       where: { subdomain },
       select: { id: true },
     });
-    if (inCrm !== null) return true;
+    if (inCrm !== null) return 'taken';
 
     const fqdn = this.hostFor(subdomain);
     try {
       const applications = await this.provisioner.status();
       return applications.some(
         (a) => a.domains.includes(fqdn) || a.name === this.applicationName(subdomain),
-      );
+      )
+        ? 'taken'
+        : 'free';
     } catch (exception) {
       // COOLIFY NICHT ERREICHBAR HEISST NICHT „FREI".
       //
@@ -222,7 +234,7 @@ export class InstanceService {
         `Verfügbarkeit von ${fqdn} nicht prüfbar (${reason}). Die Subdomain ` +
           'gilt vorsorglich als vergeben.',
       );
-      return true;
+      return 'unverifiable';
     }
   }
 

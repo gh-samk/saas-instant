@@ -140,7 +140,7 @@ export interface LineInput {
   quantity: number;
   unitPriceNetCent: number;
   taxRate: number;
-  /** UN/ECE Rec. 20, z. B. `C62` (Stück/Pauschale), `MON`, `ANN`. */
+  /** UN/ECE Rec. 20, z. B. `C62` (Stück), `MON`, `ANN`, `LS` (Pauschale). */
   unit?: string;
   /** Abrechnungszeitraum des einzelnen Postens. */
   period?: { from: string; until: string };

@@ -1468,6 +1468,16 @@ export function fetchSubdomainSuggestion(
 }
 
 /**
+ * Antwort der Verfügbarkeitsprüfung. `reason` trennt „vergeben" (`taken`) von
+ * „gerade nicht prüfbar" (`unverifiable`, z. B. Coolify nicht erreichbar);
+ * gesperrt ist die Subdomain in beiden Fällen.
+ */
+export interface SubdomainCheck {
+  available: boolean;
+  reason?: 'taken' | 'unverifiable';
+}
+
+/**
  * Ist die Subdomain frei? Geprüft gegen CRM UND Coolify.
  *
  * Wirft `400 subdomain_ungueltig`, wenn der Wert unzulässig oder für den
@@ -1477,8 +1487,8 @@ export function fetchSubdomainSuggestion(
 export function checkSubdomain(
   companyId: string,
   value: string,
-): Promise<{ available: boolean }> {
-  return apiFetch<{ available: boolean }>(
+): Promise<SubdomainCheck> {
+  return apiFetch<SubdomainCheck>(
     `/api/companies/${encodeURIComponent(companyId)}/instance/subdomain-available?value=${encodeURIComponent(value)}`,
   );
 }
@@ -1664,7 +1674,7 @@ export interface InvoiceLineInput {
   periodUntil?: string;
   unitPriceNetCent: number;
   taxRate: number;
-  /** UN/ECE Rec. 20: `C62` (Pauschale), `MON` (Monat), `ANN` (Jahr). */
+  /** UN/ECE Rec. 20: `C62` (Stück), `MON` (Monat), `ANN` (Jahr), `LS` (Pauschale). */
   unit?: string;
   /** Preisstufe des Postens (aus dem Vorschlag); das Etikett setzt der Server. */
   priceTierKey?: string;

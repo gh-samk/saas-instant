@@ -1,11 +1,12 @@
 import { t } from '../i18n';
+import { issueLine, isRawServerText, validationIssues } from './validation-errors';
 /**
  * HTTP-Zugang zur Verwaltungs-API.
  *
  * Aufbau bewusst identisch zu `apps/web/src/lib/api-client.ts`: Cookies werden
  * immer mitgeschickt, vor jeder schreibenden Anfrage wird das CSRF-Token
  * beschafft und als Header `x-csrf-token` gesendet (Double-Submit), und Fehler
- * kommen im einheitlichen Format `{ fehler: { code, nachricht, detail? } }`
+ * kommen im einheitlichen Format `{ error: { code, message, detail? } }`
  * zurück.
  */
 const API_BASIS = (import.meta.env['VITE_API_URL'] as string | undefined) ?? '';
@@ -138,13 +139,21 @@ const FALLBACK_TEXT: Record<string, string> = {
 /**
  * Der Text, den die Oberfläche zu einem Fehler anzeigt.
  *
- * Reihenfolge: bekannte Rahmenmeldung übersetzen, sonst die fachliche Meldung
- * des Servers im Wortlaut, sonst der übergebene Ersatztext. Es verschwindet
- * nichts stillschweigend — es wird nur nichts Technisches durchgereicht.
+ * Reihenfolge: bekannte Rahmenmeldung übersetzen; Prüfmeldungen des Servers
+ * auf deutsche Feldbezeichnungen abbilden („Posten 1, Einheit: …", bei mehreren
+ * „2 Angaben prüfen"); sonst die fachliche Meldung des Servers im Wortlaut;
+ * sonst der übergebene Ersatztext. Rohe Rahmentexte (englisch, technisch)
+ * werden durch den Ersatztext ersetzt. Es verschwindet nichts stillschweigend
+ * — es wird nur nichts Technisches durchgereicht.
  */
 export function errorText(error: unknown, fallback: string): string {
   if (!(error instanceof ApiError)) return fallback;
-  return FALLBACK_TEXT[error.error.code] ?? error.error.message ?? fallback;
+  const known = FALLBACK_TEXT[error.error.code];
+  if (known !== undefined) return known;
+  const issues = validationIssues(error);
+  if (issues.length === 1 && issues[0] !== undefined) return issueLine(issues[0]);
+  if (issues.length > 1) return t('common.validation.count', { count: issues.length });
+  return isRawServerText(error.error.message) ? fallback : error.error.message;
 }
 
 const SECURE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { today } from '@saas-instant/shared';
 import { ChevronDown, Info, PlusCircle, Trash2 } from 'lucide-react';
 import {
@@ -9,13 +9,14 @@ import {
   Button,
   useToast,
 } from '@saas-instant/ui';
-import { SelectField, TextArea } from './FormFields';
+import { HelpHint, SelectField, TextArea } from './FormFields';
 import { InvoiceFinalizeDialog } from './InvoiceFinalizeDialog';
 import {
   InvoicePriceSuggestion,
   type AdoptionLines,
 } from './InvoicePriceSuggestion';
 import { errorText } from '../lib/api-client';
+import { issueLine, validationIssues, type ValidationIssue } from '../lib/validation-errors';
 import { TEXT_BUTTON_ACTION } from '../lib/styles';
 import {
   updateInvoiceDraft,
@@ -89,16 +90,108 @@ function linesFrom(invoice: Invoice): LinesDraft[] {
     periodUntil: p.periodUntil ?? '',
     unitPriceNet: p.unitPriceNet,
     taxRate: decimalFieldValue(p.taxRate),
-    unit: p.unit ?? 'C62',
+    unit: normalizeUnit(p.unit),
     priceTierKey: p.priceTierKey ?? '',
   }));
 }
 
+/**
+ * Die wählbaren Einheiten (UN/ECE Rec. 20, höchstens drei Zeichen — so viel
+ * nimmt das Feld `unit` des Servers und so steht es als `unitCode` im XML).
+ */
 const UNITS: { value: string; label: string }[] = [
   { value: 'C62', label: t('components.invoiceDraftForm.label') },
   { value: 'MON', label: t('components.invoiceDraftForm.label2') },
   { value: 'ANN', label: t('components.invoiceDraftForm.label3') },
+  { value: 'LS', label: t('components.invoiceDraftForm.unitLumpSum') },
 ];
+
+/**
+ * Ältere Entwürfe können eine frei getippte Einheit tragen („Stück", „Monat").
+ * Bekannte Wörter werden auf den Code abgebildet, den die Auswahl kennt; alles
+ * andere bleibt unverändert stehen und erscheint als eigener Eintrag
+ * (`unitOptions`), damit nichts stillschweigend umgeschrieben wird.
+ */
+const UNIT_WORDS: Record<string, string> = {
+  stück: 'C62',
+  stueck: 'C62',
+  stk: 'C62',
+  'stk.': 'C62',
+  monat: 'MON',
+  monate: 'MON',
+  jahr: 'ANN',
+  pauschal: 'LS',
+  pauschale: 'LS',
+};
+
+function normalizeUnit(unit: string | null): string {
+  if (unit === null || unit.trim() === '') return 'C62';
+  return UNIT_WORDS[unit.trim().toLowerCase()] ?? unit;
+}
+
+/** Auswahlliste einer Zeile: die festen Einheiten, bei fremdem Wert dieser dazu. */
+function unitOptions(current: string): { value: string; label: string }[] {
+  return UNITS.some((u) => u.value === current)
+    ? UNITS
+    : [...UNITS, { value: current, label: current }];
+}
+
+/** Längste Einheit, die der Server annimmt. */
+const UNIT_MAX_LENGTH = 3;
+
+/**
+ * Ordnet eine Prüfmeldung des Servers dem Eingabefeld zu.
+ *
+ * `key` ist der Schlüssel in `fieldError`, `focusId` das Element, das den
+ * Fokus bekommt, `expand` der Posten, dessen „Weitere Angaben" dafür offen sein
+ * müssen. `null`, wenn das Formular dazu kein Feld hat (dann steht die Meldung
+ * nur in der Zusammenfassung). `rank` bestimmt, welches Feld zuerst den Fokus
+ * bekommt: Posten in Lesereihenfolge, danach die Kopfangaben.
+ */
+interface FieldTarget {
+  key: string;
+  focusId: string;
+  expand: string | null;
+  rank: number;
+}
+
+const LINE_FIELDS: Record<string, { suffix: string; focus: string; weitere: boolean; rank: number }> = {
+  label: { suffix: 'bezeichnung', focus: 'bezeichnung', weitere: false, rank: 0 },
+  periodFrom: { suffix: 'zeitraum', focus: 'zeitraum-von', weitere: false, rank: 1 },
+  periodUntil: { suffix: 'zeitraum', focus: 'zeitraum-bis', weitere: false, rank: 2 },
+  quantity: { suffix: 'menge', focus: 'menge', weitere: false, rank: 3 },
+  unitPriceNetCent: { suffix: 'einzelpreis', focus: 'einzelpreis', weitere: false, rank: 4 },
+  taxRate: { suffix: 'steuersatz', focus: 'steuersatz', weitere: false, rank: 5 },
+  description: { suffix: 'beschreibung', focus: 'beschreibung', weitere: true, rank: 6 },
+  unit: { suffix: 'einheit', focus: 'einheit', weitere: true, rank: 7 },
+};
+
+const HEAD_FIELDS: Record<string, { key: string; focusId: string; rank: number }> = {
+  invoiceDate: { key: 'rechnung-rechnungsdatum', focusId: 'rechnung-rechnungsdatum', rank: 1000 },
+  servicePeriodFrom: { key: 'period-from', focusId: 'rechnung-zeitraum-von', rank: 1001 },
+  servicePeriodUntil: { key: 'period', focusId: 'rechnung-zeitraum-bis', rank: 1002 },
+  dueDate: { key: 'rechnung-faelligkeit', focusId: 'rechnung-faelligkeit', rank: 1003 },
+  introduction: { key: 'rechnung-einleitung', focusId: 'rechnung-einleitung', rank: 1004 },
+  paymentNote: { key: 'rechnung-zahlungshinweis', focusId: 'rechnung-zahlungshinweis', rank: 1005 },
+  internalNote: { key: 'rechnung-interne-notiz', focusId: 'rechnung-interne-notiz', rank: 1006 },
+};
+
+function targetFor(issue: ValidationIssue, lines: LinesDraft[]): FieldTarget | null {
+  if (issue.field === null) return null;
+  if (issue.index !== null) {
+    const line = lines[issue.index];
+    const spec = LINE_FIELDS[issue.field];
+    if (line === undefined || spec === undefined) return null;
+    return {
+      key: `${line.key}-${spec.suffix}`,
+      focusId: `${line.key}-${spec.focus}`,
+      expand: spec.weitere ? line.key : null,
+      rank: issue.index * 10 + spec.rank,
+    };
+  }
+  const head = HEAD_FIELDS[issue.field];
+  return head === undefined ? null : { key: head.key, focusId: head.focusId, expand: null, rank: head.rank };
+}
 
 /**
  * Das Entwurfsformular einer Rechnung.
@@ -180,6 +273,11 @@ export function InvoiceDraftForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<Record<string, string>>({});
+  /** Zusammenfassung oben: eine Zeile je fehlerhafter Angabe. */
+  const [summary, setSummary] = useState<string[]>([]);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  /** Welches Feld den Fokus bekommen soll; `n` zählt, damit dasselbe Feld erneut greift. */
+  const [focusRequest, setFocusRequest] = useState<{ id: string; n: number } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -196,6 +294,47 @@ export function InvoiceDraftForm({
     });
     setDueDate(invoice.dueDate);
   }, [invoice]);
+
+  // Fokus erst nach dem Rendern setzen: Das Feld kann hinter „Weitere Angaben"
+  // liegen, das im selben Schritt erst aufklappt.
+  useEffect(() => {
+    if (focusRequest === null) return;
+    const element = document.getElementById(focusRequest.id);
+    if (element instanceof HTMLElement) element.focus();
+  }, [focusRequest]);
+
+  function requestFocus(id: string, expand: string | null) {
+    if (expand !== null) setExpanded((alt) => new Set(alt).add(expand));
+    setFocusRequest((alt) => ({ id, n: (alt?.n ?? 0) + 1 }));
+  }
+
+  /**
+   * Prüfmeldungen des Servers ans Feld setzen, Fokus aufs erste fehlerhafte
+   * Feld, Zusammenfassung oben. `false`, wenn der Fehler keine Eingabeprüfung
+   * war (dann bleibt es beim Text unter dem Formular).
+   */
+  function showServerIssues(f: unknown): boolean {
+    const issues = validationIssues(f);
+    if (issues.length === 0) return false;
+    const errorList: Record<string, string> = {};
+    let first: FieldTarget | null = null;
+    const toExpand: string[] = [];
+    for (const issue of issues) {
+      const target = targetFor(issue, lines);
+      if (target === null) continue;
+      // Jede Meldung muss sichtbar sein, auch die hinter „Weitere Angaben".
+      if (target.expand !== null) toExpand.push(target.expand);
+      errorList[target.key] ??= issue.message;
+      if (first === null || target.rank < first.rank) first = target;
+    }
+    setFieldError(errorList);
+    setSummary(issues.map(issueLine));
+    setError(null);
+    if (toExpand.length > 0) setExpanded((alt) => new Set([...alt, ...toExpand]));
+    if (first !== null) requestFocus(first.focusId, first.expand);
+    else summaryRef.current?.focus();
+    return true;
+  }
 
   function linesChange(
     key: string,
@@ -271,6 +410,10 @@ export function InvoiceDraftForm({
           t('components.invoiceDraftForm.text5');
       }
 
+      if (p.unit.length > UNIT_MAX_LENGTH) {
+        errorList[`${p.key}-einheit`] = t('components.invoiceDraftForm.unitInvalid');
+      }
+
       // BEIDE ODER KEINER. Der Server weist einen halben Zeitraum ab; ihn hier
       // still wegzulassen hiesse, eine Eingabe der Betreiberin zu verschlucken.
       const half =
@@ -310,6 +453,18 @@ export function InvoiceDraftForm({
     }
 
     setFieldError(errorList);
+    setSummary([]);
+    const firstKey = Object.keys(errorList)[0];
+    if (firstKey !== undefined) {
+      // Die Schlüssel entsprechen den Feld-IDs, nur der Zeitraum und die
+      // Kopfzeile des Leistungszeitraums tragen eine andere.
+      const focusId = firstKey.endsWith('-zeitraum')
+        ? `${firstKey}-von`
+        : firstKey === 'period'
+          ? 'rechnung-zeitraum-bis'
+          : firstKey;
+      requestFocus(focusId, firstKey.endsWith('-einheit') ? firstKey.slice(0, -'-einheit'.length) : null);
+    }
     return Object.keys(errorList).length === 0 ? dto : null;
   }
 
@@ -326,6 +481,7 @@ export function InvoiceDraftForm({
     }
     setLoading(true);
     setError(null);
+    setSummary([]);
     try {
       const body = {
         invoiceDate,
@@ -349,7 +505,9 @@ export function InvoiceDraftForm({
     } catch (f) {
       // Das Formular bleibt vollständig erhalten — kein Datenverlust bei einem
       // Serverfehler.
-      setError(errorText(f, t('components.invoiceDraftForm.text10')));
+      if (!showServerIssues(f)) {
+        setError(errorText(f, t('components.invoiceDraftForm.text10')));
+      }
       return null;
     } finally {
       setLoading(false);
@@ -403,6 +561,22 @@ export function InvoiceDraftForm({
 
   return (
     <>
+      {summary.length > 0 && (
+        <div
+          ref={summaryRef}
+          role="alert"
+          tabIndex={-1}
+          className="mb-4 rounded-lg border border-einwand-rahmen-hell bg-einwand-bg p-3 text-sm text-einwand-text focus:outline-none"
+        >
+          <p className="font-semibold">{t('common.validation.count', { count: summary.length })}</p>
+          <ul className="mt-1 list-inside list-disc">
+            {summary.map((line, i) => (
+              <li key={`${i}-${line}`}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* ZWEISPALTIG NACH ENTWURF: links, was den Inhalt der Rechnung
           ausmacht (Posten, Texte), rechts die Rahmendaten. Die rechte Spalte
           bleibt beim Scrollen stehen — wer unten an den Posten arbeitet, soll
@@ -466,7 +640,7 @@ export function InvoiceDraftForm({
                       und das trifft die Sache: Er sagt, WOFÜR abgerechnet
                       wird. Beschreibung und Einheit sind Beiwerk und bleiben
                       hinter „Weitere Angaben". */}
-                  <div className="grid grid-cols-2 gap-x-3">
+                  <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
                     <DateField
                       id={`${p.key}-zeitraum-von`}
                       label={t('components.invoiceDraftForm.label6')}
@@ -578,6 +752,7 @@ export function InvoiceDraftForm({
                             ev.target.value,
                           )
                         }
+                        error={fieldError[`${p.key}-beschreibung`]}
                       />
                       <SelectField
                         id={`${p.key}-einheit`}
@@ -586,8 +761,9 @@ export function InvoiceDraftForm({
                         onChange={(value) =>
                           linesChange(p.key, 'unit', value)
                         }
+                        error={fieldError[`${p.key}-einheit`]}
                       >
-                        {UNITS.map((e) => (
+                        {unitOptions(p.unit).map((e) => (
                           <option key={e.value} value={e.value}>
                             {e.label}
                           </option>
@@ -646,6 +822,7 @@ export function InvoiceDraftForm({
               label={t('components.invoiceDraftForm.label14')}
               value={introduction}
               onChange={setIntroduction}
+              error={fieldError['rechnung-einleitung']}
               rows={3}
               helperText={t('components.invoiceDraftForm.helperText')}
             />
@@ -655,6 +832,7 @@ export function InvoiceDraftForm({
               value={paymentNote}
               maxLength={500}
               onChange={(ev) => setPaymentNote(ev.target.value)}
+              error={fieldError['rechnung-zahlungshinweis']}
               helperText={t('components.invoiceDraftForm.helperText2')}
             />
           </Card>
@@ -688,6 +866,7 @@ export function InvoiceDraftForm({
               value={invoiceDate}
               onChange={setInvoiceDate}
               required
+              error={fieldError['rechnung-rechnungsdatum']}
             />
             <DateField
               id="rechnung-zeitraum-von"
@@ -695,6 +874,7 @@ export function InvoiceDraftForm({
               value={period.from}
               onChange={(value) => setPeriod((z) => ({ ...z, from: value }))}
               required
+              error={fieldError['period-from']}
             />
             <DateField
               id="rechnung-zeitraum-bis"
@@ -710,6 +890,7 @@ export function InvoiceDraftForm({
               value={dueDate}
               onChange={setDueDate}
               helperText={t('components.invoiceDraftForm.helperText3')}
+              error={fieldError['rechnung-faelligkeit']}
             />
 
             <p className="mt-2 flex items-start gap-2 text-[13px] text-still">
@@ -726,6 +907,7 @@ export function InvoiceDraftForm({
               label={t('components.invoiceDraftForm.label21')}
               value={internalNote}
               onChange={setInternalNote}
+              error={fieldError['rechnung-interne-notiz']}
               rows={3}
               helperText={t('components.invoiceDraftForm.helperText4')}
             />
@@ -748,13 +930,15 @@ export function InvoiceDraftForm({
         <div className="mt-6 rounded-lg border border-rahmen bg-flaeche-2 p-4">
           <p className="text-sm text-text">
             {t('components.invoiceDraftForm.text17')}</p>
-          <Button
-            variant="secondaryGreen"
-            className="mt-3"
-            loading={loading}
-            onClick={() => void saveAndPreview()}
-          >
-            {t('components.invoiceDraftForm.button4')}</Button>
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              variant="secondaryGreen"
+              loading={loading}
+              onClick={() => void saveAndPreview()}
+            >
+              {t('components.invoiceDraftForm.button4')}</Button>
+            <HelpHint text={t('components.invoiceDraftForm.finalizeHint')} />
+          </div>
         </div>
       )}
 

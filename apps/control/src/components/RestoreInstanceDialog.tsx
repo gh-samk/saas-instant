@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FileKey } from 'lucide-react';
 import { Button, Dialog, InputField, NoticeBar } from '@saas-instant/ui';
 import {
   startInstanceRestore,
@@ -18,9 +19,15 @@ import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
  *
  * Es entsteht IMMER eine zusätzliche Instanz; die bestehende bleibt
  * unverändert. Der private Schlüssel lebt nur im Zustand dieses Dialogs und
- * wird beim Schließen verworfen. Zur Bestätigung ist der Instanzname
- * einzutippen — der Server prüft ihn ein zweites Mal.
+ * wird beim Schließen verworfen. Eine Bestätigung durch Tippen gibt es nicht:
+ * Die Wiederherstellung legt immer eine NEUE Instanz an und löscht nie etwas,
+ * die alte bleibt unberührt. Die API verlangt den Instanznamen weiterhin
+ * (Regel 2 der Projektkonventionen: der Server prüft alles); die Oberfläche
+ * schickt dafür den Namen der Instanz, aus der sie geöffnet wurde.
  */
+
+/** Eine Schlüsseldatei ist wenige Zeilen groß; alles darüber ist die falsche Datei. */
+const KEY_FILE_MAX_BYTES = 64 * 1024;
 export function RestoreInstanceDialog({
   open,
   instanceId,
@@ -32,7 +39,7 @@ export function RestoreInstanceDialog({
 }: {
   open: boolean;
   instanceId: string;
-  /** Der Instanzname, der zur Bestätigung einzutippen ist. */
+  /** Der Instanzname der bestehenden Instanz; geht unverändert an den Server. */
   subdomain: string;
   backup: InstanceBackupRow | null;
   totpPossible: boolean;
@@ -43,7 +50,8 @@ export function RestoreInstanceDialog({
   const evidenceState = useSecondFactorEvidence();
   const [newSubdomain, setNewSubdomain] = useState('');
   const [key, setKey] = useState('');
-  const [confirmName, setConfirmName] = useState('');
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -53,7 +61,8 @@ export function RestoreInstanceDialog({
     if (!open) {
       setNewSubdomain('');
       setKey('');
-      setConfirmName('');
+      setFileName(null);
+      setDragging(false);
       setError(null);
       setFileError(null);
       setLoading(false);
@@ -62,15 +71,18 @@ export function RestoreInstanceDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const nameMatches = confirmName.trim() === subdomain;
-  const ready =
-    backup !== null && newSubdomain.trim() !== '' && key.trim() !== '' && nameMatches;
+  const ready = backup !== null && newSubdomain.trim() !== '' && key.trim() !== '';
 
   async function readFile(file: File | undefined) {
     setFileError(null);
     if (!file) return;
+    if (file.size > KEY_FILE_MAX_BYTES) {
+      setFileError(t('backup.restoreKeyFileTooBig'));
+      return;
+    }
     try {
       setKey((await file.text()).trim());
+      setFileName(file.name);
     } catch {
       setFileError(t('backup.restoreKeyFileFailed'));
     }
@@ -89,7 +101,7 @@ export function RestoreInstanceDialog({
           // Dateien enden oft auf einen Zeilenumbruch, und age-Schlüsseldateien
           // können Kommentarzeilen tragen: nur die Schlüsselzeile gilt.
           ageIdentity: keyLine(key),
-          confirmName: confirmName.trim(),
+          confirmName: subdomain,
         },
         evidence,
       );
@@ -114,7 +126,9 @@ export function RestoreInstanceDialog({
           <>
             <Button variant="ghost" onClick={onClose}>{t('backup.restoreCancel')}</Button>
             <Button disabled={!ready} loading={loading} onClick={() => void submit()}>
-              {t('backup.restoreSubmit')}
+              {newSubdomain.trim() === ''
+                ? t('backup.restoreSubmit')
+                : t('backup.restoreSubmitNamed', { subdomain: newSubdomain.trim() })}
             </Button>
           </>
         }
@@ -152,28 +166,40 @@ export function RestoreInstanceDialog({
             className="w-full rounded-lg border border-rahmen-ui bg-flaeche px-3 py-2 font-mono text-sm text-text placeholder:text-still focus:border-primaer"
           />
           <p className="mt-1 text-sm text-leise">{t('backup.restoreKeyHint')}</p>
-          <label htmlFor="wiederherstellen-schluesseldatei" className="mt-2 block text-sm text-text">
-            {t('backup.restoreKeyFile')}
+          <label
+            htmlFor="wiederherstellen-schluesseldatei"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              void readFile(e.dataTransfer.files[0]);
+            }}
+            className={`mt-2 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed px-3 py-3 text-sm text-text transition-colors focus-within:border-primaer hover:bg-flaeche-3 ${
+              dragging ? 'border-primaer bg-primaer-soft' : 'border-rahmen-ui'
+            }`}
+          >
+            <FileKey className="h-5 w-5 shrink-0 text-leise" aria-hidden="true" />
+            <span className="min-w-0 break-words">
+              {fileName !== null
+                ? t('backup.restoreKeyFileChosen', { name: fileName })
+                : t('backup.restoreKeyDrop')}
+            </span>
+            <input
+              id="wiederherstellen-schluesseldatei"
+              type="file"
+              className="sr-only"
+              onChange={(e) => {
+                void readFile(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
           </label>
-          <input
-            id="wiederherstellen-schluesseldatei"
-            type="file"
-            aria-label={t('backup.restoreKeyFileLabel')}
-            className="mt-1 block w-full text-sm text-text"
-            onChange={(e) => void readFile(e.target.files?.[0])}
-          />
           {fileError !== null && <p role="alert" className="mt-1 text-sm text-gefahr">{fileError}</p>}
         </div>
-        <InputField
-          id="wiederherstellen-bestaetigung"
-          label={t('backup.restoreConfirm')}
-          helperText={t('backup.restoreConfirmHint', { name: subdomain })}
-          value={confirmName}
-          onChange={(e) => setConfirmName(e.target.value)}
-          error={confirmName !== '' && !nameMatches ? t('backup.restoreConfirmMismatch') : undefined}
-          autoComplete="off"
-          spellCheck={false}
-        />
         {error !== null && <p role="alert" className="text-sm text-gefahr">{error}</p>}
       </Dialog>
 

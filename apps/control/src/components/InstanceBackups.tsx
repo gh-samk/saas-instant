@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Skeleton, Table, useToast } from '@saas-instant/ui';
+import { Button, Skeleton, StatusPill, Table, useToast } from '@saas-instant/ui';
 import {
   adoptInstanceRestore,
   fetchBackupJob,
@@ -176,7 +176,6 @@ export function InstanceBackups({
 
   const columns = [
     t('backup.columnDate'),
-    t('backup.columnKind'),
     t('backup.columnSize'),
     t('backup.columnVerified'),
     t('backup.columnAction'),
@@ -212,15 +211,26 @@ export function InstanceBackups({
           {backups.map((b) => (
             <tr key={b.id} className="transition-colors hover:bg-flaeche-3">
               <td className={`${tableRow.compact} ${tableText.compact.primary}`}>{formatDate(b.date)}</td>
-              <td className={`${tableRow.compact} ${tableText.compact.secondary}`}>{t('backup.kindInstance')}</td>
               <td className={`${tableRow.compact} ziffern-tabellarisch ${tableText.compact.secondary}`}>{formatSize(b.sizeBytes)}</td>
               <td className={`${tableRow.compact} ${tableText.compact.secondary}`}>
-                {b.verified ? t('backup.verifiedYes') : t('backup.verifiedNo')}
+                {b.verified ? (
+                  <StatusPill kind="confirmed">{t('backup.verifiedYes')}</StatusPill>
+                ) : (
+                  <>
+                    <span aria-hidden="true">—</span>
+                    <span className="sr-only">{t('backup.verifiedNo')}</span>
+                  </>
+                )}
               </td>
               <td className={tableRow.compact}>
                 {b.restorable ? (
-                  <Button variant="secondary" size="sm" onClick={() => setRestoreFor(b)}>
-                    {t('backup.restoreAsNew')}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label={t('backup.restoreRowLabel', { date: formatDate(b.date) })}
+                    onClick={() => setRestoreFor(b)}
+                  >
+                    {t('backup.restoreRow')}
                   </Button>
                 ) : (
                   <span className={tableText.compact.secondary}>{t('backup.notRestorable')}</span>

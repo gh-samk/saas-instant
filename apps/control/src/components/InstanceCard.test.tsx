@@ -191,7 +191,7 @@ describe('Instanz-Karte — anlegen', () => {
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Instanz anlegen' }));
-    expect(await screen.findByLabelText('Subdomain')).toHaveValue(
+    expect(await screen.findByLabelText('Subdomain *')).toHaveValue(
       'musterverein-ostend',
     );
     expect(await screen.findByText('Verfügbar')).toBeInTheDocument();
@@ -225,6 +225,14 @@ describe('Instanz-Karte — anlegen', () => {
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Instanz anlegen' }));
+    // Beim ungetippten Vorschlag steht kein roter Fehler, nur ein ruhiger Hinweis.
+    expect(
+      await screen.findByText(/Der Vorschlag ist bereits vergeben/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Diese Subdomain ist bereits vergeben.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Weiter' })).toBeDisabled();
+    // Erst nach eigener Eingabe wird daraus der Fehler am Feld.
+    fireEvent.change(screen.getByLabelText('Subdomain *'), { target: { value: 'musterverein' } });
     expect(
       await screen.findByText('Diese Subdomain ist bereits vergeben.'),
     ).toBeInTheDocument();

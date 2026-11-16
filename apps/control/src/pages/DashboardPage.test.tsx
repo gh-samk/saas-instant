@@ -359,24 +359,24 @@ describe('Dashboard — Aufgabenliste', () => {
     // Die Ueberschrift steht seit dem Redesign nur noch fuer die
     // Vorlesestimme da — sichtbar ist die Zeile mit dem Befund.
     expect(
-      await screen.findByRole('heading', { name: 'Abgleich mit Coolify' }),
+      await screen.findByRole('heading', { name: 'Abgleich der Instanzen' }),
     ).toBeInTheDocument();
     expect(screen.getByText('alt-projekt')).toBeInTheDocument();
     expect(screen.getByText(/25\.08\.2026/)).toBeInTheDocument();
     // DER ABGLEICH MELDET NUR — er ordnet nichts zu und löscht nichts.
     //
     // Vorher stand hier „gar kein Knopf". Das war dieselbe Aussage, solange
-    // es keinen gab; seit „Jetzt prüfen" ist es die falsche: Ein erneuter
+    // es keinen gab; seit „Jetzt abgleichen" ist es die falsche: Ein erneuter
     // Lauf ist kein Eingriff, sondern dieselbe Messung noch einmal. Geprüft
     // wird deshalb, WELCHE Knöpfe es gibt — genau der eine, der nur liest.
     const section = screen.getByRole('region', {
-      name: 'Abgleich mit Coolify',
+      name: 'Abgleich der Instanzen',
     });
     expect(
       within(section)
         .queryAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['Jetzt prüfen']);
+    ).toEqual(['Jetzt abgleichen']);
   });
 
   it('unterscheidet „kein Befund" von „nicht gemessen"', async () => {
@@ -405,7 +405,28 @@ describe('Dashboard — Aufgabenliste', () => {
     // Befund und fehlte ausgerechnet hier — „kam nicht durch" ohne jede
     // Handlung daneben.
     expect(
-      screen.getByRole('button', { name: 'Jetzt prüfen' }),
+      screen.getByRole('button', { name: 'Jetzt abgleichen' }),
+    ).toBeInTheDocument();
+  });
+
+  it('nie gelaufen: ein Band in Alltagssprache, der Knopf steckt im Band', async () => {
+    setFetchReady({
+      ...TASKS,
+      orphanedApplications: [],
+      state: {
+        ...TASKS.state,
+        reconciliation: { lastAt: null, successful: false, message: null },
+      },
+    });
+    window.history.pushState({}, '', '/');
+    renderWithI18n(<App />);
+
+    const text = await screen.findByText(/noch nie abgeglichen/);
+    expect(text).toHaveTextContent('Zahlen zu Instanzen können fehlen');
+    expect(text.textContent).not.toMatch(/Coolify|ungemessen/);
+    const band = text.parentElement as HTMLElement;
+    expect(
+      within(band).getByRole('button', { name: 'Jetzt abgleichen' }),
     ).toBeInTheDocument();
   });
 
@@ -419,7 +440,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Jetzt prüfen' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Jetzt abgleichen' }));
 
     await waitFor(() => {
       const call = called.mock.calls.find((c) =>

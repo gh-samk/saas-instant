@@ -159,7 +159,7 @@ export default function App() {
                 element={<CompanyDetailPage />}
               />
               {/* `:invoiceId` ist entweder eine Kennung oder das Wortzeichen
-                  `neu`. Die Form ist nicht frei wählbar: Die Aufgabenquelle
+                  `new`. Die Form ist nicht frei wählbar: Die Aufgabenquelle
                   `rechnung-ueberfaellig` liefert bereits genau diesen Pfad als
                   Ziel ihrer Handlung — und Lesezeichen aus der Zeit davor
                   gibt es auch. Beide landen weiterhin richtig: Die Neuanlage
@@ -169,7 +169,7 @@ export default function App() {
                 element={<InvoiceRedirect />}
               />
               {/* Der Redaktionsbereich. `:id` ist die Kennung der Vorlage;
-                  ein Wortzeichen wie `neu` gibt es hier bewusst nicht — eine
+                  ein Wortzeichen wie `new` gibt es hier bewusst nicht — eine
                   Vorlage entsteht im Dialog der Liste, weil der KANAL beim
                   Anlegen fällt und danach nie wieder änderbar ist. */}
               {/* Die globale Rechnungsliste. Sie steht VOR den

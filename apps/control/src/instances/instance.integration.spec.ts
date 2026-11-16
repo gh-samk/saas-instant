@@ -228,6 +228,7 @@ describe('Subdomain — geprüft, bevor irgendetwas passiert', () => {
     const { service: second } = build();
     expect(await second.checkSubdomain('belegt-im-crm')).toEqual({
       available: false,
+      reason: 'taken',
     });
   });
 
@@ -237,6 +238,7 @@ describe('Subdomain — geprüft, bevor irgendetwas passiert', () => {
 
     expect(await service.checkSubdomain('nur-coolify')).toEqual({
       available: false,
+      reason: 'taken',
     });
   });
 
@@ -246,8 +248,11 @@ describe('Subdomain — geprüft, bevor irgendetwas passiert', () => {
     const { service, coolify } = build();
     coolify.failsAt = 'applications';
 
+    // Nicht „vergeben", sondern „nicht prüfbar": die Oberfläche meldet beides
+    // verschieden, gesperrt bleibt die Subdomain in beiden Fällen.
     expect(await service.checkSubdomain('unbekannt-bei-ausfall')).toEqual({
       available: false,
+      reason: 'unverifiable',
     });
   });
 

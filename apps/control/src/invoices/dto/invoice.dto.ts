@@ -76,7 +76,7 @@ export class InvoiceLineDto {
   @Max(100)
   taxRate!: number;
 
-  /** UN/ECE Rec. 20, z. B. `C62` (Pauschale), `MON` (Monat), `ANN` (Jahr). */
+  /** UN/ECE Rec. 20, z. B. `C62` (Stück), `MON` (Monat), `ANN` (Jahr), `LS` (Pauschale). */
   @IsOptional()
   @IsString()
   @MaxLength(3)

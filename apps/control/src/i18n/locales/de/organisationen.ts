@@ -18,6 +18,7 @@ export default {
   electronicAddressHint: 'Optional: Adresse, an die die E-Rechnung elektronisch zugestellt werden kann (z. B. E-Mail oder Peppol-ID).',
   electronicAddressScheme: 'Art der elektronischen Adresse',
   leitwegIdAuthorityHint: 'Pflicht bei Behörden: Ohne Leitweg-ID kann die Rechnung nicht festgeschrieben werden.',
+  leitwegHelp: 'Pflicht bei Behörden. Die Kennung steht auf der Bestellung oder im Auftrag der Behörde.',
   leitwegIdRequired: 'Leitweg-ID (Pflicht)',
   leitwegMissing: 'Für eine Behörde fehlt die Leitweg-ID. Ohne sie lässt sich keine Rechnung festschreiben.',
   leitwegRequired: 'Bei einer Behörde ist die Leitweg-ID Pflicht. Bitte trage sie ein.',

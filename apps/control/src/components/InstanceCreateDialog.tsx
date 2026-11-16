@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Globe, Loader2 } from 'lucide-react';
+import { CheckCircle2, Globe, Info, Loader2 } from 'lucide-react';
 import { Dialog, InputField, Button } from '@saas-instant/ui';
 import { Field } from './DetailBlock';
+import { fieldLabel } from './FormFields';
 import { ApiError, errorText } from '../lib/api-client';
 import {
   generateInstancePreview,
@@ -12,13 +13,20 @@ import {
   type InstancePreview,
 } from '../lib/api';
 import {
+  alternativeSubdomains,
   normalizeSubdomain,
   subdomainFormatError,
 } from '../utils/subdomain';
+import { TEXT_BUTTON } from '../lib/styles';
 import { useT } from '../i18n';
 
 type Step = 'subdomain' | 'preview';
-type CheckStatus = 'unknown' | 'prueft' | 'available' | 'taken';
+/**
+ * `idle`: nichts zu prüfen (leer oder Format falsch). `unknown`: die Prüfung
+ * ist gerade NICHT möglich (Dienst nicht erreichbar) — ausdrücklich etwas
+ * anderes als `taken`, die Subdomain gehört schon jemandem.
+ */
+type CheckStatus = 'idle' | 'checking' | 'available' | 'taken' | 'unknown';
 
 /** Wartezeit, bevor eine Eingabe zur Verfügbarkeitsanfrage wird. */
 const CHECK_DELAY_MS = 500;
@@ -52,6 +60,14 @@ const CHECK_DELAY_MS = 500;
  * steht. Er ist zu diesem Zeitpunkt sichtbar, die Anfrage geht an den eigenen
  * Server, und eine bereits vergebene vorgeschlagene Subdomain fällt so
  * sofort auf statt erst nach einem Umweg.
+ *
+ * WAS DIE OBERFLÄCHE DAVON ZEIGT, hängt an der Eingabe: Der Vorschlag wird
+ * still geprüft. Ist er vergeben, setzt der Dialog den ersten freien
+ * Ausweichnamen (`-2`, `-3` …) ein, ohne etwas Rotes zu zeigen — niemand hat
+ * etwas Falsches getippt. Erst wenn jemand tippt oder das Feld verlässt,
+ * erscheint „vergeben" als Fehler am Feld, samt freiem Vorschlag zum
+ * Übernehmen. „Prüfung gerade nicht möglich" ist ein neutraler Hinweis mit
+ * Wiederholen-Knopf, kein Fehler am Feld.
  */
 export function InstanceCreateDialog({
   open,
@@ -69,8 +85,15 @@ export function InstanceCreateDialog({
   const t = useT();
   const [step, setStep] = useState<Step>('subdomain');
   const [subdomain, setSubdomain] = useState('');
-  const [checkStatus, setCheckStatus] = useState<CheckStatus>('unknown');
+  const [checkStatus, setCheckStatus] = useState<CheckStatus>('idle');
   const [fieldError, setFieldError] = useState<string | null>(null);
+  /** Hat jemand getippt oder das Feld verlassen? Erst dann zählt „vergeben" als Fehler. */
+  const [touched, setTouched] = useState(false);
+  /** Erster freier Ausweichname zu einer vergebenen Subdomain. */
+  const [alternative, setAlternative] = useState<string | null>(null);
+  /** Hochgezählt, um die Prüfung von Hand zu wiederholen. */
+  const [recheck, setRecheck] = useState(0);
+  const touchedRef = useRef(false);
   const [preview, setPreview] = useState<InstancePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
@@ -81,7 +104,14 @@ export function InstanceCreateDialog({
   const previewRef = useRef<HTMLDivElement>(null);
 
   const formatError = subdomainFormatError(subdomain);
-  const errorTextField = formatError ?? fieldError;
+  const takenError =
+    checkStatus === 'taken' && touched ? t('components.instanceCreateDialog.text') : null;
+  const errorTextField = formatError ?? fieldError ?? takenError;
+
+  function touch() {
+    touchedRef.current = true;
+    setTouched(true);
+  }
 
   // Beim Öffnen zurück auf Anfang und den Vorschlag holen. Ein abgebrochener
   // Versuch soll beim nächsten Öffnen nicht mit alten Werten dastehen.
@@ -90,8 +120,11 @@ export function InstanceCreateDialog({
     let discarded = false;
     setStep('subdomain');
     setSubdomain('');
-    setCheckStatus('unknown');
+    setCheckStatus('idle');
     setFieldError(null);
+    setAlternative(null);
+    setTouched(false);
+    touchedRef.current = false;
     setPreview(null);
     setCreateError(null);
     void fetchSubdomainSuggestion(companyId)
@@ -113,33 +146,62 @@ export function InstanceCreateDialog({
   useEffect(() => {
     if (!open || step !== 'subdomain') return;
     if (subdomain === '' || formatError !== null) {
-      setCheckStatus('unknown');
+      setCheckStatus('idle');
+      setAlternative(null);
       return;
     }
     const run = ++checkRun.current;
-    setCheckStatus('prueft');
+    setCheckStatus('checking');
     setFieldError(null);
+    setAlternative(null);
     const clock = setTimeout(() => {
-      void checkSubdomain(companyId, subdomain)
-        .then((response) => {
+      void (async () => {
+        try {
+          const response = await checkSubdomain(companyId, subdomain);
           if (run !== checkRun.current) return;
-          setCheckStatus(response.available ? 'available' : 'taken');
-          setFieldError(
-            response.available ? null : t('components.instanceCreateDialog.text'),
-          );
-        })
-        .catch((f: unknown) => {
+          if (response.available) {
+            setCheckStatus('available');
+            return;
+          }
+          if (response.reason === 'unverifiable') {
+            setCheckStatus('unknown');
+            return;
+          }
+          // Wer getippt hat, sieht „vergeben" sofort. Beim Vorschlag bleibt es
+          // bei „wird geprüft", bis feststeht, ob sich ein Ersatz findet —
+          // sonst blitzte kurz eine Meldung auf, die gleich wieder verschwindet.
+          if (touchedRef.current) setCheckStatus('taken');
+          // Einen freien Ausweichnamen suchen. Wird dabei die Prüfung selbst
+          // unmöglich, bleibt es beim Hinweis „vergeben" ohne Vorschlag.
+          for (const candidate of alternativeSubdomains(subdomain)) {
+            const other = await checkSubdomain(companyId, candidate);
+            if (run !== checkRun.current) return;
+            if (other.available) {
+              // Den NICHT getippten Vorschlag still ersetzen; eine Eingabe
+              // bleibt stehen und bekommt den Namen nur angeboten.
+              if (touchedRef.current) setAlternative(candidate);
+              else setSubdomain(candidate);
+              return;
+            }
+            if (other.reason === 'unverifiable') break;
+          }
+          setCheckStatus('taken');
+        } catch (f: unknown) {
           if (run !== checkRun.current) return;
-          setCheckStatus('unknown');
-          // Der Server kennt die gesperrten Namen und begründet sie im
-          // Wortlaut — die Oberfläche pflegt dafür keine eigene Liste.
-          setFieldError(
-            errorText(f, t('components.instanceCreateDialog.text2')),
-          );
-        });
+          // Eine Ablehnung des Servers mit Begründung (reservierter Name) steht
+          // im Wortlaut am Feld. Alles andere — Netz, 5xx, Drosselung — heißt
+          // nur: gerade nicht prüfbar.
+          if (f instanceof ApiError && f.status >= 400 && f.status < 500 && f.status !== 429 && f.status !== 403) {
+            setCheckStatus('idle');
+            setFieldError(errorText(f, t('components.instanceCreateDialog.text2')));
+          } else {
+            setCheckStatus('unknown');
+          }
+        }
+      })();
     }, CHECK_DELAY_MS);
     return () => clearTimeout(clock);
-  }, [open, step, subdomain, formatError, companyId]);
+  }, [open, step, subdomain, formatError, companyId, recheck]);
 
   // Nach dem Schrittwechsel wandert der Fokus in den neuen Inhalt — `Dialog`
   // tut das nur beim Öffnen, nicht bei einem internen Wechsel.
@@ -186,6 +248,10 @@ export function InstanceCreateDialog({
       setCreateLoading(false);
     }
   }
+
+  // Der Vorschlag war vergeben und es fand sich kein freier Ersatz: neutral
+  // sagen, was zu tun ist, solange noch nichts getippt wurde.
+  const untouchedTaken = checkStatus === 'taken' && !touched;
 
   const context = (
     <p className="mb-4 text-sm text-leise">
@@ -246,14 +312,19 @@ export function InstanceCreateDialog({
           <InputField
             id="instanz-subdomain-feld"
             name="subdomain"
-            label={t('components.instanceCreateDialog.label')}
+            label={fieldLabel(t('components.instanceCreateDialog.label'), 'required')}
+            required
             autoFocus
             autoComplete="off"
             spellCheck={false}
             value={subdomain}
-            onChange={(e) =>
-              setSubdomain(normalizeSubdomain(e.target.value))
-            }
+            onChange={(e) => {
+              touch();
+              setSubdomain(normalizeSubdomain(e.target.value));
+            }}
+            onBlur={() => {
+              if (subdomain !== '') touch();
+            }}
             error={errorTextField ?? undefined}
             helperText={
               errorTextField
@@ -263,7 +334,7 @@ export function InstanceCreateDialog({
           />
           {/* Der Zustand der Prüfung steht am Feld, nicht am Knopf: dort
               entsteht er, und ein zweiter Ladezustand wäre Wiederholung. */}
-          {!errorTextField && checkStatus === 'prueft' && (
+          {!errorTextField && checkStatus === 'checking' && (
             <p className="-mt-3 mb-4 flex items-center gap-1.5 text-sm text-leise">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               {t('components.instanceCreateDialog.text6')}</p>
@@ -272,6 +343,37 @@ export function InstanceCreateDialog({
             <p className="-mt-3 mb-4 flex items-center gap-1.5 text-sm text-beschluss-text">
               <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
               {t('components.instanceCreateDialog.text7')}</p>
+          )}
+          {/* Freier Ersatz zum Übernehmen — nur, wenn das Getippte vergeben ist. */}
+          {takenError && alternative !== null && (
+            <p className="-mt-3 mb-4 text-sm text-leise">
+              {t('components.instanceCreateDialog.alternative')}{' '}
+              <button
+                type="button"
+                className={TEXT_BUTTON}
+                onClick={() => setSubdomain(alternative)}
+              >
+                {alternative}
+              </button>
+            </p>
+          )}
+          {untouchedTaken && (
+            <p role="status" className="-mt-3 mb-4 flex items-start gap-1.5 text-sm text-leise">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {t('components.instanceCreateDialog.takenSuggestion')}
+            </p>
+          )}
+          {/* Nicht prüfbar ist KEIN Fehler am Feld und heißt nicht „vergeben". */}
+          {!errorTextField && checkStatus === 'unknown' && (
+            <p role="status" className="-mt-3 mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-leise">
+              <span className="flex min-w-0 items-start gap-1.5">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>{t('components.instanceCreateDialog.unknown')}</span>
+              </span>
+              <button type="button" className={TEXT_BUTTON} onClick={() => setRecheck((n) => n + 1)}>
+                {t('components.instanceCreateDialog.recheck')}
+              </button>
+            </p>
           )}
         </form>
       ) : (

@@ -704,7 +704,7 @@ describe('Zahlung — hinter dem zweiten Faktor', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Zahlung erfassen/ }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Zahlung vermerken' }),
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Zahlung erfassen' }),
     );
 
     // Der Nachweis-Dialog klappt auf, weil der Server 401 geantwortet hat.
@@ -734,7 +734,9 @@ describe('Zahlung — hinter dem zweiten Faktor', () => {
     expect(
       await screen.findByLabelText('Gezahlter Betrag (EUR, gesamt)'),
     ).toHaveValue(583.1);
-    fireEvent.click(screen.getByRole('button', { name: 'Zahlung vermerken' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Zahlung erfassen' }),
+    );
 
     await waitFor(() => {
       const first = called.mock.calls.find(([path]) =>
@@ -852,6 +854,7 @@ describe('[K3] Der Abschluss einer Rechnung — hinter dem zweiten Faktor', () =
     open(FINALIZED_ID);
 
     fireEvent.click(await screen.findByRole('button', { name: /^Versenden$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Jetzt senden' }));
     await evidenceKeep(/verschickte Mail holt niemand zurück/);
 
     await waitFor(() => {
@@ -869,9 +872,11 @@ describe('[K3] Der Abschluss einer Rechnung — hinter dem zweiten Faktor', () =
     });
     open(FINALIZED_ID);
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Erinnerung senden/ }),
-    );
+    const reminder = await screen.findByRole('button', { name: /Zahlungserinnerung senden/ });
+    // „Mahnung" als Zusatz in derselben Zeile — wer danach sucht, findet den Knopf.
+    expect(within(reminder).getByText('(Mahnung)')).toBeInTheDocument();
+    fireEvent.click(reminder);
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung senden' }));
     await evidenceKeep(/geht an eine Kundin/);
 
     await waitFor(() => {
@@ -989,11 +994,16 @@ describe('[H5] Versand nach der Kontaktdatenlöschung', () => {
     });
   });
 
-  it('fragt bei ungelöschten Kontaktdaten NICHT nach', async () => {
+  it('fragt bei ungelöschten Kontaktdaten nur mit dem Bestätigungsdialog nach', async () => {
     const called = setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
     fireEvent.click(await screen.findByRole('button', { name: /^Versenden$/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).queryByText(/weitere Verarbeitung nach dem Löschverlangen/),
+    ).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Jetzt senden' }));
 
     await waitFor(() => {
       expect(

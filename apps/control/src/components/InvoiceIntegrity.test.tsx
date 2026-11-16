@@ -51,7 +51,7 @@ describe('InvoiceIntegrity', () => {
       'Festgeschrieben',
       'Versendet',
       'Dokument abgerufen (PDF)',
-      'Zahlung vermerkt (bezahlt)',
+      'Zahlung erfasst (bezahlt)',
       'Storniert',
     ]) {
       expect(await screen.findByText(text)).toBeInTheDocument();

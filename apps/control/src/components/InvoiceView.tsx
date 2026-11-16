@@ -197,6 +197,7 @@ export function InvoiceView({
   const [transferOpen, setTransferOpen] = useState(false);
   const [sendPurpose, setSendPurpose] = useState<SendPurpose | null>(null);
   const [warningPurpose, setWarningPurpose] = useState<SendPurpose | null>(null);
+  const [confirmPurpose, setConfirmPurpose] = useState<SendPurpose | null>(null);
   const evidenceState = useSecondFactorEvidence();
 
   const cancellationNumber = useInvoiceNumber(invoice.cancellationInvoiceId);
@@ -238,15 +239,19 @@ export function InvoiceView({
   }
 
   /**
-   * Der Weg zum Absenden: bei gelöschten Kontaktdaten erst die Nachfrage
-   * ([H5]), sonst direkt.
+   * Der Weg zum Absenden: Eine Mail geht an eine Kundin und lässt sich nicht
+   * zurückholen, also nie mit einem einzigen Klick. Bei gelöschten
+   * Kontaktdaten übernimmt die Nachfrage ([H5], mit Adresse) diese Rolle —
+   * eine zweite Rückfrage dahinter wäre bloß Ermüdung. Sonst fragt der
+   * Bestätigungsdialog. Erst danach läuft `send`, und der Zweitfaktor
+   * meldet sich dort, falls der Server ihn verlangt.
    */
   function startSend(purpose: SendPurpose) {
     if (contactDataDeleted) {
       setWarningPurpose(purpose);
       return;
     }
-    void send(purpose);
+    setConfirmPurpose(purpose);
   }
 
   const cancelled = invoice.paymentState === 'cancelled';
@@ -482,7 +487,13 @@ export function InvoiceView({
             onClick={() => startSend('reminder')}
           >
             <MailWarning className="h-4 w-4" aria-hidden="true" />
-            {t('components.invoiceView.button3')}</Button>
+            {/* „Mahnung" als kleiner Zusatz in derselben Zeile: gleiche Höhe wie die
+                übrigen Knöpfe, und wer danach sucht, findet das Wort trotzdem. */}
+            <span>{t('components.invoiceView.button3')}</span>
+            <span className="text-xs font-normal text-leise">
+              ({t('components.invoiceView.reminderSubtitle')})
+            </span>
+          </Button>
         )}
 
         {invoice.paymentState !== 'paid' && !cancelled && (
@@ -571,6 +582,78 @@ export function InvoiceView({
           onCancelled(result);
         }}
       />
+
+      {/* Die Bestätigung vor dem Versand. Empfänger und Betrag kommen aus dem
+          Schnappschuss der Rechnung — genau dorthin schickt der Server
+          (`recipientEmail` der Rechnung, nicht die aktuelle Kontaktadresse der
+          Organisation). Ohne Adresse lehnt der Server ohnehin ab; dann ist der
+          Knopf gesperrt. Bei der Erinnerung zählt der OFFENE Betrag, beim
+          Versand die Bruttosumme. */}
+      {(() => {
+        const purpose = confirmPurpose;
+        const reminder = purpose === 'reminder';
+        const email = invoice.recipientEmail;
+        const missingEmail = email === null || email.trim() === '';
+        const dialogTitle = reminder
+          ? t('components.invoiceView.confirmTitleReminder')
+          : alreadySent
+            ? t('components.invoiceView.confirmTitleResend')
+            : t('components.invoiceView.confirmTitleSend');
+        return (
+          <Dialog
+            open={purpose !== null}
+            title={dialogTitle}
+            size="sm"
+            onClose={() => setConfirmPurpose(null)}
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setConfirmPurpose(null)}>
+                  {t('components.invoiceView.button8')}
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={missingEmail}
+                  onClick={() => {
+                    setConfirmPurpose(null);
+                    if (purpose) void send(purpose);
+                  }}
+                >
+                  {reminder
+                    ? t('components.invoiceView.confirmReminder')
+                    : t('components.invoiceView.confirmSend')}
+                </Button>
+              </>
+            }
+          >
+            <dl className="space-y-2 text-sm text-text">
+              <div>
+                <dt className="text-leise">{t('components.invoiceView.confirmRecipient')}</dt>
+                <dd className="font-medium">{invoice.recipientName}</dd>
+                {!missingEmail && <dd className="font-medium">{email}</dd>}
+              </div>
+              <div>
+                <dt className="text-leise">{t('components.invoiceView.confirmInvoiceNumber')}</dt>
+                <dd className="font-medium">{invoice.invoiceNumber}</dd>
+              </div>
+              <div>
+                <dt className="text-leise">
+                  {reminder
+                    ? t('components.invoiceView.confirmOpenAmount')
+                    : t('components.invoiceView.confirmAmount')}
+                </dt>
+                <dd className="ziffern-tabellarisch font-medium">
+                  {formatAmount(reminder ? invoice.openAmount : invoice.sumGross)}
+                </dd>
+              </div>
+            </dl>
+            {missingEmail && (
+              <p role="alert" className="mt-3 text-sm text-gefahr">
+                {t('components.invoiceView.confirmNoEmail')}
+              </p>
+            )}
+          </Dialog>
+        );
+      })()}
 
       {/* [H5] Die Nachfrage nach der Kontaktdatenlöschung.
           KEINE SPERRE: Es kann Gründe geben, eine bereits ausgestellte

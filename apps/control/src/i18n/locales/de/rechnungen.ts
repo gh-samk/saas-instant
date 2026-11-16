@@ -44,7 +44,7 @@ export default {
   paidRevenue: 'Bezahlter Umsatz {year}',
   recordPaymentFor: 'Zahlung zu {invoice} erfassen',
   retry: 'Erneut versuchen',
-  sendReminderFor: 'Erinnerung zu {invoice} senden',
+  sendReminderFor: 'Zahlungserinnerung (Mahnung) zu {invoice} senden',
   showAll: 'Alle zeigen',
   status: 'Status',
   thisInvoice: 'dieser Rechnung',

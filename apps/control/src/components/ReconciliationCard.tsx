@@ -60,6 +60,13 @@ export function ReconciliationCard({
 
   if (!hasFinding && state.successful) return null;
 
+  const checkButton = (
+    <Button variant="secondary" className="w-full justify-center sm:w-auto" loading={running} onClick={() => void nowCheck()}>
+      <RefreshCw className="h-4 w-4" aria-hidden="true" />
+      {t('components.reconciliationCard.button')}
+    </Button>
+  );
+
   return (
     <section aria-labelledby="abgleich-titel" className="mt-6">
       {/* AUS DREI ZEILEN ERKLAERTEXT WIRD EINE ZEILE MIT ZUSTAND.
@@ -70,27 +77,20 @@ export function ReconciliationCard({
       <h2 id="abgleich-titel" className="sr-only">
         {t('components.reconciliationCard.heading')}</h2>
 
+      {/* EIN BAND MIT KNOPF DARIN. Der Knopf stand früher getrennt weit unten
+          rechts; wer die Meldung liest, soll den Weg dazu direkt daneben
+          finden. Im Fehlerfall steht er deshalb im Band, nicht darunter. */}
       {!state.successful && (
-        <NoticeBar kind="attention" className="mb-3">
-          {state.lastAt === null ? (
-            // KEINE SERVERMELDUNG DAZU. Sie lautet in diesem Fall „Noch kein
-            // Abgleich gelaufen" und sagt damit genau dasselbe wie der Satz
-            // davor — zweimal dieselbe Auskunft in einer Zeile, die eine
-            // Zeile bleiben soll.
-            <>{t('components.reconciliationCard.text3')}</>
-          ) : (
-            <>
-              {t('components.reconciliationCard.text4')}{' '}
-              <span className="ziffern-tabellarisch">
-                {formatDate(state.lastAt)}
-              </span>{' '}
-              {t('components.reconciliationCard.text5')}{state.message ? ` ${state.message}` : ''}
-            </>
-          )}
+        <NoticeBar kind="attention" className="mb-3" action={checkButton}>
+          {state.lastAt === null
+            ? t('components.reconciliationCard.text3')
+            : t('components.reconciliationCard.text4', { date: formatDate(state.lastAt) })}
+          {state.message ? ` ${state.message}` : ''}
         </NoticeBar>
       )}
 
-      {/* DER KNOPF STEHT IMMER, WENN DIESE KARTE UEBERHAUPT DA IST.
+      {/* DER KNOPF STEHT IMMER, WENN DIESE KARTE UEBERHAUPT DA IST — im Band
+          bei nicht gelaufenem Abgleich, sonst neben der Standzeile.
           
           DAS WAR DIE LUECKE: Wer etwas an der Zuordnung geaendert hatte —
           eine Instanz eingetragen, ein eigenes Deployment ausgeblendet —,
@@ -107,25 +107,17 @@ export function ReconciliationCard({
           Die Standzeile dagegen NUR OHNE Fehlerleiste: Dort steht das Datum
           des letzten Laufs schon, und zweimal dasselbe in zwei Zeilen liest
           sich wie zwei verschiedene Angaben. */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        {state.successful ? (
+      {state.successful && (
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-leise">
             {t('components.reconciliationCard.text6')}{' '}
             <span className="ziffern-tabellarisch">
               {state.lastAt === null ? t('components.reconciliationCard.label') : formatDate(state.lastAt)}
             </span>
           </p>
-        ) : (
-          <span />
-        )}
-        <Button
-          variant="secondary"
-          loading={running}
-          onClick={() => void nowCheck()}
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {t('components.reconciliationCard.button')}</Button>
-      </div>
+          {checkButton}
+        </div>
+      )}
 
       {hasFinding && (
         <ul className="divide-y divide-rahmen overflow-hidden rounded-xl border border-rahmen bg-flaeche">

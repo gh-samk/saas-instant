@@ -162,7 +162,9 @@ export function Dialog({
           aria-labelledby={ownOrHead ? undefined : titleId}
           aria-label={ownHead ? 'Vorschlag-Detail' : head ? title : undefined}
           className={`relative w-full rounded-xl border border-rahmen bg-flaeche shadow-dialog ${
-            ownHead ? 'overflow-hidden border-t-4 border-t-vorschlag-rahmen' : 'p-6'
+            ownHead
+              ? 'overflow-hidden border-t-4 border-t-vorschlag-rahmen'
+              : 'flex max-h-[calc(100dvh-2rem)] flex-col p-6'
           } ${SIZE_CLASS[size]}`}
           onClick={(e) => e.stopPropagation()}
         >
@@ -175,7 +177,7 @@ export function Dialog({
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
           ) : (
-            <div className="mb-3 flex items-start justify-between gap-4">
+            <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
               <div className="min-w-0">
                 {head ?? (
                   <>
@@ -206,9 +208,17 @@ export function Dialog({
               </button>
             </div>
           )}
-          <div className={ownHead ? '' : 'text-sm text-text'}>{children}</div>
+          {/* Bei niedrigem Fenster scrollt nur der Inhalt; Kopf und Fußzeile
+              bleiben im Bild. Das kleine Polster hält Fokusrahmen sichtbar. */}
+          <div
+            className={
+              ownHead ? '' : '-mx-1 min-h-0 flex-1 overflow-y-auto px-1 text-sm text-text'
+            }
+          >
+            {children}
+          </div>
           {footer && (
-            <div className="-mx-6 -mb-6 mt-6 flex justify-end gap-3 rounded-b-xl border-t border-rahmen bg-flaeche-2 px-6 py-4">
+            <div className="-mx-6 -mb-6 mt-6 flex shrink-0 flex-col-reverse gap-3 rounded-b-xl border-t border-rahmen bg-flaeche-2 px-6 py-4 max-sm:[&>*]:w-full sm:flex-row sm:justify-end">
               {footer}
             </div>
           )}

@@ -61,3 +61,22 @@ export function subdomainFormatError(value: string): string | null {
   }
   return null;
 }
+
+/**
+ * Freie Ausweichnamen zu einer vergebenen Subdomain: `muster-2`, `muster-3` …
+ *
+ * Trägt der Name schon eine Zahl am Ende (`muster-2`), zählt es von dort
+ * weiter. Die Länge bleibt unter `SUBDOMAIN_MAX`; ob ein Kandidat wirklich
+ * frei ist, entscheidet der Server (Regel 2 der Projektkonventionen).
+ */
+export function alternativeSubdomains(subdomain: string, count = 4): string[] {
+  const match = /^(.*?)-(\d+)$/.exec(subdomain);
+  const base = match?.[1] ?? subdomain;
+  const first = match?.[2] ? Number(match[2]) + 1 : 2;
+  const result: string[] = [];
+  for (let n = first; result.length < count; n += 1) {
+    const suffix = `-${n}`;
+    result.push(`${base.slice(0, SUBDOMAIN_MAX - suffix.length).replace(/-+$/, '')}${suffix}`);
+  }
+  return result;
+}
