@@ -70,8 +70,11 @@ describe('invoiceOverdue', () => {
     expect(task?.dueAt).toBe('2026-08-14');
     // Achtzehn Tage überfällig -> hoch.
     expect(task?.urgency).toBe('high');
-    expect(task?.title).toContain('2026-001');
-    expect(task?.reason).toContain('458,15 €');
+    // Kurzer Titel mit Nummer und offenem Betrag; die Organisation steht im
+    // Feld `company`, das Alter in der Begründung.
+    expect(task?.title).toBe('Rechnung 2026-001 überfällig · 458,15 €');
+    expect(task?.reason).toBe('seit 18 Tagen');
+    expect(task?.invoiceId).toBe('r1');
     expect(task?.action.kind).toBe('payment_check');
     expect(task?.company?.id).toBe('o1');
   });
@@ -81,7 +84,7 @@ describe('invoiceOverdue', () => {
       { ...Row, paidAmount: new Prisma.Decimal('200.00') },
     ]);
     const result = await invoiceOverdue.collect(context);
-    expect(result.tasks[0]?.reason).toContain('258,15 €');
+    expect(result.tasks[0]?.title).toContain('258,15 €');
   });
 
   /**
@@ -121,5 +124,20 @@ describe('invoiceOverdue', () => {
       /^\/companies\/o1\/invoices\/r1$/,
     );
     expect(result.tasks[0]?.action.label).toBe('Rechnung öffnen');
+  });
+
+  it('wiederholt den Erklärsatz nicht in jeder Zeile', async () => {
+    const { context } = contextWith([Row]);
+    const result = await invoiceOverdue.collect(context);
+    expect(result.tasks[0]?.reason).not.toContain('Kontoabgleich');
+    expect(result.tasks[0]?.title).not.toContain(Row.company.name);
+  });
+
+  it('schreibt „1 Tag" im Singular', async () => {
+    const { context } = contextWith([
+      { ...Row, dueDate: toDate('2026-08-31') },
+    ]);
+    const result = await invoiceOverdue.collect(context);
+    expect(result.tasks[0]?.reason).toBe('seit 1 Tag');
   });
 });

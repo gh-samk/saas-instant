@@ -234,6 +234,13 @@ export function CompanyDetailPage() {
   const [companyDeleteOpen, setCompanyDeleteOpen] =
     useState(false);
   const [historyState, setHistoryState] = useState(0);
+  /**
+   * „Instanz anlegen" aus dem Überblick: Der Dialog gehört der Instanzkarte, die
+   * es erst nach dem Reiterwechsel gibt. Die Anforderung bleibt deshalb hier
+   * stehen, bis die Karte sie gelesen und zurückgemeldet hat — sonst öffnete
+   * sich der Dialog bei jedem späteren Zurückkehren auf den Reiter von neuem.
+   */
+  const [instanceCreateRequested, setInstanceCreateRequested] = useState(false);
 
   /**
    * Der offene Reiter steht IN DER URL, nicht nur im Zustand.
@@ -475,6 +482,23 @@ export function CompanyDetailPage() {
               setTab('contract');
               editStart('contacts', o);
             }}
+            onContract={() => {
+              setTab('contract');
+              editStart('contract', o);
+              // Der Reiter ist über 2000 px lang: Ohne Scrollen öffnete sich
+              // das Formular außerhalb des Bildschirms. Erst nach dem
+              // Rendern, sonst gibt es den Anker noch nicht.
+              window.setTimeout(() => {
+                document
+                  .getElementById('vertragsdaten')
+                  ?.scrollIntoView?.({ block: 'start' });
+              }, 0);
+            }}
+            onInstance={() => {
+              setInstanceCreateRequested(true);
+              setTab('instance');
+            }}
+            onInvoice={() => navigate(`/companies/${o.id}/invoices/new`)}
           />
         </ErrorBoundary>
       )}
@@ -493,6 +517,8 @@ export function CompanyDetailPage() {
             contactEmail={o.contactEmail}
             totpPossible={totpPossible}
             onHistoryChanged={() => setHistoryState((n) => n + 1)}
+            createRequested={instanceCreateRequested}
+            onCreateRequestHandled={() => setInstanceCreateRequested(false)}
           />
         </ErrorBoundary>
         </>

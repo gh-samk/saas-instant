@@ -1,40 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Ban,
   Download,
-  FileCode,
   Landmark,
   MailWarning,
+  MoreHorizontal,
   Send,
 } from 'lucide-react';
-import { Dialog, Card, Button, Table, useToast } from '@saas-instant/ui';
+import {
+  Card,
+  Button,
+  Menu,
+  Table,
+  useToast,
+  type MenuItem,
+} from '@saas-instant/ui';
 import { Field } from './DetailBlock';
 import { InvoiceCancelDialog } from './InvoiceCancelDialog';
 import { TransferNoteDialog } from './TransferNoteDialog';
 import { PaymentRecordDialog } from './PaymentRecordDialog';
-import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
-import { InvoiceIntegrity } from './InvoiceIntegrity';
+import {
+  InvoiceIntegrity,
+  IntegrityStatusBadge,
+  localStamp,
+  useInvoiceIntegrity,
+} from './InvoiceIntegrity';
+import { useInvoiceSendFlow } from './InvoiceSendFlow';
 import { apiFile, errorText } from '../lib/api-client';
 import { tableRow } from '../lib/density';
 import { TEXT_BUTTON, TEXT_BUTTON_ACTION } from '../lib/styles';
-import { useSecondFactorEvidence } from '../lib/second-factor';
 import {
   fetchInvoice,
-  sendPaymentReminder,
-  sendInvoice,
+  type BuyerType,
   type Invoice,
   type InvoiceWithRetention,
-  type SecondFactorEvidence,
 } from '../lib/api';
 import { formatAmount } from '../utils/amount';
 import { formatQuantity, formatPercent } from '../utils/decimal';
 import { formatDate } from '../utils/date';
-import { t, useT } from '../i18n';
-
-/** Klassen eines `Knopf variante="sekundaer"` für ein echtes `<a>`. */
-const BUTTON_SECONDARY_AS_LINK =
-  'inline-flex items-center justify-center gap-2 rounded-lg border border-rahmen bg-flaeche px-4 py-2 text-sm font-medium text-text transition-colors hover:bg-flaeche-3';
+import { useT } from '../i18n';
 
 /**
  * Holt die NUMMER einer verwiesenen Rechnung.
@@ -86,28 +91,27 @@ function NumberSlot({ number }: { number: string | null }) {
   return <span className="ziffern-tabellarisch">{number}</span>;
 }
 
-/** Wofür gerade ein Nachweis verlangt wird — der Dialog ist derselbe. */
-type SendPurpose = 'send' | 'reminder';
+type DownloadWay = 'document' | 'xml' | 'xrechnung';
 
-const SEND_TEXT: Record<
-  SendPurpose,
-  { title: string; declaration: string; success: string; error: string }
-> = {
-  send: {
-    title: t('components.invoiceView.title'),
-    declaration:
-      t('components.invoiceView.declaration'),
-    success: t('components.invoiceView.success'),
-    error: t('components.invoiceView.error'),
-  },
-  reminder: {
-    title: t('components.invoiceView.title2'),
-    declaration:
-      t('components.invoiceView.declaration2'),
-    success: t('components.invoiceView.success2'),
-    error: t('components.invoiceView.error2'),
-  },
-};
+/**
+ * Die Download-Varianten in der Reihenfolge, die zur Empfängerart passt: Die
+ * empfohlene steht oben und ist markiert. Eine Behörde bekommt die XRechnung
+ * (das PDF allein genügt dort nicht), Unternehmen und Privatpersonen das
+ * ZUGFeRD-PDF. Ohne bekannte Art gibt es keine Empfehlung — raten wäre
+ * schlimmer als schweigen.
+ */
+export function downloadOrder(
+  buyerType: BuyerType | null | undefined,
+): { way: DownloadWay; recommended: boolean }[] {
+  const order: DownloadWay[] =
+    buyerType === 'authority'
+      ? ['xrechnung', 'document', 'xml']
+      : ['document', 'xrechnung', 'xml'];
+  return order.map((way, index) => ({
+    way,
+    recommended: buyerType != null && index === 0,
+  }));
+}
 
 /**
  * Die FESTGESCHRIEBENE Rechnung — reine Ansicht.
@@ -132,7 +136,14 @@ export function InvoiceView({
   contactDataDeleted,
   onChanged,
   onCancelled,
+  header,
 }: {
+  /**
+   * Titel, Status und Organisation der Kopfzeile — kommen von der Seite. Die
+   * Ansicht setzt Integritäts-Abzeichen und Aktionsleiste daneben, damit
+   * alles, was man mit der Rechnung tun kann, ohne Scrollen erreichbar ist.
+   */
+  header?: ReactNode;
   invoice: InvoiceWithRetention;
   companyId: string;
   totpPossible: boolean;
@@ -163,8 +174,8 @@ export function InvoiceView({
    * Klick das PDF im Speicher, bis die Seite neu geladen wird.
    */
   async function fetch(
-    event: React.MouseEvent<HTMLAnchorElement>,
-    weg: 'document' | 'xml' | 'xrechnung',
+    event: React.MouseEvent<HTMLElement>,
+    weg: DownloadWay,
     ending: string,
   ): Promise<void> {
     // Mittelklick, Cmd/Strg-Klick und Kontextmenü NICHT abfangen: Wer
@@ -190,75 +201,178 @@ export function InvoiceView({
       );
     }
   }
-  const [sendLoading, setSendLoading] = useState(false);
-  const [reminderLoading, setReminderLoading] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [cancellationOpen, setCancellationOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
-  const [sendPurpose, setSendPurpose] = useState<SendPurpose | null>(null);
-  const [warningPurpose, setWarningPurpose] = useState<SendPurpose | null>(null);
-  const [confirmPurpose, setConfirmPurpose] = useState<SendPurpose | null>(null);
-  const evidenceState = useSecondFactorEvidence();
 
   const cancellationNumber = useInvoiceNumber(invoice.cancellationInvoiceId);
   const originalNumber = useInvoiceNumber(invoice.cancelledInvoiceId);
 
-  /**
-   * Versenden und Erinnern — beides hinter dem zweiten Faktor.
-   *
-   * Erst OHNE Nachweis rufen: Bei einer Sitzung unter zehn Minuten lässt der
-   * Server ihn weg. Erst wenn er ihn verlangt, klappt der Dialog auf, und der
-   * Aufruf wird mit Nachweis wiederholt.
-   *
-   * Die Fehlermeldungen des Servers sind bereits für Menschen geschrieben
-   * („Trage die E-Mail-Adresse an der Organisation nach …") — sie gehen im
-   * Wortlaut in den Toast.
-   */
-  async function send(purpose: SendPurpose, evidence?: SecondFactorEvidence) {
-    const texts = SEND_TEXT[purpose];
-    const setLoading =
-      purpose === 'send' ? setSendLoading : setReminderLoading;
-    setLoading(true);
-    setSendPurpose(purpose);
-    try {
-      onChanged(
-        purpose === 'send'
-          ? await sendInvoice(invoice.id, evidence)
-          : await sendPaymentReminder(invoice.id, evidence),
-      );
-      evidenceState.close();
-      setSendPurpose(null);
-      toast.show(texts.success);
-    } catch (f) {
-      if (evidenceState.handle(f, evidence)) return;
-      setSendPurpose(null);
-      toast.show(errorText(f, texts.error), 'error');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  /**
-   * Der Weg zum Absenden: Eine Mail geht an eine Kundin und lässt sich nicht
-   * zurückholen, also nie mit einem einzigen Klick. Bei gelöschten
-   * Kontaktdaten übernimmt die Nachfrage ([H5], mit Adresse) diese Rolle —
-   * eine zweite Rückfrage dahinter wäre bloß Ermüdung. Sonst fragt der
-   * Bestätigungsdialog. Erst danach läuft `send`, und der Zweitfaktor
-   * meldet sich dort, falls der Server ihn verlangt.
-   */
-  function startSend(purpose: SendPurpose) {
-    if (contactDataDeleted) {
-      setWarningPurpose(purpose);
-      return;
-    }
-    setConfirmPurpose(purpose);
-  }
+  // Der Versandablauf (Bestätigung, [H5]-Nachfrage, Zweitfaktor) steht in
+  // einer eigenen Komponente, damit Listen ihn ebenfalls auslösen können.
+  const sendFlow = useInvoiceSendFlow({
+    invoice,
+    contactDataDeleted,
+    totpPossible,
+    onChanged,
+  });
+  const integrityState = useInvoiceIntegrity(
+    invoice.id,
+    invoice.finalizedAt !== null,
+    `${invoice.status}|${invoice.paymentState}|${invoice.transferStatus ?? ''}`,
+  );
 
   const cancelled = invoice.paymentState === 'cancelled';
   const alreadySent = invoice.status === 'sent';
 
+  // GENAU EINE HAUPTAKTION JE STATUS. Eine festgeschriebene, nie versendete
+  // Rechnung will zuerst hinaus („Versenden"); danach ist offen, was fehlt: die
+  // Zahlung. Bezahlt oder storniert gibt es nichts Dringendes mehr, dann
+  // bleiben nur Nebenaktionen. Alles andere sind Sekundärknöpfe, und das
+  // Stornieren liegt im Menü „Weitere": nie als roter Knopf neben der Zahlung.
+  const canPay = invoice.paymentState !== 'paid' && !cancelled;
+  const sendIsPrimary = !cancelled && invoice.status === 'finalized';
+  const payIsPrimary = canPay && !sendIsPrimary;
+  const canReminder =
+    invoice.paymentState === 'overdue' ||
+    invoice.paymentState === 'partially_paid';
+  // Kein Stornieren an einer Stornorechnung und keins an einer bereits
+  // stornierten: Ein Knopf, der immer scheitert, ist der schlechteste Weg,
+  // eine Regel zu erklären.
+  const canCancel =
+    !cancelled &&
+    !invoice.isCancellation &&
+    invoice.cancellationInvoiceId === null;
+
+  const downloadItems: MenuItem[] = downloadOrder(invoice.recipientBuyerType).map(
+    ({ way, recommended }) => {
+      const key =
+        way === 'document' ? 'Document' : way === 'xrechnung' ? 'Xrechnung' : 'Xml';
+      return {
+        id: way,
+        // Es BLEIBT ein `<a href>`, und zwar mit Absicht: Mittelklick, „Link
+        // in neuem Tab öffnen" und ein Browser ohne Skript funktionieren
+        // damit unverändert. Der Klick wird nur ABGEFANGEN, um die Antwort zu
+        // prüfen, bevor sich ein Tab öffnet — im Fehlerfall stünde sonst das
+        // rohe JSON des Servers in einem neuen Tab.
+        href: `/api/invoices/${invoice.id}/${way}`,
+        label: t(`components.invoiceView.download${key}`),
+        description: t(`components.invoiceView.download${key}Hint`),
+        badge: recommended
+          ? t('components.invoiceView.downloadRecommended')
+          : undefined,
+        onSelect: (ev) => void fetch(ev, way, way === 'document' ? 'pdf' : 'xml'),
+      };
+    },
+  );
+
+  const moreItems: MenuItem[] = canCancel
+    ? [
+        {
+          id: 'cancel',
+          label: t('components.invoiceView.button5'),
+          description: t('components.invoiceView.cancelHint'),
+          tone: 'danger',
+          onSelect: () => setCancellationOpen(true),
+        },
+      ]
+    : [];
+
+  const transferDate = (integrityState.history ?? [])
+    .filter((e) => e.action === 'invoice.transfer.noted')
+    .map((e) => e.at)
+    .sort()
+    .pop();
+
+  const sendButton = !cancelled && (
+    <Button
+      variant={sendIsPrimary ? 'primary' : 'ghost'}
+      loading={sendFlow.loadingPurpose === 'send'}
+      onClick={() => sendFlow.start('send')}
+    >
+      <Send className="h-4 w-4" aria-hidden="true" />
+      {alreadySent
+        ? t('components.invoiceView.button')
+        : t('components.invoiceView.button2')}
+    </Button>
+  );
+
   return (
     <>
+      {/* KOPFZEILE: Titel und Status links, Aktionen rechts. Die Leiste
+          bricht um (375 px), statt seitlich überzulaufen. */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          {header}
+          <div className="mt-2">
+            <IntegrityStatusBadge state={integrityState} />
+          </div>
+        </div>
+        <div
+          role="group"
+          aria-label={t('components.invoiceView.actionsLabel')}
+          className="flex min-w-0 max-w-full flex-wrap items-center gap-2"
+        >
+          {sendIsPrimary && sendButton}
+          {payIsPrimary && (
+            <Button variant="primary" onClick={() => setPaymentOpen(true)}>
+              <Landmark className="h-4 w-4" aria-hidden="true" />
+              {t('components.invoiceView.button4')}
+            </Button>
+          )}
+          {!sendIsPrimary && sendButton}
+          {canReminder && !cancelled && (
+            <Button
+              variant="ghost"
+              loading={sendFlow.loadingPurpose === 'reminder'}
+              onClick={() => sendFlow.start('reminder')}
+            >
+              <MailWarning className="h-4 w-4" aria-hidden="true" />
+              {/* „Mahnung" als kleiner Zusatz in derselben Zeile: gleiche Höhe
+                  wie die übrigen Knöpfe, und wer danach sucht, findet das Wort
+                  trotzdem. */}
+              <span>{t('components.invoiceView.button3')}</span>
+              <span className="text-xs font-normal text-leise">
+                ({t('components.invoiceView.reminderSubtitle')})
+              </span>
+            </Button>
+          )}
+          {canPay && !payIsPrimary && (
+            <Button variant="secondary" onClick={() => setPaymentOpen(true)}>
+              <Landmark className="h-4 w-4" aria-hidden="true" />
+              {t('components.invoiceView.button4')}
+            </Button>
+          )}
+          <Menu
+            label={t('components.invoiceView.download')}
+            icon={<Download className="h-4 w-4" aria-hidden="true" />}
+            items={downloadItems}
+          />
+          {moreItems.length > 0 && (
+            <Menu
+              label={<MoreHorizontal className="h-4 w-4" aria-hidden="true" />}
+              ariaLabel={t('components.invoiceView.more')}
+              hideChevron
+              items={moreItems}
+            />
+          )}
+        </div>
+      </div>
+
+      {alreadySent && (
+        <p className="mb-4 text-sm text-leise">
+          {t('components.invoiceView.text12')}
+        </p>
+      )}
+
+      {/* [H5] Steht da, BEVOR jemand auf „Versenden" drückt — die Nachfrage im
+          Dialog kommt danach und ist die zweite Stufe, nicht die erste. */}
+      {contactDataDeleted && !cancelled && (
+        <p className="mb-4 text-sm text-leise">
+          {t('components.invoiceView.text13')}
+        </p>
+      )}
+
       {invoice.cancellationInvoiceId !== null && (
         <div className="mb-6 flex items-start gap-3 rounded-lg border border-rahmen bg-flaeche-2 p-4">
           <Ban
@@ -404,149 +518,46 @@ export function InvoiceView({
         </dl>
       </Card>
 
-      {/* GoBD: Integrität, Aufbewahrungsfrist und Verlauf (rein lesend). */}
-      <InvoiceIntegrity
-        invoiceId={invoice.id}
-        finalized={invoice.finalizedAt !== null}
-        retentionUntil={invoice.retentionUntil}
-      />
-
-      {/* Genau die fünf Handlungen einer festgeschriebenen Rechnung — keine
-          mehr. Kein Bearbeiten, kein Löschen. */}
-      {invoice.recipientBuyerType && (
-        <p className="mt-6 text-sm text-leise">
-          {t(
-            invoice.recipientBuyerType === 'authority'
-              ? 'components.invoiceView.hintAuthority'
-              : invoice.recipientBuyerType === 'business'
-                ? 'components.invoiceView.hintBusiness'
-                : 'components.invoiceView.hintConsumer',
-          )}
-        </p>
-      )}
-      <div
-        className={
-          invoice.recipientBuyerType
-            ? 'mt-2 flex flex-wrap gap-3'
-            : 'mt-6 flex flex-wrap gap-3'
-        }
-      >
-        {/* ES BLEIBT EIN `<a href>`, und zwar mit Absicht: Mittelklick,
-            „Link in neuem Tab öffnen" und ein Browser ohne Skript
-            funktionieren damit unverändert. Der Klick wird nur ABGEFANGEN,
-            um die Antwort zu prüfen, bevor sich ein Tab öffnet.
-
-            Vorher öffnete sich im Fehlerfall ein Tab mit dem rohen JSON des
-            Servers — gemessen, als der Rechnungsdienst nicht lief. Die
-            Meldung darin ist für Menschen geschrieben; sie stand nur an
-            einer Stelle, an der sie niemand lesen soll. */}
-        <a
-          href={`/api/invoices/${invoice.id}/document`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(ev) => fetch(ev, 'document', 'pdf')}
-          className={BUTTON_SECONDARY_AS_LINK}
-        >
-          <Download className="h-4 w-4" aria-hidden="true" />
-          {t('components.invoiceView.text10')}</a>
-        <a
-          href={`/api/invoices/${invoice.id}/xml`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(ev) => fetch(ev, 'xml', 'xml')}
-          className={BUTTON_SECONDARY_AS_LINK}
-        >
-          <FileCode className="h-4 w-4" aria-hidden="true" />
-          {t('components.invoiceView.text11')}</a>
-        <a
-          href={`/api/invoices/${invoice.id}/xrechnung`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(ev) => fetch(ev, 'xrechnung', 'xml')}
-          className={BUTTON_SECONDARY_AS_LINK}
-        >
-          <FileCode className="h-4 w-4" aria-hidden="true" />
-          {t('components.invoiceView.xrechnung')}</a>
-
-        {!cancelled && (
-          <Button
-            variant="secondary"
-            loading={sendLoading}
-            onClick={() => startSend('send')}
-          >
-            <Send className="h-4 w-4" aria-hidden="true" />
-            {alreadySent ? t('components.invoiceView.button') : t('components.invoiceView.button2')}
-          </Button>
-        )}
-
-        {(invoice.paymentState === 'overdue' ||
-          invoice.paymentState === 'partially_paid') && (
-          <Button
-            variant="secondary"
-            loading={reminderLoading}
-            onClick={() => startSend('reminder')}
-          >
-            <MailWarning className="h-4 w-4" aria-hidden="true" />
-            {/* „Mahnung" als kleiner Zusatz in derselben Zeile: gleiche Höhe wie die
-                übrigen Knöpfe, und wer danach sucht, findet das Wort trotzdem. */}
-            <span>{t('components.invoiceView.button3')}</span>
-            <span className="text-xs font-normal text-leise">
-              ({t('components.invoiceView.reminderSubtitle')})
-            </span>
-          </Button>
-        )}
-
-        {invoice.paymentState !== 'paid' && !cancelled && (
-          <Button
-            variant="secondaryGreen"
-            onClick={() => setPaymentOpen(true)}
-          >
-            <Landmark className="h-4 w-4" aria-hidden="true" />
-            {t('components.invoiceView.button4')}</Button>
-        )}
-
-        {/* Kein Stornieren-Knopf an einer Stornorechnung und keiner an einer
-            bereits stornierten: Ein Knopf, der immer scheitert, ist der
-            schlechteste Weg, eine Regel zu erklären. */}
-        {!cancelled &&
-          !invoice.isCancellation &&
-          invoice.cancellationInvoiceId === null && (
-            <Button variant="danger" onClick={() => setCancellationOpen(true)}>
-              <Ban className="h-4 w-4" aria-hidden="true" />
-              {t('components.invoiceView.button5')}</Button>
-          )}
-      </div>
-
-      {alreadySent && (
-        <p className="mt-3 text-sm text-leise">
-          {t('components.invoiceView.text12')}</p>
-      )}
-
-      {/* [H5] Steht da, BEVOR jemand auf „Versenden" drückt — die Nachfrage im
-          Dialog kommt danach und ist die zweite Stufe, nicht die erste. */}
-      {contactDataDeleted && !cancelled && (
-        <p className="mt-3 text-sm text-leise">
-          {t('components.invoiceView.text13')}</p>
-      )}
-
+      {/* Buchhaltung: eine verständliche Zeile statt eines Kastens. Der
+          Vermerk ist Freitext (kein Datum am Rechnungsobjekt); das Datum
+          stammt aus dem Verlauf, sofern er es kennt. Der Weg bleibt der
+          Dialog mit Zweitfaktor. */}
       {!cancelled && (
-        <div className="mt-6 rounded-lg border border-rahmen bg-flaeche-2 p-4">
-          <p className="mb-2 text-sm font-medium text-text">
-            {t('components.invoiceView.text14')}</p>
-          <p className="text-sm text-leise">
-            {invoice.transferStatus ?? t('components.invoiceView.text15')}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-rahmen bg-flaeche-2 p-4">
+          <p className="min-w-0 text-sm text-text">
+            <span className="font-medium">
+              {t('components.invoiceView.transferTitle')}
+            </span>
+            {': '}
+            <span className="text-leise">
+              {invoice.transferStatus !== null
+                ? transferDate
+                  ? `${invoice.transferStatus} (${localStamp(transferDate)})`
+                  : invoice.transferStatus
+                : t('components.invoiceView.transferNot')}
+            </span>
           </p>
           <button
             type="button"
-            className={`mt-2 text-sm ${TEXT_BUTTON_ACTION}`}
+            className={`text-sm ${TEXT_BUTTON_ACTION}`}
             onClick={() => setTransferOpen(true)}
           >
             {invoice.transferStatus !== null
               ? t('components.invoiceView.button6')
-              : t('components.invoiceView.button7')}
+              : t('components.invoiceView.transferMark')}
           </button>
         </div>
       )}
+
+      {/* GoBD: Integrität, Aufbewahrungsfrist und Verlauf (rein lesend,
+          eingeklappt; das Ergebnis steht als Abzeichen in der Kopfzeile). */}
+      <InvoiceIntegrity
+        invoiceId={invoice.id}
+        finalized={invoice.finalizedAt !== null}
+        retentionUntil={invoice.retentionUntil}
+        state={integrityState}
+        showBadge={false}
+      />
 
       <PaymentRecordDialog
         open={paymentOpen}
@@ -583,135 +594,7 @@ export function InvoiceView({
         }}
       />
 
-      {/* Die Bestätigung vor dem Versand. Empfänger und Betrag kommen aus dem
-          Schnappschuss der Rechnung — genau dorthin schickt der Server
-          (`recipientEmail` der Rechnung, nicht die aktuelle Kontaktadresse der
-          Organisation). Ohne Adresse lehnt der Server ohnehin ab; dann ist der
-          Knopf gesperrt. Bei der Erinnerung zählt der OFFENE Betrag, beim
-          Versand die Bruttosumme. */}
-      {(() => {
-        const purpose = confirmPurpose;
-        const reminder = purpose === 'reminder';
-        const email = invoice.recipientEmail;
-        const missingEmail = email === null || email.trim() === '';
-        const dialogTitle = reminder
-          ? t('components.invoiceView.confirmTitleReminder')
-          : alreadySent
-            ? t('components.invoiceView.confirmTitleResend')
-            : t('components.invoiceView.confirmTitleSend');
-        return (
-          <Dialog
-            open={purpose !== null}
-            title={dialogTitle}
-            size="sm"
-            onClose={() => setConfirmPurpose(null)}
-            footer={
-              <>
-                <Button variant="ghost" onClick={() => setConfirmPurpose(null)}>
-                  {t('components.invoiceView.button8')}
-                </Button>
-                <Button
-                  variant="primary"
-                  disabled={missingEmail}
-                  onClick={() => {
-                    setConfirmPurpose(null);
-                    if (purpose) void send(purpose);
-                  }}
-                >
-                  {reminder
-                    ? t('components.invoiceView.confirmReminder')
-                    : t('components.invoiceView.confirmSend')}
-                </Button>
-              </>
-            }
-          >
-            <dl className="space-y-2 text-sm text-text">
-              <div>
-                <dt className="text-leise">{t('components.invoiceView.confirmRecipient')}</dt>
-                <dd className="font-medium">{invoice.recipientName}</dd>
-                {!missingEmail && <dd className="font-medium">{email}</dd>}
-              </div>
-              <div>
-                <dt className="text-leise">{t('components.invoiceView.confirmInvoiceNumber')}</dt>
-                <dd className="font-medium">{invoice.invoiceNumber}</dd>
-              </div>
-              <div>
-                <dt className="text-leise">
-                  {reminder
-                    ? t('components.invoiceView.confirmOpenAmount')
-                    : t('components.invoiceView.confirmAmount')}
-                </dt>
-                <dd className="ziffern-tabellarisch font-medium">
-                  {formatAmount(reminder ? invoice.openAmount : invoice.sumGross)}
-                </dd>
-              </div>
-            </dl>
-            {missingEmail && (
-              <p role="alert" className="mt-3 text-sm text-gefahr">
-                {t('components.invoiceView.confirmNoEmail')}
-              </p>
-            )}
-          </Dialog>
-        );
-      })()}
-
-      {/* [H5] Die Nachfrage nach der Kontaktdatenlöschung.
-          KEINE SPERRE: Es kann Gründe geben, eine bereits ausgestellte
-          Rechnung noch zuzustellen — die Forderung besteht ja weiter, und das
-          Aufbewahren des Schnappschusses ist ausdrücklich richtig. Was nicht
-          von selbst passieren darf, ist ein NEUER Versand an eine Adresse,
-          deren Löschung verlangt wurde. Also: nachfragen, mit Adresse. */}
-      <Dialog
-        open={warningPurpose !== null}
-        title={t('components.invoiceView.title3')}
-        size="sm"
-        onClose={() => setWarningPurpose(null)}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setWarningPurpose(null)}>
-              {t('components.invoiceView.button8')}</Button>
-            <Button
-              variant="danger"
-              onClick={() => {
-                const purpose = warningPurpose;
-                setWarningPurpose(null);
-                if (purpose) void send(purpose);
-              }}
-            >
-              {t('components.invoiceView.button9')}</Button>
-          </>
-        }
-      >
-        <p className="text-sm text-text">
-          {t('components.invoiceView.text18')}</p>
-        {invoice.recipientEmail !== null && (
-          <p className="mt-3 text-sm text-text">
-            {t('components.invoiceView.text19')}{' '}
-            <span className="font-medium">{invoice.recipientEmail}</span>.
-          </p>
-        )}
-        <p className="mt-3 text-sm text-leise">
-          {t('components.invoiceView.text20')}</p>
-      </Dialog>
-
-      {/* Als LETZTES im Baum: Beide Overlays tragen `z-50`, es entscheidet die
-          DOM-Reihenfolge. Der Nachweis-Dialog muss über allem liegen, was ihn
-          ausgelöst haben kann. */}
-      <SecondFactorEvidenceDialog
-        open={evidenceState.open}
-        title={SEND_TEXT[sendPurpose ?? 'send'].title}
-        declaration={SEND_TEXT[sendPurpose ?? 'send'].declaration}
-        totpPossible={totpPossible}
-        loading={sendLoading || reminderLoading}
-        error={evidenceState.error}
-        onCancel={() => {
-          evidenceState.close();
-          setSendPurpose(null);
-        }}
-        onConfirm={(evidence) => {
-          if (sendPurpose) void send(sendPurpose, evidence);
-        }}
-      />
+      {sendFlow.element}
     </>
   );
 }

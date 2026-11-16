@@ -2,36 +2,41 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
-  CheckCircle2,
   Eye,
   Landmark,
-  Mail,
   FileArchive,
+  MoreHorizontal,
   Pencil,
+  Plus,
   ReceiptEuro,
   Wallet,
 } from 'lucide-react';
 import {
   FilterChips,
-  IconButton,
   MetricTile,
   Button,
   EmptyState,
+  Menu,
   Skeleton,
   Table,
+  type MenuItem,
 } from '@saas-instant/ui';
+import { CompanyPicker } from '../components/CompanyPicker';
 import { InvoiceStatusBadge } from '../components/InvoiceStatusBadge';
 import { GobdExportDialog } from '../components/GobdExportDialog';
+import { useInvoiceQuickActions } from '../components/InvoiceQuickActions';
 import { useAuth } from '../context/AuthContext';
 import { errorText } from '../lib/api-client';
 import {
   fetchAllInvoices,
   fetchInvoiceMetrics,
+  type Invoice,
   type InvoiceMetrics,
   type InvoicePage,
   type PaymentState,
 } from '../lib/api';
 import { tableText, tableRow } from '../lib/density';
+import { useMediaQuery } from '../lib/use-media-query';
 import { formatAmountCent } from '../utils/amount';
 import { formatDate } from '../utils/date';
 import { useT } from '../i18n';
@@ -50,10 +55,17 @@ import { useT } from '../i18n';
  * weiter E2-24 („Aufgabenliste, keine Kacheln"), weil dort die HANDLUNG zählt.
  * Auf dieser Seite sind Zahlen der eigentliche Inhalt.
  *
- * DIE AKTIONSSPALTE FOLGT STRENG DEM ZUSTAND (Regel 4 des Entwurfs): Entwurf
- * → bearbeiten; offen oder überfällig → als bezahlt markieren und erinnern;
- * bezahlt oder storniert → NUR ansehen. Eine Handlung anzubieten, die
- * fachlich nicht mehr geht, ist schlimmer als keine.
+ * DIE AKTIONSSPALTE FOLGT STRENG DEM ZUSTAND (Regel 4 des Entwurfs) UND HAT
+ * EINE EINHEITLICHE OPTIK: ein Hauptknopf je Zustand (Entwurf → „Bearbeiten",
+ * offen, überfällig oder teilbezahlt → „Zahlung", bezahlt oder storniert →
+ * „Ansehen"), alles andere im Zeilenmenü „⋯". Vorher standen drei Optiken in
+ * einer Spalte (großer Knopf, zwei Icons, ein Auge). Eine Handlung
+ * anzubieten, die fachlich nicht mehr geht, ist schlimmer als keine.
+ *
+ * „Zahlung erfassen" und „Zahlungserinnerung senden" öffnen ihre Dialoge
+ * DIREKT in der Liste. Beide bleiben, was sie auf der Rechnungsseite sind:
+ * Die Erinnerung fragt erst nach (Empfänger, Betrag) und verschickt nichts
+ * mit einem einzigen Klick, die Zahlung liegt hinter dem zweiten Faktor.
  */
 
 /** Die Chips über der Liste, in der Reihenfolge des Entwurfs. */
@@ -71,7 +83,13 @@ export function InvoicesPage() {
   const [parameter, setParameter] = useSearchParams();
   const navigate = useNavigate();
   const { state } = useAuth();
+  // Ab `xl` die Tabelle, darunter Karten. GEMESSEN: Bei 1024 px bleiben neben
+  // der Seitenleiste 706 px — für sechs Spalten samt Status-Badge und
+  // Hauptknopf zu wenig (Badge und „Bearbeiten" überlappten). Ab 1280 px passt
+  // die Zeile ohne Kürzen und ohne Seitwärtsscrollen.
+  const wide = useMediaQuery('(min-width: 1280px)');
   const [exportOpen, setExportOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Der Export ist Inhabern und Administratoren vorbehalten (wie im Backend).
   const mayExport =
     state?.user.role === 'owner' || state?.user.role === 'administrator';
@@ -85,8 +103,10 @@ export function InvoicesPage() {
   const [metrics, setMetrics] = useState<InvoiceMetrics | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setData(null);
+  const load = useCallback(async (silent = false) => {
+    // Still nachladen (nach einer Direktaktion) lässt die Liste stehen: Ein
+    // Skelett mitten in der Arbeit würde die Zeile unter dem Zeiger wegreißen.
+    if (!silent) setData(null);
     setLoadError(null);
     try {
       const [list, numbers] = await Promise.all([
@@ -125,6 +145,20 @@ export function InvoicesPage() {
     });
   }
 
+  // Die Zeile sofort ersetzen, dann still nachladen: Zähler, Kacheln und der
+  // Filter ändern sich mit.
+  function rowChanged(updated: Invoice) {
+    setData((alt) =>
+      alt === null
+        ? alt
+        : {
+            ...alt,
+            invoices: alt.invoices.map((x) => (x.id === updated.id ? updated : x)),
+          },
+    );
+    void load(true);
+  }
+
   const pagesCount =
     data === null ? 1 : Math.max(1, Math.ceil(data.total / data.perPage));
 
@@ -137,9 +171,11 @@ export function InvoicesPage() {
         >
           {t('rechnungen.title')}
         </h1>
-        {/* Es gibt keinen globalen „+ Neu": Eine Rechnung braucht eine
-            Organisation, und die wählt man dort, wo sie steht. Der Knopf
-            führt deshalb in die Liste, nicht in ein leeres Formular. */}
+        {/* HAUPTKNOPF IST „+ RECHNUNG" (häufig), der Export für die
+            Betriebsprüfung steht als Sekundärknopf daneben (selten). Eine
+            Rechnung braucht eine Organisation; der Knopf fragt sie in einem
+            kleinen Dialog ab und springt in den Entwurf, statt auf die
+            Organisationsliste zu führen. */}
         <div className="flex flex-wrap items-center gap-3">
           {mayExport && (
             <Button variant="secondary" onClick={() => setExportOpen(true)}>
@@ -147,9 +183,9 @@ export function InvoicesPage() {
               {t('gobd.exportButton')}
             </Button>
           )}
-          <Button variant="secondary" onClick={() => navigate('/companies')}>
-            <ReceiptEuro className="h-4 w-4" aria-hidden="true" />
-            {t('rechnungen.createAtCompany')}
+          <Button variant="primary" onClick={() => setPickerOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {t('rechnungen.newInvoiceButton')}
           </Button>
         </div>
       </div>
@@ -246,77 +282,124 @@ export function InvoicesPage() {
         </div>
       ) : (
         <>
-          {/* GEMESSEN: Mit einem Zwoelftel fuer die Handlungen war der Knopf
-              „Bearbeiten" abgeschnitten. Die Organisationsspalte kuerzt
-              ohnehin, die Handlungen koennen es nicht. */}
-          <Table
-            columns={[
-              t('rechnungen.columnNumber'),
-              t('rechnungen.company'),
-              t('rechnungen.amount'),
-              t('rechnungen.due'),
-              t('rechnungen.status'),
-              t('rechnungen.actions'),
-            ]}
-            columnsWidths={[
-              'w-2/12',
-              'w-3/12',
-              'w-2/12',
-              'w-2/12',
-              'w-1/12',
-              'w-2/12',
-            ]}
-            variant="list"
-            actionColumn
-            minWidth="min-w-[830px]"
-            label={t('rechnungen.title')}
-          >
-            {data.invoices.map((r) => (
-              <tr key={r.id}>
-                <td className={`${tableRow.compact} whitespace-nowrap`}>
-                  <Link
-                    to={`/companies/${r.companyId}/invoices/${r.id}`}
-                    className={`${tableText.compact.primary} hover:underline`}
+          {wide ? (
+            <Table
+              columns={[
+                t('rechnungen.columnNumber'),
+                t('rechnungen.company'),
+                t('rechnungen.amount'),
+                t('rechnungen.due'),
+                t('rechnungen.status'),
+                t('rechnungen.actions'),
+              ]}
+              columnsWidths={[
+                'w-[13%]',
+                'w-[22%]',
+                'w-[12%]',
+                'w-[13%]',
+                'w-[15%]',
+                'w-[25%]',
+              ]}
+              variant="list"
+              actionColumn
+              label={t('rechnungen.title')}
+            >
+              {data.invoices.map((r) => (
+                <tr key={r.id}>
+                  <td className={`${tableRow.compact} whitespace-nowrap`}>
+                    <Link
+                      to={`/companies/${r.companyId}/invoices/${r.id}`}
+                      className={`${tableText.compact.primary} hover:underline`}
+                    >
+                      {/* Ein Entwurf hat noch keine Nummer — sie wird erst beim
+                          Festschreiben vergeben. „—" statt einer erfundenen. */}
+                      {r.invoiceNumber ?? '—'}
+                    </Link>
+                  </td>
+                  <td className={`${tableRow.compact} min-w-0`}>
+                    {/* Normale Schriftgröße wie Nummer und Betrag, und nicht
+                        abgeschnitten: Der Name ist der Grund, die Zeile zu
+                        lesen. */}
+                    <Link
+                      to={`/companies/${r.companyId}`}
+                      className={`block break-words ${tableText.compact.primary} hover:underline`}
+                    >
+                      {r.companyName ?? t('rechnungen.company')}
+                    </Link>
+                  </td>
+                  <td
+                    className={`${tableRow.compact} whitespace-nowrap ${tableText.compact.primary}`}
                   >
-                    {/* Ein Entwurf hat noch keine Nummer — sie wird erst beim
-                        Festschreiben vergeben. „—" statt einer erfundenen. */}
-                    {r.invoiceNumber ?? '—'}
-                  </Link>
-                </td>
-                <td className={`${tableRow.compact} min-w-0`}>
+                    {formatAmountCent(r.sumGrossCent)}
+                  </td>
+                  <td
+                    className={`${tableRow.compact} whitespace-nowrap ${
+                      r.paymentState === 'overdue'
+                        ? 'font-semibold text-gefahr'
+                        : tableText.compact.secondary
+                    }`}
+                  >
+                    {r.paymentState === 'draft' ? '—' : formatDate(r.dueDate)}
+                  </td>
+                  <td className={tableRow.compact}>
+                    <InvoiceStatusBadge paymentState={r.paymentState} />
+                  </td>
+                  <td className={tableRow.compact}>
+                    <RowActions invoice={r} onChanged={rowChanged} />
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          ) : (
+            // UNTER `xl` KARTEN: Nummer und Status oben, Organisation, dann
+            // Betrag und Fälligkeit, unten Hauptknopf und Zeilenmenü. Das
+            // Muster der Aufgabenliste auf „Heute" (Liste in einer Hülle).
+            <ul
+              aria-label={t('rechnungen.title')}
+              className="divide-y divide-rahmen overflow-hidden rounded-xl border border-rahmen bg-flaeche"
+            >
+              {data.invoices.map((r) => (
+                <li key={r.id} className="flex flex-col gap-3 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                    <Link
+                      to={`/companies/${r.companyId}/invoices/${r.id}`}
+                      className="ziffern-tabellarisch text-sm font-semibold text-text hover:underline"
+                    >
+                      {r.invoiceNumber ?? '—'}
+                    </Link>
+                    <InvoiceStatusBadge paymentState={r.paymentState} />
+                  </div>
                   <Link
                     to={`/companies/${r.companyId}`}
-                    className={`block truncate ${tableText.compact.secondary} hover:underline`}
-                    title={r.companyName ?? t('rechnungen.company')}
+                    className="min-w-0 break-words text-sm text-text hover:underline"
                   >
                     {r.companyName ?? t('rechnungen.company')}
                   </Link>
-                </td>
-                <td
-                  className={`${tableRow.compact} whitespace-nowrap ${tableText.compact.primary}`}
-                >
-                  {formatAmountCent(r.sumGrossCent)}
-                </td>
-                <td
-                  className={`${tableRow.compact} whitespace-nowrap ${
-                    r.paymentState === 'overdue'
-                      ? 'font-semibold text-gefahr'
-                      : tableText.compact.secondary
-                  }`}
-                >
-                  {r.paymentState === 'draft'
-                    ? '—'
-                    : formatDate(r.dueDate)}
-                </td>
-                <td className={tableRow.compact}>
-                  <InvoiceStatusBadge paymentState={r.paymentState} />
-                </td>
-                <td className={tableRow.compact}>
-                  <Actions invoice={r} />
-                </td>
-              </tr>
-            ))}
-          </Table>
+                  <dl className="ziffern-tabellarisch flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+                    <div className="flex items-baseline gap-1.5">
+                      <dt className="text-leise">{t('rechnungen.amount')}</dt>
+                      <dd className="font-medium text-text">
+                        {formatAmountCent(r.sumGrossCent)}
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline gap-1.5">
+                      <dt className="text-leise">{t('rechnungen.due')}</dt>
+                      <dd
+                        className={
+                          r.paymentState === 'overdue'
+                            ? 'font-semibold text-gefahr'
+                            : 'text-text'
+                        }
+                      >
+                        {r.paymentState === 'draft' ? '—' : formatDate(r.dueDate)}
+                      </dd>
+                    </div>
+                  </dl>
+                  <RowActions invoice={r} onChanged={rowChanged} />
+                </li>
+              ))}
+            </ul>
+          )}
 
           {pagesCount > 1 && (
             <nav
@@ -345,6 +428,15 @@ export function InvoicesPage() {
         </>
       )}
 
+      <CompanyPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(company) => {
+          setPickerOpen(false);
+          navigate(`/companies/${company.id}/invoices/new`);
+        }}
+      />
+
       <GobdExportDialog
         open={exportOpen}
         totpPossible={state?.totpSetUp ?? false}
@@ -355,68 +447,99 @@ export function InvoicesPage() {
 }
 
 /**
- * Die Handlungen einer Zeile — STRENG nach Zustand.
+ * Die Handlungen einer Zeile — STRENG nach Zustand, ein Hauptknopf plus Menü.
  *
- * Sie FÜHREN alle nur hin. „Als bezahlt markieren" und „Erinnerung senden"
- * sind unumkehrbare Vorgänge hinter dem zweiten Faktor; sie werden auf der
- * Rechnungsseite bestätigt und nicht aus einer Listenzeile heraus ausgelöst.
- * Eine Liste, in der ein Klick Geld bucht oder Post verschickt, ist eine
- * Falle.
+ * Die Namen der Knöpfe tragen die Rechnungsnummer, damit eine Liste mit
+ * zwanzig gleichen „Zahlung"-Knöpfen für Vorlesesoftware unterscheidbar
+ * bleibt. Ein Entwurf hat keine Nummer („dieser Rechnung").
  */
-function Actions({
+function RowActions({
   invoice,
+  onChanged,
 }: {
-  invoice: InvoicePage['invoices'][number];
+  invoice: Invoice;
+  onChanged: (invoice: Invoice) => void;
 }) {
   const t = useT();
   const navigate = useNavigate();
+  const quick = useInvoiceQuickActions({ invoice, onChanged });
   const target = `/companies/${invoice.companyId}/invoices/${invoice.id}`;
+  const number = invoice.invoiceNumber ?? t('rechnungen.thisInvoice');
+  const state = invoice.paymentState;
+  const unpaid =
+    state === 'open' || state === 'overdue' || state === 'partially_paid';
+  // Wie in der Rechnungsansicht: Erinnern nur, wenn die Frist vorbei ist
+  // oder schon etwas gezahlt wurde.
+  const reminderPossible = state === 'overdue' || state === 'partially_paid';
 
-  if (invoice.paymentState === 'draft') {
-    return (
-      <Button
-        variant="secondaryGreen"
-        onClick={() => navigate(target)}
-        className="ml-auto"
-      >
-        <Pencil className="h-4 w-4" aria-hidden="true" />
-        {t('rechnungen.edit')}
-      </Button>
+  const link = (id: string, label: string, to: string): MenuItem => ({
+    id,
+    label,
+    href: to,
+    onSelect: (event) => {
+      event.preventDefault();
+      navigate(to);
+    },
+  });
+
+  const items: MenuItem[] = [];
+  if (unpaid) {
+    items.push(
+      link('view', t('rechnungen.viewInvoice', { number: invoice.invoiceNumber ?? '' }), target),
     );
   }
-
-  if (
-    invoice.paymentState === 'open' ||
-    invoice.paymentState === 'overdue'
-  ) {
-    return (
-      <span className="flex justify-end gap-1.5">
-        <IconButton
-          Icon={CheckCircle2}
-          label={t('rechnungen.recordPaymentFor', { invoice: invoice.invoiceNumber ?? t('rechnungen.thisInvoice') })}
-          size="small"
-          onClick={() => navigate(target)}
-        />
-        <IconButton
-          Icon={Mail}
-          label={t('rechnungen.sendReminderFor', { invoice: invoice.invoiceNumber ?? t('rechnungen.thisInvoice') })}
-          size="small"
-          onClick={() => navigate(target)}
-        />
-      </span>
-    );
+  if (reminderPossible) {
+    items.push({
+      id: 'reminder',
+      label: t('rechnungen.sendReminderShort'),
+      onSelect: () => quick.sendReminder(),
+    });
   }
+  items.push(
+    link('company', t('rechnungen.openCompany'), `/companies/${invoice.companyId}`),
+  );
 
-  // Bezahlt oder storniert: NUR ansehen. Kein Bezahlt-Häkchen, keine
-  // Erinnerung — beides ginge fachlich nicht mehr.
   return (
-    <span className="flex justify-end">
-      <IconButton
-        Icon={Eye}
-        label={t('rechnungen.viewInvoice', { number: invoice.invoiceNumber ?? '' })}
-        size="small"
-        onClick={() => navigate(target)}
+    <span className="flex items-center justify-end gap-1.5">
+      {state === 'draft' ? (
+        <Button
+          variant="secondaryGreen"
+          size="sm"
+          onClick={() => navigate(target)}
+        >
+          <Pencil className="h-4 w-4" aria-hidden="true" />
+          {t('rechnungen.edit')}
+        </Button>
+      ) : unpaid ? (
+        <Button
+          variant="secondaryGreen"
+          size="sm"
+          aria-label={t('rechnungen.recordPaymentFor', { invoice: number })}
+          onClick={() => quick.recordPayment()}
+        >
+          {t('rechnungen.payment')}
+        </Button>
+      ) : (
+        // Bezahlt oder storniert: NUR ansehen. Kein Bezahlt-Häkchen, keine
+        // Erinnerung — beides ginge fachlich nicht mehr.
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={t('rechnungen.viewInvoice', { number: invoice.invoiceNumber ?? '' })}
+          onClick={() => navigate(target)}
+        >
+          <Eye className="h-4 w-4" aria-hidden="true" />
+          {t('rechnungen.view')}
+        </Button>
+      )}
+      <Menu
+        label={<MoreHorizontal className="h-4 w-4" aria-hidden="true" />}
+        ariaLabel={t('rechnungen.moreFor', { invoice: number })}
+        hideChevron
+        variant="ghost"
+        items={items}
       />
+      {quick.element}
     </span>
   );
 }

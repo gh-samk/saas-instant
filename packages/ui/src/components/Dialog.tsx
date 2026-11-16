@@ -29,6 +29,7 @@ export function Dialog({
   footer,
   size = 'sm',
   ownHead = false,
+  returnFocusTo,
 }: {
   open: boolean;
   title: string;
@@ -47,6 +48,15 @@ export function Dialog({
    * Panel bekommt einen durchgehenden blauen Top-Rand.
    */
   ownHead?: boolean;
+  /**
+   * Wohin der Fokus nach dem Schließen geht, wenn der Auslöser nicht mehr da
+   * ist — etwa weil der Dialog erst NACH einem Reiterwechsel öffnet und der
+   * Knopf, der ihn angefordert hat, mit dem alten Reiter verschwunden ist.
+   * Wird erst beim Schließen aufgerufen (das Ziel darf also später entstehen)
+   * und hat Vorrang vor dem gemerkten Auslöser, sofern es ein Element liefert,
+   * das im Dokument steht.
+   */
+  returnFocusTo?: () => HTMLElement | null;
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -88,6 +98,8 @@ export function Dialog({
    */
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const returnRef = useRef(returnFocusTo);
+  returnRef.current = returnFocusTo;
 
   useEffect(() => {
     if (!open) return;
@@ -137,7 +149,8 @@ export function Dialog({
       if (i >= 0) dialogStack.splice(i, 1);
       // Nur zurückgeben, wenn der Auslöser noch da ist (z. B. nicht mit einem
       // Drawer verschwunden) — sonst fiele der Fokus ins Leere.
-      const target = beforeFocus.current;
+      const preferred = returnRef.current?.() ?? null;
+      const target = preferred?.isConnected ? preferred : beforeFocus.current;
       if (target?.isConnected) target.focus();
     };
   }, [open, titleId]);

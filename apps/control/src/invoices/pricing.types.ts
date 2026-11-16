@@ -55,6 +55,27 @@ export type SuggestionBlocker =
   | 'instance_too_young';
 
 /**
+ * Was der VERTRAG der Organisation festlegt: Preisstufe und Zahlungsweise, so
+ * wie die Betreiberin sie an der Organisation eingetragen hat.
+ *
+ * Getrennt von `tier` (aus der Messung abgeleitet): Der Vertrag ist, was
+ * vereinbart wurde, die Messung ist, was die Instanz tatsächlich nutzt. Eine
+ * Rechnung folgt dem Vertrag; die Messung ist nur Entscheidungshilfe.
+ */
+export interface ContractTerms {
+  /** `Organisation.preisstufe` — `null`, wenn keine hinterlegt ist. */
+  tierKey: string | null;
+  /**
+   * Die Stufe zu diesem Schlüssel aus der Preisliste, auch eine archivierte.
+   * `null`, wenn kein Schlüssel hinterlegt ist ODER die Preisliste ihn nicht
+   * (mehr) kennt — dann gibt es keinen Preis, den man anbieten dürfte.
+   */
+  tier: PriceTier | null;
+  /** Rhythmus der Abrechnung — `null`, wenn keiner hinterlegt ist. */
+  paymentInterval: 'yearly' | 'half_yearly' | 'monthly' | null;
+}
+
+/**
  * Der VORSCHLAG — R5, wörtlich: Er wird angezeigt, die Benutzerin bestätigt.
  *
  * Deshalb gibt dieser Typ auch her, WORAUS der Vorschlag entstanden ist
@@ -91,4 +112,6 @@ export interface PriceSuggestion {
    * Aufsetzen der Instanz erbracht, das Abo erst nach der Pilotphase.
    */
   setupCalculable: boolean;
+  /** Der Vertrag der Organisation — Grundlage für „Posten aus Vertrag übernehmen". */
+  contract: ContractTerms;
 }

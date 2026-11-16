@@ -46,6 +46,8 @@ export class PricingService {
       where: { id: companyId },
       select: {
         customAmount: true,
+        priceTier: true,
+        paymentInterval: true,
         instanceStartDate: true,
         instance: { select: { id: true } },
       },
@@ -108,6 +110,14 @@ export class PricingService {
       subscriptionCalculableFrom,
       subscriptionCalculable,
       setupCalculable: true,
+      // Nur gelesen, nie gesetzt (R5): Der Vertrag steht, wie die Betreiberin
+      // ihn eingetragen hat. `tier()` kennt auch archivierte Stufen — ein
+      // Vertrag darf eine ältere Stufe weiterführen.
+      contract: {
+        tierKey: company.priceTier,
+        tier: this.coolifyConfig.tier(company.priceTier),
+        paymentInterval: company.paymentInterval,
+      },
     };
   }
 }

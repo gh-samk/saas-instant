@@ -172,3 +172,62 @@ describe('Dialog — Fokus beim Tippen', () => {
     expect(document.activeElement).not.toBe(open);
   });
 });
+
+describe('Dialog — Fokus nach dem Schließen', () => {
+  it('geht an den Auslöser zurück', () => {
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Auslöser</button>
+          <Dialog open={open} title="T" onClose={() => setOpen(false)}>
+            <p>Inhalt</p>
+          </Dialog>
+        </>
+      );
+    }
+    render(<Host />);
+    const trigger = screen.getByRole('button', { name: 'Auslöser' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('nimmt `returnFocusTo`, wenn der Auslöser nicht mehr im Dokument steht', () => {
+    function Host() {
+      const [showTrigger, setShowTrigger] = useState(true);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          {showTrigger ? (
+            <button
+              onClick={() => {
+                setShowTrigger(false);
+                setOpen(true);
+              }}
+            >
+              Auslöser
+            </button>
+          ) : (
+            <button id="anker">Anker</button>
+          )}
+          <Dialog
+            open={open}
+            title="T"
+            returnFocusTo={() => document.getElementById('anker')}
+            onClose={() => setOpen(false)}
+          >
+            <p>Inhalt</p>
+          </Dialog>
+        </>
+      );
+    }
+    render(<Host />);
+    const trigger = screen.getByRole('button', { name: 'Auslöser' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Anker' }));
+  });
+});

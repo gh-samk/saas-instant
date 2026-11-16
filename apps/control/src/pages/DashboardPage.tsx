@@ -2,14 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ListChecks } from 'lucide-react';
 import {
-  FilterChips,
   Button,
   EmptyState,
+  NoticeBar,
   Skeleton,
-  Table,
 } from '@saas-instant/ui';
 import { ReconciliationCard } from '../components/ReconciliationCard';
 import { TaskAction } from '../components/TaskAction';
+import { TaskInvoiceActions } from '../components/InvoiceQuickActions';
 import { errorText } from '../lib/api-client';
 import {
   fetchTasks,
@@ -19,7 +19,7 @@ import {
   type TaskList,
 } from '../lib/api';
 import { taskLabel, taskIcon } from '../lib/tasks';
-import { tableText, tableRow } from '../lib/density';
+import { tableText } from '../lib/density';
 import { dateInText, formatDate } from '../utils/date';
 import { dueNotice, daysUntil } from '../utils/due-date';
 import { useT, type TFunction } from '../i18n';
@@ -27,17 +27,32 @@ import { useT, type TFunction } from '../i18n';
 /**
  * Was die Aufgabe ist: Icon, Titel, Begründung, betroffene Organisation.
  *
- * Eigener Baustein, weil ihn beide Darstellungen (Karten unter `sm`, Tabelle
- * darüber) benutzen. Zwei Kopien desselben Markups liefen sonst mit der Zeit
- * auseinander, und der Unterschied fiele nur bei genau einer Fensterbreite auf.
+ * Rechnungsaufgaben tragen einen KURZEN Titel („Rechnung DEMO-0005 überfällig
+ * · 629,51 €") und eine einzige Zeile darunter: Organisation und Alter
+ * („Steinbock Bergwacht-Förderkreis · seit 61 Tagen"). Der Titel ist dort der
+ * Link zur Rechnung — die eigentlichen Handlungen sind die Knöpfe daneben.
+ * Alle anderen Arten behalten Titel, Begründung und darunter die
+ * Organisation.
+ *
+ * Organisationsnamen werden NIE abgeschnitten (`break-words`): Der Name ist
+ * der Grund, die Zeile zu lesen, und daneben ist Platz.
  */
 function TaskHeader({ task }: { task: Task }) {
   // Über die Funktion, nicht über den Record: Eine Aufgabenart, die die
   // Oberfläche noch nicht kennt, ergäbe sonst `undefined` als Komponente und
   // risse die ganze Startseite mit.
   const Icon = taskIcon(task.kind);
+  const isInvoice = task.kind === 'invoice_overdue';
+  const companyLink = task.company && (
+    <Link
+      to={`/companies/${task.company.id}`}
+      className="break-words text-primaer underline underline-offset-2 hover:text-primaer-hover"
+    >
+      {task.company.name}
+    </Link>
+  );
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex min-w-0 items-start gap-3">
       {/* Alle Aufgabenkreise tragen dieselbe Farbe: Die acht
           Organisationsstatus haben bereits eine gelernte Farbsprache, eine
           zweite daneben hieße zweimal „was bedeutet Rot hier". Unterschieden
@@ -46,27 +61,38 @@ function TaskHeader({ task }: { task: Task }) {
         <Icon className="h-4 w-4" aria-hidden="true" />
       </span>
       <div className="min-w-0">
-        <p className={tableText.compact.primary}>{task.title}</p>
-        {/* Vier Aufgabenquellen setzen den Kalendertag direkt in ihren Text
-            ein („… am 2026-08-31 …"). Das Datumsformat der Anwendung ist
-            durchgehend dd.mm.yyyy; die Anzeigeschicht ist der letzte Ort, an
-            dem die Regel noch greifen kann. */}
-        <p className={tableText.compact.secondary}>
-          {dateInText(task.reason)}
-        </p>
-        {/* DER ORGANISATIONSLINK STEHT NUR NOCH IN DER SCHMALEN ANSICHT.
-            Ab 640 px hat die Organisation eine eigene Spalte; zweimal
-            derselbe Verweis in einer Zeile ist einmal zu viel.
-
-            NICHT jede Aufgabe hängt an einer Organisation: Die
-            Aufbewahrungsfrist des Audit-Logs gilt für den ganzen Bestand. */}
-        {task.company && (
+        {isInvoice && task.action.target.startsWith('/') ? (
           <Link
-            to={`/companies/${task.company.id}`}
-            className="mt-1 inline-block text-xs text-primaer underline underline-offset-2 hover:text-primaer-hover sm:hidden"
+            to={task.action.target}
+            className={`break-words ${tableText.compact.primary} hover:underline`}
           >
-            {task.company.name}
+            {task.title}
           </Link>
+        ) : (
+          <p className={`break-words ${tableText.compact.primary}`}>
+            {task.title}
+          </p>
+        )}
+        {isInvoice ? (
+          <p className={`break-words ${tableText.compact.secondary}`}>
+            {companyLink}
+            {companyLink && ' · '}
+            {task.reason}
+          </p>
+        ) : (
+          <>
+            {/* Vier Aufgabenquellen setzen den Kalendertag direkt in ihren
+                Text ein („… am 2026-08-31 …"). Das Datumsformat der
+                Anwendung ist durchgehend dd.mm.yyyy; die Anzeigeschicht ist
+                der letzte Ort, an dem die Regel noch greifen kann. */}
+            <p className={`break-words ${tableText.compact.secondary}`}>
+              {dateInText(task.reason)}
+            </p>
+            {/* NICHT jede Aufgabe hängt an einer Organisation: Die
+                Aufbewahrungsfrist des Audit-Logs gilt für den ganzen
+                Bestand. */}
+            {companyLink && <p className="mt-1 text-xs">{companyLink}</p>}
+          </>
         )}
       </div>
     </div>
@@ -87,10 +113,20 @@ function TaskDue({
 }: {
   task: Task;
   todayDay: string;
-  /** In der Karte nebeneinander, in der Tabelle untereinander. */
+  /** Nebeneinander (schmal) oder untereinander (breit). */
   sideBySide?: boolean;
 }) {
+  const t = useT();
   const overdue = daysUntil(task.dueAt, todayDay) < 0;
+  // Rechnungsaufgaben sagen das Alter schon in der Zeile darunter („seit 61
+  // Tagen"). Hier bleibt nur das exakte Datum — die Aussage nicht doppelt.
+  if (task.kind === 'invoice_overdue') {
+    return (
+      <p className={`ziffern-tabellarisch ${tableText.compact.secondary}`}>
+        {t('dashboard.dueOn', { date: formatDate(task.dueAt) })}
+      </p>
+    );
+  }
   return (
     <div className={sideBySide ? 'flex flex-wrap items-baseline gap-x-2' : ''}>
       <p
@@ -159,19 +195,27 @@ function TruncationHint({
  * Ein-Personen-Betrieb braucht morgens keine Statistik, sondern die Liste der
  * Dinge, die heute anstehen, jede mit einer benannten Handlung daneben.
  *
- * ZWEI DARSTELLUNGEN, EINE DATENQUELLE. Unter 640 px gestapelte Karten, ab
- * dort die Tabelle. Grund: In der Tabelle liegt die Handlung in der dritten
- * Spalte, und die war bei 375 px nur nach seitlichem Schieben erreichbar. Für
- * die Einstiegsseite eines täglich benutzten Werkzeugs, deren einziger Zweck
- * „die nächste Handlung ausführen" ist, ist das der falsche Kompromiss — eine
- * Aufgabenliste, deren Knopf man erst wegscrollen muss, verfehlt ihren Zweck.
- * Bei drei Feldern je Zeile kostet die gestapelte Form nichts.
+ * GRUPPEN MIT ÜBERSCHRIFT STATT REITER PLUS SPALTE „ART". Früher filterte eine
+ * Chipleiste die Liste, und eine eigene Spalte nannte die Art. Beides sagte
+ * dasselbe aus zwei Richtungen. Jetzt steht über jeder Gruppe ihre
+ * Überschrift mit der Zählung (die Zahl der Chips bleibt also erhalten), und
+ * die Art ergibt sich aus der Gruppe. Gruppen ohne Aufgaben entfallen.
  *
- * REIHENFOLGE KOMMT VOM SERVER und wird hier nicht nachsortiert. Er ordnet
- * nach Dringlichkeit und darin nach Fälligkeit — und weil die Dringlichkeit
- * selbst aus der Fälligkeit abgeleitet ist (überfällig, binnen einer Woche,
- * später), ist das Ergebnis genau die chronologische Reihenfolge nach
- * Fälligkeit: das am längsten Überfällige oben.
+ * KARTENZEILEN AUF ALLEN BREITEN. Die frühere Tabelle lief bei 768 px
+ * seitlich über (fünf Spalten, Mindestbreite 820 px). Eine Zeile aus Aufgabe,
+ * Fälligkeit und Knöpfen bricht dagegen von selbst um und braucht keine
+ * Mindestbreite — und die Handlung bleibt auch bei 375 px ohne Schieben
+ * erreichbar, was der einzige Zweck dieser Seite ist.
+ *
+ * DER ERKLÄRTEXT STEHT EINMAL. Der Satz zum Zahlungseingang galt für jede
+ * überfällige Rechnung und stand viermal fast gleich in der Liste. Er steht
+ * jetzt als Hinweis über der Rechnungsgruppe.
+ *
+ * REIHENFOLGE KOMMT VOM SERVER und wird innerhalb einer Gruppe nicht
+ * nachsortiert. Er ordnet nach Dringlichkeit und darin nach Fälligkeit — und
+ * weil die Dringlichkeit selbst aus der Fälligkeit abgeleitet ist (überfällig,
+ * binnen einer Woche, später), ist das Ergebnis genau die chronologische
+ * Reihenfolge nach Fälligkeit: das am längsten Überfällige oben.
  *
  * DIESELBE ORGANISATION KANN MEHRFACH ERSCHEINEN, und das bleibt so. Eine 25
  * Monate alte, unbeantwortete Anfrage erzeugt zwei Aufgaben zugleich: „Anfrage
@@ -183,53 +227,54 @@ function TruncationHint({
  * Aufbewahrungspflicht und darf nicht hinter einer Vertriebsaufgabe
  * verschwinden.
  */
+
 /**
- * Die Filtergruppen der Aufgabenliste.
+ * Die Gruppen der Aufgabenliste, in der Reihenfolge der Anzeige.
  *
  * SIE GRUPPIEREN NACH ART, NICHT NACH DRINGLICHKEIT. Dringlichkeit steht
- * schon in der Fälligkeitsspalte und in der Sortierung; eine zweite Ordnung
- * daneben hiesse zweimal dasselbe. Wonach man wirklich filtert, ist die Art
- * der Arbeit: Anfragen beantworten ist etwas anderes als Rechnungen schreiben.
+ * schon in der Fälligkeit und in der Sortierung; eine zweite Ordnung daneben
+ * hiesse zweimal dasselbe. Wonach man wirklich sucht, ist die Art der Arbeit:
+ * Anfragen beantworten ist etwas anderes als Rechnungen schreiben.
+ *
+ * Eine Aufgabenart, die in keiner Gruppe steht, landet in „Sonstiges" — sie
+ * darf nicht verschwinden, nur weil die Oberfläche sie noch nicht kennt.
  */
 function taskGroups(t: TFunction): { value: string; label: string; kinds: TaskKind[] }[] {
   return [
-  { value: 'all', label: t('dashboard.groupAll'), kinds: [] },
-  {
-    value: 'inquiries',
-    label: t('dashboard.groupInquiries'),
-    kinds: ['inquiry_unanswered'],
-  },
-  {
-    value: 'review',
-    label: t('dashboard.groupReview'),
-    kinds: ['review_date'],
-  },
-  {
-    value: 'invoices',
-    label: t('dashboard.groupInvoices'),
-    kinds: ['invoice_due', 'invoice_overdue', 'price_info_missing', 'tier_check'],
-  },
-  {
-    value: 'other',
-    label: t('dashboard.groupOther'),
-    kinds: [
-      'status_change_automatic',
-      'deletion_suggestion',
-      'audit_retention',
-      'outbox_disrupted',
-    ],
-  },
-  {
-    value: 'instances',
-    label: t('dashboard.groupInstances'),
-    kinds: [
-      'backup_missing',
-      'metrics_query_failed',
-      'reconciliation_deviation',
-      'no_entry_for_long',
-      'company_name_mismatch',
-    ],
-  },
+    {
+      value: 'invoices',
+      label: t('dashboard.groupInvoices'),
+      kinds: [
+        'invoice_due',
+        'invoice_overdue',
+        'price_info_missing',
+        'tier_check',
+        'document_tampered',
+      ],
+    },
+    {
+      value: 'inquiries',
+      label: t('dashboard.groupInquiries'),
+      kinds: ['inquiry_unanswered'],
+    },
+    {
+      value: 'review',
+      label: t('dashboard.groupReview'),
+      kinds: ['review_date'],
+    },
+    {
+      value: 'instances',
+      label: t('dashboard.groupInstances'),
+      kinds: [
+        'backup_missing',
+        'control_backup_missing',
+        'metrics_query_failed',
+        'reconciliation_deviation',
+        'no_entry_for_long',
+        'company_name_mismatch',
+      ],
+    },
+    { value: 'other', label: t('dashboard.groupOther'), kinds: [] },
   ];
 }
 
@@ -238,10 +283,11 @@ export function DashboardPage() {
   const groups = taskGroups(t);
   const [data, setData] = useState<TaskList | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState('all');
 
-  const load = useCallback(async () => {
-    setData(null);
+  const load = useCallback(async (silent = false) => {
+    // Still nachladen (nach einer Direktaktion) lässt die Liste stehen, sonst
+    // risse das Skelett die offenen Dialoge und Toasts mit.
+    if (!silent) setData(null);
     setLoadError(null);
     try {
       // Ohne `seit` gilt serverseitig eine Woche Rückschau für automatische
@@ -259,37 +305,21 @@ export function DashboardPage() {
   }, [load]);
 
   const allTasks = data?.tasks ?? [];
-  const group = groups.find((g) => g.value === filter) ?? groups[0];
-  const tasks =
-    group.kinds.length === 0
-      ? allTasks
-      : allTasks.filter((a) => group.kinds.includes(a.kind));
-
-  /**
-   * Die Zahlen der Chips beziehen sich IMMER auf die ganze Liste, nie auf die
-   * gerade gefilterte — sonst zeigte jeder Chip ausser dem gewaehlten eine
-   * Null, und die Leiste waere genau dann nutzlos, wenn man sie braucht.
-   *
-   * Eine Gruppe OHNE Aufgaben verschwindet: Anders als bei den Statuschips
-   * der Organisationsliste ist hier keine feste Ordnung zu wahren, und eine
-   * Leiste mit fuenf Nullen sagt nur, dass nichts zu tun ist — das steht dann
-   * ohnehin im Leerzustand.
-   */
-  const chips = groups.map((g) => ({
-    value: g.value,
-    label: g.label,
-    count:
-      g.kinds.length === 0
-        ? allTasks.length
-        : allTasks.filter((a) => g.kinds.includes(a.kind)).length,
-  })).filter((c) => c.value === 'all' || c.count > 0);
+  const known = new Set(groups.flatMap((g) => g.kinds));
+  const sections = groups
+    .map((g) => ({
+      ...g,
+      tasks: allTasks.filter((a) =>
+        g.value === 'other' ? !known.has(a.kind) : g.kinds.includes(a.kind),
+      ),
+    }))
+    .filter((g) => g.tasks.length > 0);
 
   return (
     <section aria-labelledby="dashboard-title">
       {/* „HEUTE" STATT „DASHBOARD". Der Untertitel „Deine Aufgaben, sortiert
-          nach Fälligkeit." entfällt ersatzlos — der Tabellenkopf sagt es
-          genauer, und eine Zeile, die nur wiederholt, was darunter steht,
-          kostet jeden Blick Zeit. */}
+          nach Fälligkeit." entfällt ersatzlos — eine Zeile, die nur
+          wiederholt, was darunter steht, kostet jeden Blick Zeit. */}
       <div className="mb-4 flex flex-wrap items-baseline gap-x-3">
         <h1
           id="dashboard-title"
@@ -305,20 +335,7 @@ export function DashboardPage() {
       {/* KEINE KENNZAHL-KACHELN. Der Entwurf zeigt hier vier; das
           Abnahmekriterium E2-24 verlangt ausdrücklich „Aufgabenliste …
           keine Kacheln, keine Diagramme", und der Auftraggeber hat sich
-          beim Durchgang dafür entschieden, es bei der Liste zu belassen.
-          Die Chips leisten dasselbe: Sie filtern dieselbe Liste, ohne eine
-          zweite Ebene über ihr aufzubauen. */}
-      {data !== null && data.tasks.length > 0 && (
-        <div className="mb-4">
-          <FilterChips
-            label={t('dashboard.filterCaption')}
-            active={filter}
-            onSelect={setFilter}
-            chips={chips}
-          />
-        </div>
-      )}
-
+          beim Durchgang dafür entschieden, es bei der Liste zu belassen. */}
       {loadError ? (
         <div className="rounded-xl border border-rahmen bg-flaeche p-6">
           <p role="alert" className="mb-3 text-sm text-text">
@@ -342,100 +359,64 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* --- Bis 640 px: gestapelte Karten, Handlung immer sichtbar --- */}
-          <ul
-            aria-label={t('dashboard.openTasksLabel')}
-            className="divide-y divide-rahmen overflow-hidden rounded-xl border border-rahmen bg-flaeche sm:hidden"
-          >
-            {tasks.map((a, i) => (
-              <li key={key(a, i)} className="p-4">
-                <TaskHeader task={a} />
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <TaskDue
-                    task={a}
-                    todayDay={data.state.day}
-                    sideBySide
-                  />
-                  <TaskAction action={a.action} afterAction={load} />
-                </div>
-              </li>
+          <div className="flex flex-col gap-6">
+            {sections.map((group) => (
+              <section
+                key={group.value}
+                aria-labelledby={`group-${group.value}`}
+              >
+                <h2
+                  id={`group-${group.value}`}
+                  className="mb-2 text-base font-semibold text-text"
+                >
+                  {group.label}{' '}
+                  <span className="font-normal text-leise ziffern-tabellarisch">
+                    ({group.tasks.length})
+                  </span>
+                </h2>
+                {/* Der Erklärsatz zu überfälligen Rechnungen steht EINMAL über
+                    der Gruppe — nicht in jeder Zeile. */}
+                {group.tasks.some((a) => a.kind === 'invoice_overdue') && (
+                  <NoticeBar kind="notice" className="mb-2">
+                    {t('dashboard.overdueHint')}
+                  </NoticeBar>
+                )}
+                <ul
+                  aria-label={group.label}
+                  className="divide-y divide-rahmen overflow-hidden rounded-xl border border-rahmen bg-flaeche"
+                >
+                  {group.tasks.map((a, i) => (
+                    <li
+                      key={key(a, i)}
+                      className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between md:gap-4"
+                    >
+                      <div className="min-w-0 md:flex-1">
+                        <TaskHeader task={a} />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 md:shrink-0 md:justify-end">
+                        <TaskDue
+                          task={a}
+                          todayDay={data.state.day}
+                          sideBySide
+                        />
+                        {a.kind === 'invoice_overdue' && a.invoiceId ? (
+                          <TaskInvoiceActions
+                            task={a}
+                            onChanged={() => void load(true)}
+                          />
+                        ) : (
+                          <TaskAction
+                            action={a.action}
+                            afterAction={() => void load(true)}
+                          />
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
-
-          {/* --- Ab 640 px: Tabelle mit den Spalten des Entwurfs ---
-
-              DIE BREITEN SIND GEMESSEN, NICHT GESCHAETZT: Mit fuenf Zwoelfteln
-              fuer die Aufgabe und einem fuer die Handlung brauchte die Tabelle
-              bei 1280 px 996 px in einer 962 px breiten Huelle — die
-              Handlungsspalte war halb verdeckt, und genau sie ist der Grund,
-              warum die Zeile ueberhaupt da ist. Die Beschriftungen des Servers
-              sind laenger als das „Erledigen" des Entwurfs (etwa
-              „Ueberpruefung vorbereiten"), die Spalte braucht also wirklich
-              Platz. */}
-          <div className="hidden sm:block">
-            <Table
-              columns={[t('dashboard.columnTask'), t('dashboard.columnCompany'), t('dashboard.columnKind'), t('dashboard.columnDue'), t('dashboard.columnAction')]}
-              columnsWidths={[
-                'w-4/12',
-                'w-2/12',
-                'w-2/12',
-                'w-2/12',
-                'w-2/12',
-              ]}
-              columnsOnlyReadAloud={[false, false, false, false, true]}
-              variant="list"
-              actionColumn
-              minWidth="min-w-[820px]"
-              label={t('dashboard.openTasksLabel')}
-            >
-              {tasks.map((a, i) => (
-                <tr key={key(a, i)} className="align-top">
-                  <td className={`${tableRow.compact} min-w-0`}>
-                    <TaskHeader task={a} />
-                  </td>
-                  {/* ORGANISATION UND ART BEKOMMEN EIGENE SPALTEN. Bis zum
-                      Redesign standen beide im Aufgabenblock — der Name als
-                      Link darunter, die Art gar nicht. In einer Liste mit
-                      neun Zeilen sucht man aber quer: „welche gehoeren zu
-                      dieser Organisation", „was ist davon eine Rechnung". */}
-                  <td className={`${tableRow.compact} min-w-0`}>
-                    {a.company ? (
-                      <Link
-                        to={`/companies/${a.company.id}`}
-                        className={`block truncate ${tableText.compact.primary} hover:underline`}
-                        title={a.company.name}
-                      >
-                        {a.company.name}
-                      </Link>
-                    ) : (
-                      <span className={tableText.compact.secondary}>—</span>
-                    )}
-                  </td>
-                  <td
-                    className={`${tableRow.compact} ${tableText.compact.secondary}`}
-                  >
-                    {taskLabel(a.kind)}
-                  </td>
-                  <td className={tableRow.compact}>
-                    <TaskDue
-                      task={a}
-                      todayDay={data.state.day}
-                    />
-                  </td>
-                  <td className={tableRow.compact}>
-                    <TaskAction action={a.action} afterAction={load} />
-                  </td>
-                </tr>
-              ))}
-            </Table>
           </div>
-
-          {/* Der Leerzustand EINER AUSWAHL — nicht derselbe wie „gar nichts
-              offen". Wer filtert und nichts findet, soll das als Ergebnis des
-              Filters lesen, nicht als Zustand des Systems. */}
-          {tasks.length === 0 && (
-            <p className="mt-3 text-sm text-still">{t('dashboard.nothingInSelection')}</p>
-          )}
 
           <TruncationHint
             truncated={data.shortened}
@@ -460,7 +441,7 @@ export function DashboardPage() {
         <ReconciliationCard
           orphanedApplications={data.orphanedApplications}
           state={data.state.reconciliation}
-          onRun={() => void load()}
+          onRun={() => void load(true)}
         />
       )}
     </section>

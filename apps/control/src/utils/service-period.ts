@@ -11,7 +11,8 @@ import type { PaymentInterval } from '../lib/api';
  *
  * EIN VORSCHLAG, KEINE SPERRE. Beide Felder bleiben frei editierbar; die
  * Vorbelegung nimmt nur den häufigen Fall vorweg (laufender Monat bei
- * monatlicher, laufendes Jahr bei jährlicher Zahlweise). Ist keine
+ * monatlicher, laufendes Halbjahr bei halbjährlicher, laufendes Jahr bei
+ * jährlicher Zahlweise — alle drei Werte, die `PaymentInterval` kennt). Ist keine
  * Zahlungsweise hinterlegt, wird nichts geraten: Dann steht in beiden Feldern
  * der heutige Tag, und die Person entscheidet selbst.
  *
@@ -30,6 +31,14 @@ export function servicePeriodSuggestion(
       from: `${year}-${month}-01`,
       until: `${year}-${month}-${String(lastDayOfMonth(Number(year), Number(month))).padStart(2, '0')}`,
     };
+  }
+  if (paymentInterval === 'half_yearly') {
+    // KALENDERHALBJAHR, nicht „sechs Monate ab heute": passend zum Kalendermonat
+    // und zum Kalenderjahr der Nachbarfälle, damit aufeinanderfolgende
+    // Rechnungen lückenlos aneinanderstoßen (Jan–Jun, Jul–Dez).
+    return Number(month) <= 6
+      ? { from: `${year}-01-01`, until: `${year}-06-30` }
+      : { from: `${year}-07-01`, until: `${year}-12-31` };
   }
   if (paymentInterval === 'yearly') {
     return { from: `${year}-01-01`, until: `${year}-12-31` };

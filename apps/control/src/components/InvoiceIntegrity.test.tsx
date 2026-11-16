@@ -93,4 +93,49 @@ describe('InvoiceIntegrity', () => {
       await screen.findByText('Der Verlauf konnte nicht geladen werden.'),
     ).toBeInTheDocument();
   });
+
+  it('klappt Details und Verlauf standardmäßig zu, wenn alles in Ordnung ist', async () => {
+    fetchInvoiceIntegrity.mockResolvedValue(OK);
+    const { container } = render(
+      <InvoiceIntegrity invoiceId="r1" finalized retentionUntil="2034-12-31" />,
+    );
+    await screen.findByText('Integrität geprüft');
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+  });
+
+  it('klappt bei einer Abweichung von selbst auf — der Fehler wird nicht versteckt', async () => {
+    fetchInvoiceIntegrity.mockResolvedValue({
+      ...OK,
+      ok: false,
+      checks: [{ check: 'pdf_sha256', ok: false, status: 'mismatch' }],
+    });
+    const { container } = render(
+      <InvoiceIntegrity invoiceId="r1" finalized retentionUntil="2034-12-31" />,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Abweichung festgestellt');
+    expect(container.querySelector('details')).toHaveAttribute('open');
+  });
+
+  it('zeigt eine nicht mögliche Prüfung als Fehler-Abzeichen, nicht nur im Text', async () => {
+    fetchInvoiceIntegrity.mockRejectedValue(new Error('x'));
+    const { container } = render(
+      <InvoiceIntegrity invoiceId="r1" finalized />,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Integrität nicht prüfbar');
+    expect(container.querySelector('details')).toHaveAttribute('open');
+  });
+
+  it('zeigt Zeiten in lokaler Zeit', async () => {
+    fetchInvoiceIntegrity.mockResolvedValue(OK);
+    render(<InvoiceIntegrity invoiceId="r1" finalized />);
+    const at = new Date('2026-11-01T08:00:00.000Z');
+    const hh = String(at.getHours()).padStart(2, '0');
+    const mm = String(at.getMinutes()).padStart(2, '0');
+    const day = String(at.getDate()).padStart(2, '0');
+    expect(
+      (await screen.findAllByText(new RegExp(`${day}\\.11\\.2026 ${hh}:${mm} · von sam`)))
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/UTC/)).toBeNull();
+  });
 });

@@ -80,6 +80,22 @@ const TASKS = {
   },
 };
 
+/** Eine überfällige Rechnung, wie der Server sie seit der Kurzfassung liefert. */
+const OVERDUE_TASK = {
+  kind: 'invoice_overdue',
+  dueAt: '2026-08-17',
+  urgency: 'high',
+  invoiceId: 'r1',
+  title: 'Rechnung 2026-014 überfällig · 458,15 €',
+  reason: 'seit 61 Tagen',
+  action: {
+    kind: 'payment_check',
+    label: 'Rechnung öffnen',
+    target: `/companies/${COMPANY.id}/invoices/r1`,
+  },
+  company: COMPANY,
+};
+
 /** Gibt die Attrappe zurück, damit Aufrufe geprüft werden können. */
 function setFetchReady(
   tasks: unknown,
@@ -125,17 +141,18 @@ afterEach(() => {
 });
 
 /**
- * Es gibt ZWEI Darstellungen derselben Daten: gestapelte Karten unter 640 px,
- * die Tabelle darüber. Umgeschaltet wird per CSS, deshalb stehen im Test
- * (jsdom wendet kein CSS an) beide im DOM. Die Prüfungen fassen deshalb
- * gezielt eine der beiden an — und eine eigene prüft, dass beide dasselbe
- * zeigen.
+ * Es gibt EINE Darstellung: Kartenzeilen in Gruppen mit Überschrift (keine
+ * Tabelle mehr, die bei 768 px seitlich überlief). `table()` bleibt als Name
+ * der Abfrage auf die ganze Seite erhalten.
  */
 function table() {
-  return within(screen.getByRole('table'));
+  return screen;
 }
-function cards() {
-  return within(screen.getByRole('list', { name: 'Offene Aufgaben' }));
+/** Wartet, bis die Aufgabenliste geladen ist (irgendeine Gruppe steht). */
+function ready() {
+  return screen.findAllByRole('heading', {
+    name: /^(Neue Anfragen|Rechnungen|Zu überprüfen|Instanzen|Sonstiges)/,
+  });
 }
 
 describe('Dashboard — Aufgabenliste', () => {
@@ -144,7 +161,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     expect(
       table().getByText('Anfrage von Solawi Rheintal ist unbeantwortet'),
     ).toBeInTheDocument();
@@ -161,29 +178,22 @@ describe('Dashboard — Aufgabenliste', () => {
     ).toBeInTheDocument();
   });
 
-  it('bietet die Handlung auch in der gestapelten Darstellung an', async () => {
-    // [W1] Bei 375 px lag die Aktionsspalte der Tabelle außerhalb des Bildes;
-    // die Handlung war nur nach seitlichem Schieben erreichbar. Für eine
-    // Aufgabenliste ist genau das der Zweck der Seite.
+  it('ist eine Liste in Gruppen, keine Tabelle (kein Überlauf bei 768 px)', async () => {
+    // Die Tabelle hatte eine Mindestbreite von 820 px und lief bei 768 px
+    // seitlich über. Kartenzeilen brechen von selbst um.
     setFetchReady(TASKS);
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
+    expect(screen.queryByRole('table')).toBeNull();
+    // Beide Aufgaben der Organisation stehen in ihren Gruppen mit Zählung.
     expect(
-      cards().getByText('Anfrage von Solawi Rheintal ist unbeantwortet'),
+      screen.getByRole('heading', { name: /Neue Anfragen\s*\(1\)/ }),
     ).toBeInTheDocument();
     expect(
-      cards().getByRole('link', { name: 'Anfrage bearbeiten' }),
+      screen.getByRole('heading', { name: /Sonstiges\s*\(1\)/ }),
     ).toBeInTheDocument();
-    expect(
-      cards().getByRole('link', { name: 'Löschung prüfen' }),
-    ).toBeInTheDocument();
-    // Beide Darstellungen zeigen dieselben Aufgaben — keine darf welche
-    // unterschlagen.
-    expect(cards().getAllByRole('listitem')).toHaveLength(
-      table().getAllByRole('row').length - 1,
-    );
   });
 
   it('nennt Überfälliges beim Wort und zeigt daneben das exakte Datum', async () => {
@@ -191,7 +201,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     // 02.07.2024 gegen den Serverstand 31.08.2026.
     expect(table().getByText('Seit 790 Tagen überfällig')).toBeInTheDocument();
     expect(table().getByText('02.07.2024')).toBeInTheDocument();
@@ -268,7 +278,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     expect(
       table().getByText('Aufbewahrungsfrist des Nachweises prüfen'),
     ).toBeInTheDocument();
@@ -287,7 +297,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     expect(screen.getByText('Nicht alles wird angezeigt')).toBeInTheDocument();
     expect(screen.getByText(/340 weitere ausgeblendet/)).toBeInTheDocument();
     expect(screen.getByText(/Anfragen ohne Reaktion: 25 von 365 gezeigt/)).toBeInTheDocument();
@@ -331,7 +341,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     expect(table().getByText('Seit 56 Tagen kein Eintrag')).toBeInTheDocument();
     expect(table().getByText('Sicherung überfällig')).toBeInTheDocument();
     expect(
@@ -482,7 +492,7 @@ describe('Dashboard — Aufgabenliste', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     const target = table()
       .getByRole('link', { name: 'Löschung prüfen' })
       .getAttribute('href');
@@ -521,7 +531,7 @@ describe('Dashboard — eine unbekannte Aufgabenart bricht die Seite nicht ab', 
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
+    await ready();
     expect(
       table().getByText('Etwas Neues aus dem Backend'),
     ).toBeInTheDocument();
@@ -537,57 +547,36 @@ describe('Dashboard — eine unbekannte Aufgabenart bricht die Seite nicht ab', 
     ).toBeInTheDocument();
   });
 
-  it('trägt die neue Art „Rechnung überfällig" samt Icon und Bezeichnung', async () => {
+  it('trägt die neue Art „Rechnung überfällig“ samt Icon und Bezeichnung', async () => {
     setFetchReady({
       ...TASKS,
-      tasks: [
-        {
-          kind: 'invoice_overdue',
-          dueAt: '2026-08-17',
-          urgency: 'high',
-          title: 'Rechnung 2026-014 an Solawi Rheintal ist überfällig',
-          reason: 'Fällig war sie am 2026-08-17; offen sind 458,15 €.',
-          action: {
-            kind: 'payment_check',
-            label: 'Rechnung öffnen',
-            target: `/companies/${COMPANY.id}/invoices/r1`,
-          },
-          company: COMPANY,
-        },
-      ],
+      tasks: [OVERDUE_TASK],
       shortened: [{ kind: 'invoice_overdue', shown: 25, further: 2 }],
     });
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
-    expect(
-      table().getByText(
-        'Rechnung 2026-014 an Solawi Rheintal ist überfällig',
-      ),
-    ).toBeInTheDocument();
-    // Das ISO-Datum aus dem Servertext wird auf dd.mm.yyyy gezogen.
-    expect(
-      table().getByText(/Fällig war sie am 17\.08\.2026/),
-    ).toBeInTheDocument();
+    await ready();
+    // Kurzer Titel; darunter EINE Zeile mit Organisation und Alter.
+    const title = screen.getByRole('link', {
+      name: 'Rechnung 2026-014 überfällig · 458,15 €',
+    });
+    // Der Titel führt auf die Route, die die Quelle festgeschrieben hat.
+    expect(title).toHaveAttribute('href', `/companies/${COMPANY.id}/invoices/r1`);
+    expect(screen.getByText(/seit 61 Tagen/)).toHaveTextContent(
+      'Solawi Rheintal · seit 61 Tagen',
+    );
     expect(
       screen.getByText(/Überfällige Rechnungen: 25 von/),
     ).toBeInTheDocument();
-    // Die Handlung führt auf die Route, die die Quelle festgeschrieben hat.
-    expect(
-      table().getAllByRole('link', { name: 'Rechnung öffnen' })[0],
-    ).toHaveAttribute(
-      'href',
-      `/companies/${COMPANY.id}/invoices/r1`,
-    );
   });
 });
 
-describe('Heute — Filterchips statt Kacheln', () => {
+describe('Heute — Gruppen statt Reiter', () => {
   it('HEISST „HEUTE" UND ERKLAERT SICH NICHT MEHR', async () => {
     // Der Untertitel „Deine Aufgaben, sortiert nach Fälligkeit." entfällt
-    // ersatzlos: Der Tabellenkopf sagt es genauer, und eine Zeile, die nur
-    // wiederholt, was darunter steht, kostet jeden Blick Zeit.
+    // ersatzlos: Eine Zeile, die nur wiederholt, was darunter steht, kostet
+    // jeden Blick Zeit.
     setFetchReady(TASKS);
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
@@ -600,74 +589,37 @@ describe('Heute — Filterchips statt Kacheln', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('ZEIGT KEINE KENNZAHL-KACHELN — E2-24 gilt weiter', async () => {
-    // Der Entwurf hat hier vier Kacheln. Das Abnahmekriterium verlangt
-    // ausdrücklich „Aufgabenliste … keine Kacheln, keine Diagramme", und der
-    // Auftraggeber hat sich beim Durchgang dafür entschieden, es dabei zu
-    // belassen. Die Chips leisten dasselbe, ohne eine zweite Ebene über der
-    // Liste aufzubauen.
+  it('ZEIGT KEINE KENNZAHL-KACHELN UND KEINE FILTERLEISTE — E2-24 gilt weiter', async () => {
     setFetchReady(TASKS);
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    await screen.findByRole('table');
-    const groups = screen.getAllByRole('group');
-    // Genau EINE Gruppe: die Filterleiste. Kacheln waeren Knoepfe ausserhalb.
-    expect(groups).toHaveLength(1);
-    expect(groups[0]).toHaveAccessibleName('Aufgaben filtern');
+    await ready();
+    // Weder Kacheln noch Chipleiste: Gruppen mit Überschrift ersetzen sie.
+    expect(screen.queryAllByRole('group')).toHaveLength(0);
+    expect(
+      screen.queryByRole('group', { name: 'Aufgaben filtern' }),
+    ).toBeNull();
   });
 
-  it('filtert die Liste und zaehlt dabei die ganze Liste', async () => {
-    setFetchReady(TASKS);
+  it('gruppiert mit Überschrift und Zählung statt Reiter plus Spalte „Art“', async () => {
+    setFetchReady({
+      ...TASKS,
+      tasks: [...TASKS.tasks, OVERDUE_TASK, { ...OVERDUE_TASK, invoiceId: 'r2' }],
+    });
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    const bar = within(
-      await screen.findByRole('group', { name: 'Aufgaben filtern' }),
-    );
-    const inquiries = bar.getByRole('button', { name: /Neue Anfragen/ });
-    fireEvent.click(inquiries);
-
-    // Die Liste zeigt nur noch die Anfrage …
-    const table = within(screen.getByRole('table'));
+    await ready();
     expect(
-      table.getByText('Anfrage von Solawi Rheintal ist unbeantwortet'),
+      screen.getByRole('heading', { name: /Rechnungen\s*\(2\)/ }),
     ).toBeInTheDocument();
-    // … die Chipzahl von „Alles" bleibt trotzdem die volle Menge.
-    expect(bar.getByRole('button', { name: /Alles/ }).textContent).toContain(
-      String(TASKS.tasks.length),
-    );
-  });
-
-  it('nennt den Leerzustand EINER AUSWAHL anders als „gar nichts offen"', async () => {
-    // Wer filtert und nichts findet, soll das als Ergebnis des Filters lesen,
-    // nicht als Zustand des Systems.
-    setFetchReady(TASKS);
-    window.history.pushState({}, '', '/');
-    renderWithI18n(<App />);
-
-    const bar = within(
-      await screen.findByRole('group', { name: 'Aufgaben filtern' }),
-    );
-    // „Sonstiges" gibt es in diesen Beispieldaten — es bleibt also ein Chip,
-    // der Treffer hat. Fuer den Leerfall zaehlt der Text selbst.
     expect(
-      screen.queryByText('Nichts offen in dieser Auswahl.'),
-    ).not.toBeInTheDocument();
-    expect(bar.getAllByRole('button').length).toBeGreaterThan(1);
-  });
-
-  it('gibt Organisation und Art eigene Spalten', async () => {
-    setFetchReady(TASKS);
-    window.history.pushState({}, '', '/');
-    renderWithI18n(<App />);
-
-    const table = await screen.findByRole('table');
-    expect(
-      within(table)
-        .getAllByRole('columnheader')
-        .map((k) => k.textContent),
-    ).toEqual(['Aufgabe', 'Organisation', 'Art', 'Fällig', 'Aktion']);
+      screen.getByRole('heading', { name: /Neue Anfragen\s*\(1\)/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader')).toBeNull();
+    // Die Art-Bezeichnung steht nicht mehr in jeder Zeile.
+    expect(screen.queryByText('Überfällige Rechnungen')).toBeNull();
   });
 
   it('DIE ZEILENAKTION IST EIN TEXTLINK, KEIN KNOPF', async () => {
@@ -678,10 +630,121 @@ describe('Heute — Filterchips statt Kacheln', () => {
     window.history.pushState({}, '', '/');
     renderWithI18n(<App />);
 
-    const table = await screen.findByRole('table');
-    const link = within(table).getAllByRole('link', {
+    await ready();
+    const link = screen.getAllByRole('link', {
       name: /Anfrage bearbeiten/,
     })[0];
     expect(link.className).not.toContain('border-rahmen');
+  });
+
+  it('zeigt den Erklärtext zu überfälligen Rechnungen genau EINMAL', async () => {
+    setFetchReady({
+      ...TASKS,
+      tasks: [
+        OVERDUE_TASK,
+        { ...OVERDUE_TASK, invoiceId: 'r2', title: 'Rechnung 2026-015 überfällig · 10,00 €' },
+        { ...OVERDUE_TASK, invoiceId: 'r3', title: 'Rechnung 2026-016 überfällig · 11,00 €' },
+      ],
+    });
+    window.history.pushState({}, '', '/');
+    renderWithI18n(<App />);
+
+    await ready();
+    expect(screen.getAllByText(/Der Zahlungseingang wird von Hand vermerkt/)).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Zahlung erfassen' })).toHaveLength(3);
+  });
+});
+
+describe('Heute — Direktaktionen an überfälligen Rechnungen', () => {
+  const INVOICE = {
+    id: 'r1',
+    companyId: COMPANY.id,
+    companyName: COMPANY.name,
+    invoiceNumber: '2026-014',
+    status: 'sent',
+    paymentState: 'overdue',
+    invoiceDate: '2026-08-01',
+    servicePeriodFrom: '2026-08-01',
+    servicePeriodUntil: '2026-08-31',
+    dueDate: '2026-08-17',
+    paymentDate: null,
+    paidAmount: null,
+    openAmount: '458,15',
+    sumNet: '458,15',
+    sumTax: '0,00',
+    sumGross: '458,15',
+    sumGrossCent: 45_815,
+    recipientName: 'Solawi Rheintal',
+    recipientAddress: 'Weg 1',
+    recipientEmail: 'info@solawi.example',
+    lines: [],
+  };
+
+  function setup() {
+    const base = setFetchReady({ ...TASKS, tasks: [OVERDUE_TASK] });
+    const wrapped = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.includes('/api/invoices/r1') && !path.includes('remind')) {
+        return new Response(JSON.stringify(INVOICE), { status: 200 });
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal('fetch', wrapped);
+    window.history.pushState({}, '', '/');
+    renderWithI18n(<App />);
+    return wrapped;
+  }
+
+  it('„Zahlung erfassen“ lädt die Rechnung nach und öffnet den Dialog OHNE Seitenwechsel', async () => {
+    const called = setup();
+    await ready();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zahlung erfassen' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/2026-014/)).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(
+      called.mock.calls.some((c) => String(c[0]).endsWith('/api/invoices/r1')),
+    ).toBe(true);
+  });
+
+  it('„Zahlungserinnerung senden“ fragt erst nach und schickt nichts vor der Bestätigung', async () => {
+    const called = setup();
+    await ready();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Zahlungserinnerung senden' }),
+    );
+
+    const dialog = await screen.findByRole('dialog');
+    // Empfänger und OFFENER Betrag stehen im Bestätigungsdialog.
+    expect(within(dialog).getByText('info@solawi.example')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(
+      called.mock.calls.some((c) => String(c[0]).includes('remind')),
+    ).toBe(false);
+  });
+
+  it('meldet einen Ladefehler der Rechnung, statt still nichts zu tun', async () => {
+    const base = setFetchReady({ ...TASKS, tasks: [OVERDUE_TASK] });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith('/api/invoices/r1')
+          ? new Response(
+              JSON.stringify({ error: { code: 'HTTP_500', message: 'Kaputt.' } }),
+              { status: 500 },
+            )
+          : base(input, init),
+      ),
+    );
+    window.history.pushState({}, '', '/');
+    renderWithI18n(<App />);
+    await ready();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zahlung erfassen' }));
+    expect(await screen.findByText('Kaputt.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

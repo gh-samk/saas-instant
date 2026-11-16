@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { ToastProvider } from '@saas-instant/ui';
 import { renderWithI18n as render } from '../test-support/render-with-i18n';
@@ -46,11 +46,11 @@ function draft(unit: string | null): Invoice {
   } as unknown as Invoice;
 }
 
-function show(invoice: Invoice | null = draft('C62')) {
+function show(invoice: Invoice | null = draft('C62'), company: Company = COMPANY) {
   return render(
     <ToastProvider>
       <InvoiceDraftForm
-        company={COMPANY}
+        company={company}
         invoice={invoice}
         totpPossible={false}
         suggestion={null}
@@ -178,5 +178,124 @@ describe('InvoiceDraftForm: Hilfetext zum Festschreiben', () => {
     expect(trigger.tagName).toBe('BUTTON');
     expect(trigger).toHaveAttribute('type', 'button');
     expect(trigger).toHaveAccessibleName('Hilfe zu diesem Feld');
+  });
+});
+
+describe('InvoiceDraftForm: Leistungszeitraum nur einmal, vorbelegt aus dem Vertrag', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-17T10:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ['monthly', '2026-08-01', '2026-08-31', 'monatlich'],
+    ['half_yearly', '2026-07-01', '2026-12-31', 'halbjährlich'],
+    ['yearly', '2026-01-01', '2026-12-31', 'jährlich'],
+  ] as const)('belegt bei %s den Zeitraum vor und nennt die Herkunft', (interval, from, until, word) => {
+    show(null, { ...COMPANY, paymentInterval: interval } as Company);
+    expect(screen.getByLabelText(/Leistungszeitraum von/)).toHaveValue(from);
+    expect(screen.getByLabelText(/Leistungszeitraum bis/)).toHaveValue(until);
+    expect(
+      screen.getByText(`Vorbelegt aus der Zahlungsweise des Vertrags (${word}).`),
+    ).toBeInTheDocument();
+  });
+
+  it('belegt ohne Vertrag wie bisher mit dem heutigen Tag vor und nennt keine Herkunft', () => {
+    show(null, { ...COMPANY, paymentInterval: null } as Company);
+    expect(screen.getByLabelText(/Leistungszeitraum von/)).toHaveValue('2026-08-17');
+    expect(screen.getByLabelText(/Leistungszeitraum bis/)).toHaveValue('2026-08-17');
+    expect(screen.queryByText(/Vorbelegt aus der Zahlungsweise/)).toBeNull();
+  });
+
+  it('zeigt je Posten keinen Zeitraum, solange er nicht abweicht', () => {
+    show(null);
+    expect(screen.queryByLabelText('Zeitraum von')).toBeNull();
+    expect(screen.getByRole('button', { name: /Abweichender Zeitraum/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('klappt den Posten-Zeitraum auf, sendet ihn und verwirft ihn beim Zuklappen', async () => {
+    createInvoiceDraft.mockResolvedValue(draft('C62'));
+    show(null);
+    fireEvent.click(screen.getByRole('button', { name: /Abweichender Zeitraum/ }));
+    fireEvent.change(screen.getByLabelText('Zeitraum von'), { target: { value: '2026-07-01' } });
+    fireEvent.change(screen.getByLabelText('Zeitraum bis'), { target: { value: '2026-07-31' } });
+    // Zuklappen verwirft: Es darf nichts Unsichtbares gespeichert werden.
+    fireEvent.click(screen.getByRole('button', { name: /Abweichender Zeitraum/ }));
+    expect(screen.queryByLabelText('Zeitraum von')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Bezeichnung'), { target: { value: 'Paket' } });
+    fireEvent.change(screen.getByLabelText(/Einzelpreis/), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Als Entwurf speichern' }));
+    await waitFor(() => expect(createInvoiceDraft).toHaveBeenCalled());
+    const body = createInvoiceDraft.mock.calls[0]?.[1] as {
+      servicePeriodFrom: string;
+      lines: { periodFrom?: string }[];
+    };
+    expect(body.servicePeriodFrom).toBe('2026-08-01');
+    expect(body.lines[0]).not.toHaveProperty('periodFrom');
+  });
+
+  it('lässt den eigenen Posten-Zeitraum eines bestehenden Entwurfs sichtbar und aufgeklappt', () => {
+    const invoice = draft('C62');
+    invoice.lines[0] = { ...invoice.lines[0]!, periodFrom: '2026-07-01', periodUntil: '2026-07-31' };
+    show(invoice);
+    expect(screen.getByLabelText('Zeitraum von')).toHaveValue('2026-07-01');
+    expect(screen.getByLabelText('Zeitraum bis')).toHaveValue('2026-07-31');
+    expect(screen.getByRole('button', { name: /Abweichender Zeitraum/ })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('öffnet den Posten-Zeitraum und fokussiert ihn, wenn der Server dort einen Fehler meldet', async () => {
+    updateInvoiceDraft.mockRejectedValue(
+      validationError(['lines.0.periodFrom must be a valid ISO 8601 date string']),
+    );
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    const field = await screen.findByLabelText('Zeitraum von');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+});
+
+describe('InvoiceDraftForm: Texte und Notiz eingeklappt', () => {
+  beforeEach(() => {
+    updateInvoiceDraft.mockReset();
+  });
+
+  it('startet bei leeren Texten zugeklappt', () => {
+    show(null);
+    const toggle = screen.getByRole('button', { name: /Texte und Notiz \(optional\)/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Einleitung')).toBeNull();
+    expect(screen.queryByLabelText('Zahlungshinweis')).toBeNull();
+    expect(screen.queryByLabelText('Notiz')).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByLabelText('Einleitung')).toBeInTheDocument();
+    expect(screen.getByLabelText('Notiz')).toBeInTheDocument();
+  });
+
+  it('startet aufgeklappt, wenn schon ein Text befüllt ist', () => {
+    show({ ...draft('C62'), paymentNote: 'Bitte überweisen.' });
+    expect(screen.getByRole('button', { name: /Texte und Notiz/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Zahlungshinweis')).toHaveValue('Bitte überweisen.');
+  });
+
+  it('nennt zugeklappt, was befüllt ist', () => {
+    show({ ...draft('C62'), internalNote: 'Zahlt spät.' });
+    fireEvent.click(screen.getByRole('button', { name: /Texte und Notiz/ }));
+    expect(screen.getByText('Befüllt: Notiz')).toBeInTheDocument();
+  });
+
+  it('öffnet den Abschnitt und fokussiert das Feld, wenn der Server dort einen Fehler meldet', async () => {
+    updateInvoiceDraft.mockRejectedValue(
+      validationError(['introduction must be shorter than or equal to 2000 characters']),
+    );
+    show();
+    expect(screen.queryByLabelText('Einleitung')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    const field = await screen.findByLabelText('Einleitung');
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(screen.getByRole('button', { name: /Texte und Notiz/ })).toHaveAttribute('aria-expanded', 'true');
   });
 });

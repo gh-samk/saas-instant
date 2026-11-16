@@ -119,6 +119,14 @@ export interface Task {
   reason: string;
   action: Action;
   /**
+   * Die Rechnung hinter der Aufgabe — nur bei Rechnungsaufgaben.
+   *
+   * Die Oberfläche lädt sie beim Klick auf „Zahlung erfassen" bzw.
+   * „Zahlungserinnerung senden" nach (`GET /api/invoices/:id`), statt dass die
+   * Aufgabenliste Empfänger, Beträge und Status jeder Rechnung mitschleppt.
+   */
+  invoiceId?: string;
+  /**
    * Bezug zur Organisation — OPTIONAL.
    *
    * Es gibt Aufgaben, die keine einzelne Organisation betreffen: die

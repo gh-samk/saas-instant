@@ -75,11 +75,14 @@ export function InstanceCreateDialog({
   companyName,
   onClose,
   onCreated,
+  returnFocusTo,
 }: {
   open: boolean;
   companyId: string;
   companyName: string;
   onClose: () => void;
+  /** Ziel für den Fokus nach dem Schließen, falls der Auslöser fehlt (siehe `Dialog`). */
+  returnFocusTo?: () => HTMLElement | null;
   onCreated: (instance: InstanceDetail) => void;
 }) {
   const t = useT();
@@ -265,6 +268,7 @@ export function InstanceCreateDialog({
       title={step === 'preview' ? t('components.instanceCreateDialog.title') : t('components.instanceCreateDialog.title2')}
       eyebrow={step === 'preview' ? t('components.instanceCreateDialog.eyebrow') : undefined}
       size={step === 'preview' ? 'lg' : 'sm'}
+      returnFocusTo={returnFocusTo}
       onClose={close}
       footer={
         step === 'subdomain' ? (

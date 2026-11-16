@@ -27,6 +27,21 @@ describe('leistungszeitraumVorschlag', () => {
     });
   });
 
+  it('schlägt bei halbjährlicher Zahlweise das laufende Kalenderhalbjahr vor', () => {
+    expect(servicePeriodSuggestion('half_yearly', '2026-03-17')).toEqual({
+      from: '2026-01-01',
+      until: '2026-06-30',
+    });
+    expect(servicePeriodSuggestion('half_yearly', '2026-06-30')).toEqual({
+      from: '2026-01-01',
+      until: '2026-06-30',
+    });
+    expect(servicePeriodSuggestion('half_yearly', '2026-07-01')).toEqual({
+      from: '2026-07-01',
+      until: '2026-12-31',
+    });
+  });
+
   it('rät nichts, wenn keine Zahlungsweise hinterlegt ist', () => {
     expect(servicePeriodSuggestion(null, '2026-08-17')).toEqual({
       from: '2026-08-17',

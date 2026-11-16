@@ -25,6 +25,7 @@ import {
   LINES_MAX_COUNT,
   TAX_RATE_DEFAULT,
   type Company,
+  type PaymentInterval,
   type PriceSuggestion,
   type Invoice,
   type InvoiceLineInput,
@@ -136,6 +137,13 @@ function unitOptions(current: string): { value: string; label: string }[] {
     : [...UNITS, { value: current, label: current }];
 }
 
+/** Zahlungsweise des Vertrags in Worten, für den Hinweis am Leistungszeitraum. */
+const INTERVAL_LABEL: Record<PaymentInterval, string> = {
+  monthly: t('components.invoiceDraftForm.intervalMonthly'),
+  half_yearly: t('components.invoiceDraftForm.intervalHalfYearly'),
+  yearly: t('components.invoiceDraftForm.intervalYearly'),
+};
+
 /** Längste Einheit, die der Server annimmt. */
 const UNIT_MAX_LENGTH = 3;
 
@@ -143,8 +151,9 @@ const UNIT_MAX_LENGTH = 3;
  * Ordnet eine Prüfmeldung des Servers dem Eingabefeld zu.
  *
  * `key` ist der Schlüssel in `fieldError`, `focusId` das Element, das den
- * Fokus bekommt, `expand` der Posten, dessen „Weitere Angaben" dafür offen sein
- * müssen. `null`, wenn das Formular dazu kein Feld hat (dann steht die Meldung
+ * Fokus bekommt, `expand` der Aufklapper, der dafür offen sein muss — ein
+ * Schlüssel der Menge `expanded` (siehe `weitereKey`, `periodKey`, `TEXTS_KEY`).
+ * `null`, wenn das Formular dazu kein Feld hat (dann steht die Meldung
  * nur in der Zusammenfassung). `rank` bestimmt, welches Feld zuerst den Fokus
  * bekommt: Posten in Lesereihenfolge, danach die Kopfangaben.
  */
@@ -155,25 +164,40 @@ interface FieldTarget {
   rank: number;
 }
 
-const LINE_FIELDS: Record<string, { suffix: string; focus: string; weitere: boolean; rank: number }> = {
-  label: { suffix: 'bezeichnung', focus: 'bezeichnung', weitere: false, rank: 0 },
-  periodFrom: { suffix: 'zeitraum', focus: 'zeitraum-von', weitere: false, rank: 1 },
-  periodUntil: { suffix: 'zeitraum', focus: 'zeitraum-bis', weitere: false, rank: 2 },
-  quantity: { suffix: 'menge', focus: 'menge', weitere: false, rank: 3 },
-  unitPriceNetCent: { suffix: 'einzelpreis', focus: 'einzelpreis', weitere: false, rank: 4 },
-  taxRate: { suffix: 'steuersatz', focus: 'steuersatz', weitere: false, rank: 5 },
-  description: { suffix: 'beschreibung', focus: 'beschreibung', weitere: true, rank: 6 },
-  unit: { suffix: 'einheit', focus: 'einheit', weitere: true, rank: 7 },
+/** Aufklapper „Weitere Angaben" eines Postens (Beschreibung, Einheit). */
+const weitereKey = (lineKey: string) => lineKey;
+/** Aufklapper „Abweichender Zeitraum" eines Postens. */
+const periodKey = (lineKey: string) => `${lineKey}:zeitraum`;
+/** Aufklapper „Texte und Notiz (optional)". */
+const TEXTS_KEY = 'texte';
+
+const LINE_FIELDS: Record<
+  string,
+  { suffix: string; focus: string; expand: 'weitere' | 'zeitraum' | null; rank: number }
+> = {
+  label: { suffix: 'bezeichnung', focus: 'bezeichnung', expand: null, rank: 0 },
+  periodFrom: { suffix: 'zeitraum', focus: 'zeitraum-von', expand: 'zeitraum', rank: 1 },
+  periodUntil: { suffix: 'zeitraum', focus: 'zeitraum-bis', expand: 'zeitraum', rank: 2 },
+  quantity: { suffix: 'menge', focus: 'menge', expand: null, rank: 3 },
+  unitPriceNetCent: { suffix: 'einzelpreis', focus: 'einzelpreis', expand: null, rank: 4 },
+  taxRate: { suffix: 'steuersatz', focus: 'steuersatz', expand: null, rank: 5 },
+  description: { suffix: 'beschreibung', focus: 'beschreibung', expand: 'weitere', rank: 6 },
+  unit: { suffix: 'einheit', focus: 'einheit', expand: 'weitere', rank: 7 },
 };
 
-const HEAD_FIELDS: Record<string, { key: string; focusId: string; rank: number }> = {
-  invoiceDate: { key: 'rechnung-rechnungsdatum', focusId: 'rechnung-rechnungsdatum', rank: 1000 },
-  servicePeriodFrom: { key: 'period-from', focusId: 'rechnung-zeitraum-von', rank: 1001 },
-  servicePeriodUntil: { key: 'period', focusId: 'rechnung-zeitraum-bis', rank: 1002 },
-  dueDate: { key: 'rechnung-faelligkeit', focusId: 'rechnung-faelligkeit', rank: 1003 },
-  introduction: { key: 'rechnung-einleitung', focusId: 'rechnung-einleitung', rank: 1004 },
-  paymentNote: { key: 'rechnung-zahlungshinweis', focusId: 'rechnung-zahlungshinweis', rank: 1005 },
-  internalNote: { key: 'rechnung-interne-notiz', focusId: 'rechnung-interne-notiz', rank: 1006 },
+const HEAD_FIELDS: Record<
+  string,
+  { key: string; focusId: string; expand: string | null; rank: number }
+> = {
+  invoiceDate: { key: 'rechnung-rechnungsdatum', focusId: 'rechnung-rechnungsdatum', expand: null, rank: 1000 },
+  servicePeriodFrom: { key: 'period-from', focusId: 'rechnung-zeitraum-von', expand: null, rank: 1001 },
+  servicePeriodUntil: { key: 'period', focusId: 'rechnung-zeitraum-bis', expand: null, rank: 1002 },
+  dueDate: { key: 'rechnung-faelligkeit', focusId: 'rechnung-faelligkeit', expand: null, rank: 1003 },
+  // Die drei Texte liegen im eingeklappten Abschnitt „Texte und Notiz": Ein
+  // Feldfehler darin muss ihn öffnen, sonst gäbe es eine Meldung ohne Feld.
+  introduction: { key: 'rechnung-einleitung', focusId: 'rechnung-einleitung', expand: TEXTS_KEY, rank: 1004 },
+  paymentNote: { key: 'rechnung-zahlungshinweis', focusId: 'rechnung-zahlungshinweis', expand: TEXTS_KEY, rank: 1005 },
+  internalNote: { key: 'rechnung-interne-notiz', focusId: 'rechnung-interne-notiz', expand: TEXTS_KEY, rank: 1006 },
 };
 
 function targetFor(issue: ValidationIssue, lines: LinesDraft[]): FieldTarget | null {
@@ -185,12 +209,19 @@ function targetFor(issue: ValidationIssue, lines: LinesDraft[]): FieldTarget | n
     return {
       key: `${line.key}-${spec.suffix}`,
       focusId: `${line.key}-${spec.focus}`,
-      expand: spec.weitere ? line.key : null,
+      expand:
+        spec.expand === 'weitere'
+          ? weitereKey(line.key)
+          : spec.expand === 'zeitraum'
+            ? periodKey(line.key)
+            : null,
       rank: issue.index * 10 + spec.rank,
     };
   }
   const head = HEAD_FIELDS[issue.field];
-  return head === undefined ? null : { key: head.key, focusId: head.focusId, expand: null, rank: head.rank };
+  return head === undefined
+    ? null
+    : { key: head.key, focusId: head.focusId, expand: head.expand, rank: head.rank };
 }
 
 /**
@@ -268,7 +299,20 @@ export function InvoiceDraftForm({
   const [lines, setLines] = useState<LinesDraft[]>(() =>
     invoice === null ? [emptyLines()] : linesFrom(invoice),
   );
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // WAS AUFGEKLAPPT STARTET: Alles, worin schon etwas steht. Ein zugeklappter
+  // Abschnitt, der Inhalt versteckt (eigener Posten-Zeitraum eines bestehenden
+  // Entwurfs, ein Einleitungssatz), wäre eine Falle — gedruckt wird, was
+  // darin steht, ob man es sieht oder nicht.
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    const open = new Set<string>();
+    for (const p of lines) {
+      if (p.periodFrom !== '' || p.periodUntil !== '') open.add(periodKey(p.key));
+    }
+    if (introduction.trim() !== '' || paymentNote.trim() !== '' || internalNote.trim() !== '') {
+      open.add(TEXTS_KEY);
+    }
+    return open;
+  });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -365,23 +409,59 @@ export function InvoiceDraftForm({
    * eine leere Startzeile da, wird sie ersetzt — sonst stünde nach dem ersten
    * Klick eine leere Pflichtzeile im Weg, die das Speichern blockiert.
    */
-  function adopt(template: AdoptionLines) {
-    const newValue: LinesDraft = {
+  function adopt(templates: AdoptionLines | AdoptionLines[]) {
+    const list = Array.isArray(templates) ? templates : [templates];
+    if (list.length === 0) return;
+    const newValues: LinesDraft[] = list.map((template) => ({
       ...emptyLines(),
       label: template.label,
       unitPriceNet: centAsFieldValue(template.unitPriceNetCent),
       unit: template.unit,
       priceTierKey: template.priceTierKey,
-    };
+    }));
     setLines((alt) => {
       const onlyEmptyStartRow =
         alt.length === 1 &&
         alt[0] !== undefined &&
         alt[0].label.trim() === '' &&
         alt[0].unitPriceNet.trim() === '';
-      return onlyEmptyStartRow ? [newValue] : [...alt, newValue];
+      return onlyEmptyStartRow ? newValues : [...alt, ...newValues].slice(0, LINES_MAX_COUNT);
     });
-    toast.show(t('components.invoiceDraftForm.text', { label: template.label }));
+    toast.show(
+      t('components.invoiceDraftForm.text', {
+        label: list.map((template) => template.label).join(', '),
+      }),
+    );
+  }
+
+  /** Klappt einen Abschnitt auf oder zu (Schlüssel siehe `expanded`). */
+  function toggle(key: string) {
+    setExpanded((alt) => {
+      const updated = new Set(alt);
+      if (updated.has(key)) updated.delete(key);
+      else updated.add(key);
+      return updated;
+    });
+  }
+
+  /**
+   * Nimmt den abweichenden Zeitraum eines Postens zurück: Felder leeren UND
+   * zuklappen. Nur Zuklappen ließe Daten stehen, die man nicht mehr sieht und
+   * die trotzdem gespeichert würden.
+   */
+  function periodRemove(lineKey: string) {
+    setLines((alt) =>
+      alt.map((p) => (p.key === lineKey ? { ...p, periodFrom: '', periodUntil: '' } : p)),
+    );
+    setFieldError((alt) => {
+      const { [`${lineKey}-zeitraum`]: _removed, ...rest } = alt;
+      return rest;
+    });
+    setExpanded((alt) => {
+      const updated = new Set(alt);
+      updated.delete(periodKey(lineKey));
+      return updated;
+    });
   }
 
   /** Prüft die Eingaben, bevor der Server sie ablehnt. Gibt die DTO-Posten zurück. */
@@ -463,7 +543,14 @@ export function InvoiceDraftForm({
         : firstKey === 'period'
           ? 'rechnung-zeitraum-bis'
           : firstKey;
-      requestFocus(focusId, firstKey.endsWith('-einheit') ? firstKey.slice(0, -'-einheit'.length) : null);
+      requestFocus(
+        focusId,
+        firstKey.endsWith('-einheit')
+          ? weitereKey(firstKey.slice(0, -'-einheit'.length))
+          : firstKey.endsWith('-zeitraum')
+            ? periodKey(firstKey.slice(0, -'-zeitraum'.length))
+            : null,
+      );
     }
     return Object.keys(errorList).length === 0 ? dto : null;
   }
@@ -558,6 +645,25 @@ export function InvoiceDraftForm({
   }
 
   const total = sums(lines);
+  // HINWEIS, WOHER DIE VORBELEGUNG KOMMT — nur solange sie unverändert steht.
+  // Wer den Zeitraum ändert, hat entschieden; ein Hinweis auf „aus dem Vertrag"
+  // wäre dann falsch.
+  const periodFromContract = servicePeriodSuggestion(company.paymentInterval);
+  const periodHint =
+    isNew &&
+    company.paymentInterval !== null &&
+    period.from === periodFromContract.from &&
+    period.until === periodFromContract.until
+      ? t('components.invoiceDraftForm.periodFromContract', {
+          value: INTERVAL_LABEL[company.paymentInterval],
+        })
+      : undefined;
+  const textsOpen = expanded.has(TEXTS_KEY);
+  const filledTexts = [
+    introduction.trim() !== '' ? t('components.invoiceDraftForm.label14') : null,
+    paymentNote.trim() !== '' ? t('components.invoiceDraftForm.label15') : null,
+    internalNote.trim() !== '' ? t('components.invoiceDraftForm.label21') : null,
+  ].filter((v): v is string => v !== null);
 
   return (
     <>
@@ -589,6 +695,7 @@ export function InvoiceDraftForm({
           <InvoicePriceSuggestion
             suggestion={suggestion}
             loadError={suggestionError}
+            companyId={company.id}
             onAdopt={adopt}
           />
 
@@ -598,7 +705,8 @@ export function InvoiceDraftForm({
 
             {lines.map((p, i) => {
               const amounts = linesAmounts(p);
-              const open = expanded.has(p.key);
+              const open = expanded.has(weitereKey(p.key));
+              const periodOpen = expanded.has(periodKey(p.key));
               return (
                 <div
                   key={p.key}
@@ -634,31 +742,6 @@ export function InvoiceDraftForm({
                     }
                     error={fieldError[`${p.key}-bezeichnung`]}
                   />
-
-                  {/* DER ZEITRAUM STEHT OFFEN, nicht im Aufklapper. Der
-                      Entwurf führt ihn als eigene Spalte der Positionstabelle,
-                      und das trifft die Sache: Er sagt, WOFÜR abgerechnet
-                      wird. Beschreibung und Einheit sind Beiwerk und bleiben
-                      hinter „Weitere Angaben". */}
-                  <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
-                    <DateField
-                      id={`${p.key}-zeitraum-von`}
-                      label={t('components.invoiceDraftForm.label6')}
-                      value={p.periodFrom}
-                      onChange={(value) =>
-                        linesChange(p.key, 'periodFrom', value)
-                      }
-                    />
-                    <DateField
-                      id={`${p.key}-zeitraum-bis`}
-                      label={t('components.invoiceDraftForm.label7')}
-                      value={p.periodUntil}
-                      onChange={(value) =>
-                        linesChange(p.key, 'periodUntil', value)
-                      }
-                      error={fieldError[`${p.key}-zeitraum`]}
-                    />
-                  </div>
 
                   {/* `items-end`, weil „Einzelpreis netto (EUR)" zweizeilig
                       umbricht und sein Feld sonst tiefer stünde als die
@@ -716,28 +799,71 @@ export function InvoiceDraftForm({
                     </div>
                   </div>
 
-                  {/* Beschreibung, Zeitraum und Einheit sind optional und stehen
-                      deshalb hinter einem Aufklapper — in der Grundzeile überlüden
-                      sie die Karte bei 375 px. */}
-                  <button
-                    type="button"
-                    aria-expanded={open}
-                    aria-controls={`${p.key}-weitere`}
-                    onClick={() =>
-                      setExpanded((alt) => {
-                        const newValue = new Set(alt);
-                        if (newValue.has(p.key)) newValue.delete(p.key);
-                        else newValue.add(p.key);
-                        return newValue;
-                      })
-                    }
-                    className={`text-sm ${TEXT_BUTTON_ACTION}`}
-                  >
-                    <ChevronDown
-                      className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`}
-                      aria-hidden="true"
-                    />
-                    {t('components.invoiceDraftForm.button')}</button>
+                  {/* DER LEISTUNGSZEITRAUM STEHT EINMAL OBEN bei den
+                      Rechnungsdaten und gilt für alle Posten. Hier steht nur
+                      die AUSNAHME: ein Posten, der einen anderen Zeitraum
+                      abrechnet (etwa eine Einrichtung im Vormonat). Ohne
+                      Eintrag erbt der Posten den Zeitraum der Rechnung — das
+                      Backend verlangt keinen Posten-Zeitraum (beide oder
+                      keiner), also geht beim Speichern nichts verloren. */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {/* ZUKLAPPEN VERWIRFT DIE ABWEICHUNG: „zu" heißt „kein
+                        eigener Zeitraum". Zuklappen und die Daten behalten
+                        hieße, etwas zu speichern, das man nicht sieht. */}
+                    <button
+                      type="button"
+                      aria-expanded={periodOpen}
+                      aria-controls={`${p.key}-abweichender-zeitraum`}
+                      onClick={() =>
+                        periodOpen ? periodRemove(p.key) : toggle(periodKey(p.key))
+                      }
+                      className={`text-sm ${TEXT_BUTTON_ACTION}`}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${periodOpen ? 'rotate-180' : ''}`}
+                        aria-hidden="true"
+                      />
+                      {t('components.invoiceDraftForm.periodDiffering')}</button>
+                    {/* Beschreibung und Einheit sind optional und stehen
+                        deshalb hinter einem Aufklapper — in der Grundzeile
+                        überlüden sie die Karte bei 375 px. */}
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      aria-controls={`${p.key}-weitere`}
+                      onClick={() => toggle(weitereKey(p.key))}
+                      className={`text-sm ${TEXT_BUTTON_ACTION}`}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`}
+                        aria-hidden="true"
+                      />
+                      {t('components.invoiceDraftForm.button')}</button>
+                  </div>
+                  {periodOpen && (
+                    <div
+                      id={`${p.key}-abweichender-zeitraum`}
+                      className="mt-3 grid grid-cols-1 gap-x-3 sm:grid-cols-2"
+                    >
+                      <DateField
+                        id={`${p.key}-zeitraum-von`}
+                        label={t('components.invoiceDraftForm.label6')}
+                        value={p.periodFrom}
+                        onChange={(value) =>
+                          linesChange(p.key, 'periodFrom', value)
+                        }
+                      />
+                      <DateField
+                        id={`${p.key}-zeitraum-bis`}
+                        label={t('components.invoiceDraftForm.label7')}
+                        value={p.periodUntil}
+                        onChange={(value) =>
+                          linesChange(p.key, 'periodUntil', value)
+                        }
+                        error={fieldError[`${p.key}-zeitraum`]}
+                      />
+                    </div>
+                  )}
                   {open && (
                     <div id={`${p.key}-weitere`} className="mt-3">
                       <InputField
@@ -813,28 +939,74 @@ export function InvoiceDraftForm({
               {t('components.invoiceDraftForm.text15')}</p>
           </Card>
 
-          {/* ------------------------------------- Text auf der Rechnung */}
+          {/* ------------------------------ Texte und Notiz (eingeklappt) */}
+          {/* Meist bleiben Einleitung, Zahlungshinweis und Notiz leer; zwei
+              große Textfelder und eine Notiz, die immer offen stehen, drücken
+              die Posten aus dem Bild. Deshalb zu — AUSSER es steht schon etwas
+              darin oder ein Feld darin hat einen Fehler (`expanded` wird dann
+              von `showServerIssues` geöffnet). Die Kopfzeile nennt, was
+              befüllt ist, damit zugeklappt nichts Unsichtbares gedruckt wird. */}
           <Card className="mt-4 p-[18px]">
-            <h2 className="mb-3 text-[17px] font-semibold text-text">
-              {t('components.invoiceDraftForm.heading2')}</h2>
-            <TextArea
-              id="rechnung-einleitung"
-              label={t('components.invoiceDraftForm.label14')}
-              value={introduction}
-              onChange={setIntroduction}
-              error={fieldError['rechnung-einleitung']}
-              rows={3}
-              helperText={t('components.invoiceDraftForm.helperText')}
-            />
-            <InputField
-              id="rechnung-zahlungshinweis"
-              label={t('components.invoiceDraftForm.label15')}
-              value={paymentNote}
-              maxLength={500}
-              onChange={(ev) => setPaymentNote(ev.target.value)}
-              error={fieldError['rechnung-zahlungshinweis']}
-              helperText={t('components.invoiceDraftForm.helperText2')}
-            />
+            <h2 className="text-[17px] font-semibold text-text">
+              <button
+                type="button"
+                aria-expanded={textsOpen}
+                aria-controls="rechnung-texte"
+                onClick={() => toggle(TEXTS_KEY)}
+                className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg text-left"
+              >
+                <span className="min-w-0">
+                  <span className="block break-words">
+                    {t('components.invoiceDraftForm.textsHeading')}</span>
+                  {!textsOpen && filledTexts.length > 0 && (
+                    <span className="block break-words text-sm font-normal text-leise">
+                      {t('components.invoiceDraftForm.textsFilled', {
+                        value: filledTexts.join(', '),
+                      })}
+                    </span>
+                  )}
+                </span>
+                <ChevronDown
+                  className={`h-5 w-5 shrink-0 text-leise transition-transform ${textsOpen ? 'rotate-180' : ''}`}
+                  aria-hidden="true"
+                />
+              </button>
+            </h2>
+            {textsOpen && (
+              <div id="rechnung-texte" className="mt-3">
+                <h3 className="mb-2 text-sm font-semibold text-text">
+                  {t('components.invoiceDraftForm.heading2')}</h3>
+                <TextArea
+                  id="rechnung-einleitung"
+                  label={t('components.invoiceDraftForm.label14')}
+                  value={introduction}
+                  onChange={setIntroduction}
+                  error={fieldError['rechnung-einleitung']}
+                  rows={3}
+                  helperText={t('components.invoiceDraftForm.helperText')}
+                />
+                <InputField
+                  id="rechnung-zahlungshinweis"
+                  label={t('components.invoiceDraftForm.label15')}
+                  value={paymentNote}
+                  maxLength={500}
+                  onChange={(ev) => setPaymentNote(ev.target.value)}
+                  error={fieldError['rechnung-zahlungshinweis']}
+                  helperText={t('components.invoiceDraftForm.helperText2')}
+                />
+                <h3 className="mb-2 mt-2 border-t border-rahmen-leise pt-4 text-sm font-semibold text-text">
+                  {t('components.invoiceDraftForm.heading4')}</h3>
+                <TextArea
+                  id="rechnung-interne-notiz"
+                  label={t('components.invoiceDraftForm.label21')}
+                  value={internalNote}
+                  onChange={setInternalNote}
+                  error={fieldError['rechnung-interne-notiz']}
+                  rows={3}
+                  helperText={t('components.invoiceDraftForm.helperText4')}
+                />
+              </div>
+            )}
           </Card>
         </div>
 
@@ -874,6 +1046,7 @@ export function InvoiceDraftForm({
               value={period.from}
               onChange={(value) => setPeriod((z) => ({ ...z, from: value }))}
               required
+              helperText={periodHint}
               error={fieldError['period-from']}
             />
             <DateField
@@ -898,48 +1071,27 @@ export function InvoiceDraftForm({
               {t('components.invoiceDraftForm.text16')}</p>
           </Card>
 
-          {/* ------------------------------------------- Interne Notiz */}
-          <Card className="mt-4 p-[18px]">
-            <h2 className="mb-3 text-[17px] font-semibold text-text">
-              {t('components.invoiceDraftForm.heading4')}</h2>
-            <TextArea
-              id="rechnung-interne-notiz"
-              label={t('components.invoiceDraftForm.label21')}
-              value={internalNote}
-              onChange={setInternalNote}
-              error={fieldError['rechnung-interne-notiz']}
-              rows={3}
-              helperText={t('components.invoiceDraftForm.helperText4')}
-            />
-            {invoice !== null && (
-              <Button
-                variant="danger"
-                className="w-full"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="h-4 w-4" aria-hidden="true" />
-                {t('components.invoiceDraftForm.button3')}</Button>
-            )}
-          </Card>
+          {/* „Entwurf löschen" steht unter den Rechnungsdaten: dort, wo der
+              Entwurf als Vorgang endet, und getrennt von „Speichern" unten. */}
+          {invoice !== null && (
+            <Button
+              variant="danger"
+              className="mt-4 w-full"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              {t('components.invoiceDraftForm.button3')}</Button>
+          )}
         </div>
       </div>
 
-      {/* Festschreiben: eigener, abgesetzter Block ÜBER der Fußleiste. Erst
-          möglich, wenn der Entwurf auf dem Server existiert. */}
+      {/* Festschreiben ist bei einem gespeicherten Entwurf DIE Hauptaktion:
+          Es ist der nächste Schritt zur versendbaren Rechnung, Speichern nur
+          ein Zwischenstand. Erst möglich, wenn der Entwurf auf dem Server
+          existiert; der Satz darüber sagt, was danach nicht mehr geht. */}
       {invoice !== null && (
-        <div className="mt-6 rounded-lg border border-rahmen bg-flaeche-2 p-4">
-          <p className="text-sm text-text">
-            {t('components.invoiceDraftForm.text17')}</p>
-          <div className="mt-3 flex items-center gap-2">
-            <Button
-              variant="secondaryGreen"
-              loading={loading}
-              onClick={() => void saveAndPreview()}
-            >
-              {t('components.invoiceDraftForm.button4')}</Button>
-            <HelpHint text={t('components.invoiceDraftForm.finalizeHint')} />
-          </div>
-        </div>
+        <p className="mt-6 text-sm text-leise">
+          {t('components.invoiceDraftForm.text17')}</p>
       )}
 
       {error && (
@@ -948,17 +1100,34 @@ export function InvoiceDraftForm({
         </p>
       )}
 
-      <div className="mt-6 flex flex-wrap justify-end gap-3">
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
         <Button
-          variant="secondary"
+          variant="ghost"
           onClick={onCancel}
           disabled={loading}
           type="button"
         >
           {t('components.invoiceDraftForm.button5')}</Button>
-        <Button loading={loading} onClick={() => void save()} type="button">
+        <Button
+          variant={invoice !== null ? 'secondary' : 'primary'}
+          loading={loading}
+          onClick={() => void save()}
+          type="button"
+        >
           {isNew ? t('components.invoiceDraftForm.button6') : t('components.invoiceDraftForm.button7')}
         </Button>
+        {invoice !== null && (
+          <span className="inline-flex items-center gap-2">
+            <Button
+              variant="primary"
+              loading={loading}
+              onClick={() => void saveAndPreview()}
+              type="button"
+            >
+              {t('components.invoiceDraftForm.button4')}</Button>
+            <HelpHint text={t('components.invoiceDraftForm.finalizeHint')} />
+          </span>
+        )}
       </div>
 
       {/* „Entwurf verwerfen" steht seit dem Redesign in der rechten Spalte,

@@ -930,3 +930,45 @@ describe('Instanz-Karte — Einrichtung, Mailversand, Kennzahlen jetzt', () => {
     });
   });
 });
+
+describe('Instanz-Karte — von außen angeforderter Anlegen-Dialog', () => {
+  function showRequested(handled: () => void) {
+    render(
+      <ToastProvider>
+        <InstanceCard
+          companyId={COMPANY_ID}
+          companyName="Musterverein Ostend e. V."
+          totpPossible={false}
+          createRequested
+          onCreateRequestHandled={handled}
+        />
+      </ToastProvider>,
+    );
+  }
+
+  it('öffnet ohne Instanz den Dialog und meldet die Anforderung als gelesen', async () => {
+    arrangeFetch({ instance: null });
+    const handled = vi.fn();
+    showRequested(handled);
+    expect(await screen.findByLabelText('Subdomain *')).toBeInTheDocument();
+    expect(handled).toHaveBeenCalled();
+  });
+
+  it('öffnet bei vorhandener Instanz keinen Dialog, meldet die Anforderung aber trotzdem zurück', async () => {
+    arrangeFetch({ instance: BASIS });
+    const handled = vi.fn();
+    showRequested(handled);
+    await waitFor(() => expect(handled).toHaveBeenCalled());
+    expect(screen.queryByLabelText('Subdomain *')).toBeNull();
+  });
+
+  it('gibt den Fokus nach Escape an den Anlegen-Knopf der Karte zurück', async () => {
+    arrangeFetch({ instance: null });
+    showRequested(vi.fn());
+    await screen.findByLabelText('Subdomain *');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByLabelText('Subdomain *')).toBeNull());
+    const create = screen.getByRole('button', { name: 'Instanz anlegen' });
+    expect(document.activeElement).toBe(create);
+  });
+});

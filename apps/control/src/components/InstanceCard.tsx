@@ -78,6 +78,8 @@ export function InstanceCard({
   contactEmail = null,
   totpPossible,
   onHistoryChanged,
+  createRequested = false,
+  onCreateRequestHandled,
 }: {
   companyId: string;
   companyName: string;
@@ -90,6 +92,14 @@ export function InstanceCard({
   totpPossible: boolean;
   /** Archivieren schreibt eine Systemnotiz — der Verlauf muss nachziehen. */
   onHistoryChanged?: () => void;
+  /**
+   * Von außen angeforderter Anlegen-Dialog (Schrittliste im Überblick). Gilt
+   * nur, solange es noch keine Instanz gibt — bei einer vorhandenen wäre der
+   * Dialog eine Einladung zum zweiten Anlegen.
+   */
+  createRequested?: boolean;
+  /** Meldet zurück, dass die Anforderung gelesen wurde (sie wird dann gelöscht). */
+  onCreateRequestHandled?: () => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -101,6 +111,10 @@ export function InstanceCard({
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // Der Dialog kann aus dem Überblick angefordert werden: Dann wechselt der
+  // Reiter, und der Auslöser ist weg. Der Fokus geht beim Schließen an den
+  // Anlegen-Knopf dieser Karte.
+  const createButtonId = `instance-create-${companyId}`;
   /**
    * Der Einrichtungslink wird NICHT mit der Karte geladen ([A.7]).
    *
@@ -169,6 +183,14 @@ export function InstanceCard({
   useEffect(() => {
     void load(true);
   }, [load]);
+
+  // Angeforderter Anlegen-Dialog: erst nach dem Laden entscheiden, weil erst
+  // dann feststeht, ob es schon eine Instanz gibt.
+  useEffect(() => {
+    if (!createRequested || !loaded) return;
+    if (instance == null && loadError === null) setCreateOpen(true);
+    onCreateRequestHandled?.();
+  }, [createRequested, loaded, instance, loadError, onCreateRequestHandled]);
 
   // Solange serverseitig etwas läuft, fragt die Karte nach — und hört auf,
   // sobald der Zustand steht oder die Seite verlassen wird.
@@ -367,7 +389,7 @@ export function InstanceCard({
             title={t('components.instanceCard.title')}
             notice={t('components.instanceCard.notice')}
             action={
-              <Button onClick={() => setCreateOpen(true)}>{t('components.instanceCard.button2')}</Button>
+              <Button id={createButtonId} onClick={() => setCreateOpen(true)}>{t('components.instanceCard.button2')}</Button>
             }
           />
         </>
@@ -410,6 +432,7 @@ export function InstanceCard({
         open={createOpen}
         companyId={companyId}
         companyName={companyName}
+        returnFocusTo={() => document.getElementById(createButtonId)}
         onClose={() => setCreateOpen(false)}
         onCreated={(newValue) => {
           // Der Dialog schließt SOFORT — der minutenlange Teil läuft im

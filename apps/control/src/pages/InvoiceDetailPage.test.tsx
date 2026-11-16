@@ -505,6 +505,12 @@ describe('Festschreiben — unumkehrbar, deshalb Wort UND zweiter Faktor', () =>
   });
 });
 
+/** Öffnet ein Menü der Aktionsleiste (Herunterladen, Weitere Aktionen). */
+async function openMenu(name: RegExp): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole('button', { name }));
+  return screen.findByRole('menu');
+}
+
 describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht', () => {
   it('bietet weder Bearbeiten noch Löschen an (geprüft als Abwesenheit)', async () => {
     setFetchReady({ invoice: FINALIZED });
@@ -528,46 +534,149 @@ describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht',
     expect(screen.queryByLabelText('Bezeichnung')).toBeNull();
   });
 
-  it('empfiehlt bei einer Behörde die XRechnung', async () => {
-    setFetchReady({
-      invoice: { ...FINALIZED, recipientBuyerType: 'authority' },
-    });
+  it('legt Download-Varianten ins Menü „Herunterladen" — mit erklärendem Satz', async () => {
+    setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
+    // Vorher: drei fast gleiche Knöpfe. Jetzt EIN Knopf, die Varianten dahinter.
     expect(
-      await screen.findByText(/Behörde: Bitte die XRechnung/),
+      await screen.findByRole('button', { name: /Herunterladen/ }),
+    ).toHaveAttribute('aria-haspopup', 'menu');
+    expect(screen.queryByRole('link', { name: /PDF \(ZUGFeRD\)/ })).toBeNull();
+
+    const menu = await openMenu(/Herunterladen/);
+    expect(
+      within(menu).getByRole('menuitem', { name: /PDF \(ZUGFeRD\)/ }),
+    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/document`);
+    expect(
+      within(menu).getByRole('menuitem', { name: /ZUGFeRD-XML/ }),
+    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/xml`);
+    expect(
+      within(menu).getByRole('menuitem', { name: /XRechnung \(XML\)/ }),
+    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/xrechnung`);
+    expect(
+      within(menu).getByText(/PDF mit eingebetteter Rechnungsdatei \(ZUGFeRD\), für Unternehmen/),
     ).toBeInTheDocument();
+    expect(within(menu).getByText(/für Behörden/)).toBeInTheDocument();
   });
 
-  it('nennt bei einem Unternehmen beide Formate', async () => {
-    setFetchReady({
-      invoice: { ...FINALIZED, recipientBuyerType: 'business' },
-    });
+  it.each([
+    ['authority', ['XRechnung (XML)', 'PDF (ZUGFeRD)', 'ZUGFeRD-XML']],
+    ['business', ['PDF (ZUGFeRD)', 'XRechnung (XML)', 'ZUGFeRD-XML']],
+    ['consumer', ['PDF (ZUGFeRD)', 'XRechnung (XML)', 'ZUGFeRD-XML']],
+  ] as const)(
+    'Download-Reihenfolge bei %s: empfohlene Variante oben und markiert',
+    async (buyerType, expected) => {
+      setFetchReady({
+        invoice: { ...FINALIZED, recipientBuyerType: buyerType },
+      });
+      open(FINALIZED_ID);
+
+      const menu = await openMenu(/Herunterladen/);
+      const items = within(menu).getAllByRole('menuitem');
+      expect(items.map((i) => i.querySelector('span')?.firstChild?.textContent)).toEqual(
+        expected,
+      );
+      // Nur die erste ist markiert.
+      expect(within(items[0] as HTMLElement).getByText('Empfohlen')).toBeInTheDocument();
+      expect(within(menu).getAllByText('Empfohlen')).toHaveLength(1);
+      // Der alte Hinweis unter dem Knopf entfällt.
+      expect(screen.queryByText(/Behörde: Bitte die XRechnung/)).toBeNull();
+    },
+  );
+
+  it('ohne bekannte Empfängerart gibt es keine Empfehlung', async () => {
+    setFetchReady({ invoice: { ...FINALIZED, recipientBuyerType: null } });
     open(FINALIZED_ID);
 
-    expect(
-      await screen.findByText(/Unternehmen: ZUGFeRD-PDF oder XRechnung/),
-    ).toBeInTheDocument();
+    const menu = await openMenu(/Herunterladen/);
+    expect(within(menu).queryByText('Empfohlen')).toBeNull();
   });
 
   it('zeigt genau die erlaubten Handlungen', async () => {
     setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
-    expect(
-      await screen.findByRole('link', { name: /PDF \(ZUGFeRD\)/ }),
-    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/document`);
-    expect(
-      screen.getByRole('link', { name: /XML herunterladen/ }),
-    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/xml`);
-    expect(
-      screen.getByRole('link', { name: /XRechnung \(XML\)/ }),
-    ).toHaveAttribute('href', `/api/invoices/${FINALIZED_ID}/xrechnung`);
-    expect(screen.getByRole('button', { name: /Versenden/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Versenden$/ })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /Zahlung erfassen/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Stornieren/ })).toBeInTheDocument();
+    // Stornieren liegt im Menü „Weitere", nicht als eigener Knopf daneben.
+    expect(screen.queryByRole('button', { name: /^Stornieren/ })).toBeNull();
+    const menu = await openMenu(/Weitere Aktionen/);
+    expect(
+      within(menu).getByRole('menuitem', { name: /Stornieren/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('steht die Aktionsleiste in der Kopfzeile, vor der Integritätskarte', async () => {
+    setFetchReady({ invoice: FINALIZED });
+    open(FINALIZED_ID);
+
+    const bar = await screen.findByRole('group', { name: 'Aktionen zur Rechnung' });
+    const heading = screen.getByRole('heading', { name: 'Rechnung 2026-014' });
+    const integrity = screen.getByText('Integrität und Aufbewahrung');
+    expect(
+      heading.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      bar.compareDocumentPosition(integrity) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  describe('genau eine Hauptaktion je Status', () => {
+    /** Die Knöpfe der Leiste, die als Hauptaktion (primär) gestaltet sind. */
+    function primaryButtons(): string[] {
+      const bar = screen.getByRole('group', { name: 'Aktionen zur Rechnung' });
+      return within(bar)
+        .getAllByRole('button')
+        .filter((b) => b.className.includes('bg-primaer '))
+        .map((b) => b.textContent?.trim() ?? '');
+    }
+
+    it('festgeschrieben und nie versendet: „Versenden"', async () => {
+      setFetchReady({ invoice: FINALIZED });
+      open(FINALIZED_ID);
+      await screen.findByRole('group', { name: 'Aktionen zur Rechnung' });
+      expect(primaryButtons()).toEqual(['Versenden']);
+    });
+
+    it.each(['open', 'overdue', 'partially_paid'] as const)(
+      'versendet und %s: „Zahlung erfassen", Versand nur sekundär',
+      async (paymentState) => {
+        setFetchReady({
+          invoice: { ...FINALIZED, status: 'sent', paymentState },
+        });
+        open(FINALIZED_ID);
+        await screen.findByRole('group', { name: 'Aktionen zur Rechnung' });
+        expect(primaryButtons()).toEqual(['Zahlung erfassen']);
+        expect(
+          screen.getByRole('button', { name: /Erneut versenden/ }),
+        ).toBeInTheDocument();
+      },
+    );
+
+    it('bezahlt: keine Hauptaktion, kein Zahlungsknopf', async () => {
+      setFetchReady({
+        invoice: { ...FINALIZED, status: 'paid', paymentState: 'paid' },
+      });
+      open(FINALIZED_ID);
+      await screen.findByRole('group', { name: 'Aktionen zur Rechnung' });
+      expect(primaryButtons()).toEqual([]);
+      expect(screen.queryByRole('button', { name: /Zahlung erfassen/ })).toBeNull();
+    });
+
+    it('Zahlungserinnerung bleibt ein Nebenknopf (überfällig)', async () => {
+      setFetchReady({
+        invoice: { ...FINALIZED, status: 'sent', paymentState: 'overdue' },
+      });
+      open(FINALIZED_ID);
+      await screen.findByRole('group', { name: 'Aktionen zur Rechnung' });
+      expect(primaryButtons()).toEqual(['Zahlung erfassen']);
+      expect(
+        screen.getByRole('button', { name: /Zahlungserinnerung senden/ }),
+      ).toBeInTheDocument();
+    });
   });
 
   it('ZEIGT DIE MELDUNG DES SERVERS, statt einen Tab mit rohem JSON zu oeffnen', async () => {
@@ -579,7 +688,8 @@ describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht',
     setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
-    const reference = await screen.findByRole('link', {
+    const menu = await openMenu(/Herunterladen/);
+    const reference = within(menu).getByRole('menuitem', {
       name: /PDF \(ZUGFeRD\)/,
     });
 
@@ -656,7 +766,9 @@ describe('Storno — das Paar, nicht das Löschen', () => {
     setFetchReady({ invoice: FINALIZED });
     open(FINALIZED_ID);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Stornieren/ }));
+    fireEvent.click(
+      within(await openMenu(/Weitere Aktionen/)).getByRole('menuitem', { name: /Stornieren/ }),
+    );
     const button = await screen.findByRole('button', {
       name: 'Rechnung stornieren',
     });
@@ -694,6 +806,8 @@ describe('Storno — das Paar, nicht das Löschen', () => {
 
     await screen.findByRole('heading', { name: 'Rechnung 2026-018' });
     expect(screen.queryByRole('button', { name: /Stornieren/ })).toBeNull();
+    // Auch das Menü „Weitere" entfällt: Es hätte nichts zu zeigen.
+    expect(screen.queryByRole('button', { name: /Weitere Aktionen/ })).toBeNull();
   });
 });
 
@@ -829,7 +943,9 @@ describe('[K3] Der Abschluss einer Rechnung — hinter dem zweiten Faktor', () =
     });
     open(FINALIZED_ID);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Stornieren/ }));
+    fireEvent.click(
+      within(await openMenu(/Weitere Aktionen/)).getByRole('menuitem', { name: /Stornieren/ }),
+    );
     fireEvent.change(await screen.findByLabelText('Grund'), {
       target: { value: 'Falscher Leistungszeitraum' },
     });
@@ -1246,6 +1362,8 @@ describe('Rechnung bearbeiten — die zweispaltige Maske', () => {
     setFetchReady({ invoice: DRAFT });
     open(DRAFT_ID);
 
+    // Die Texte liegen im eingeklappten Abschnitt „Texte und Notiz (optional)".
+    fireEvent.click(await screen.findByRole('button', { name: /Texte und Notiz/ }));
     expect(await screen.findByLabelText('Einleitung')).toBeInTheDocument();
     expect(screen.getByLabelText('Zahlungshinweis')).toBeInTheDocument();
     const note = screen.getByLabelText('Notiz');
@@ -1259,6 +1377,7 @@ describe('Rechnung bearbeiten — die zweispaltige Maske', () => {
     const called = setFetchReady({ invoice: DRAFT });
     open(DRAFT_ID);
 
+    fireEvent.click(await screen.findByRole('button', { name: /Texte und Notiz/ }));
     fireEvent.change(await screen.findByLabelText('Einleitung'), {
       target: { value: 'wie besprochen die Rechnung fürs kommende Jahr.' },
     });
@@ -1350,6 +1469,8 @@ describe('Rechnung bearbeiten — die zweispaltige Maske', () => {
     const called = setFetchReady({ invoice: DRAFT });
     open(DRAFT_ID);
 
+    // Der Posten-Zeitraum liegt hinter „Abweichender Zeitraum".
+    fireEvent.click(await screen.findByRole('button', { name: /Abweichender Zeitraum/ }));
     fireEvent.change(await screen.findByLabelText('Zeitraum von'), {
       target: { value: '2026-08-01' },
     });

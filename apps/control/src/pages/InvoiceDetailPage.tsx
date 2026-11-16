@@ -155,6 +155,34 @@ export function InvoiceDetailPage() {
     );
   }
 
+  // Titel, Status und Organisation — einmal gebaut, in beiden Ansichten
+  // gebraucht.
+  const titleBlock = (
+    <>
+    <div className="flex flex-wrap items-center gap-3">
+      <h1 className="text-2xl font-semibold tracking-tight text-text">
+        {isNew
+          ? t('rechnungen.newInvoice')
+          : invoice?.invoiceNumber
+            ? t('rechnungen.invoiceNumbered', { number: invoice.invoiceNumber })
+            : t('rechnungen.invoice')}
+      </h1>
+      {invoice !== null && (
+        <InvoiceStatusBadge paymentState={invoice.paymentState} />
+      )}
+    </div>
+    <p className="mt-0.5 text-sm text-leise">
+      {t('rechnungen.forCompany')}{' '}
+      <Link
+        to={`/companies/${company.id}`}
+        className="underline underline-offset-2 hover:text-primaer"
+      >
+        {company.name}
+      </Link>
+    </p>
+    </>
+  );
+
   return (
     <div>
       {/* ZURÜCK ZUR RECHNUNGSLISTE, nicht zur Organisation. Wer aus einem
@@ -165,31 +193,13 @@ export function InvoiceDetailPage() {
         {t('rechnungen.toAllInvoices')}
       </Link>
 
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight text-text">
-              {isNew
-                ? t('rechnungen.newInvoice')
-                : invoice?.invoiceNumber
-                  ? t('rechnungen.invoiceNumbered', { number: invoice.invoiceNumber })
-                  : t('rechnungen.invoice')}
-            </h1>
-            {invoice !== null && (
-              <InvoiceStatusBadge paymentState={invoice.paymentState} />
-            )}
-          </div>
-          <p className="mt-0.5 text-sm text-leise">
-            {t('rechnungen.forCompany')}{' '}
-            <Link
-              to={`/companies/${company.id}`}
-              className="underline underline-offset-2 hover:text-primaer"
-            >
-              {company.name}
-            </Link>
-          </p>
+      {/* Im Bearbeiten-Fall steht die Kopfzeile allein; in der Ansicht setzt
+          `InvoiceView` die Aktionsleiste daneben. */}
+      {draftMode && (
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">{titleBlock}</div>
         </div>
-      </div>
+      )}
 
       {/* DER BERNSTEINFARBENE HINWEISSTREIFEN des Entwurfs — mit einer
           Abweichung im Wortlaut, und zwar einer wesentlichen. Dort steht „Aus
@@ -234,6 +244,7 @@ export function InvoiceDetailPage() {
         />
       ) : invoice !== null ? (
         <InvoiceView
+          header={titleBlock}
           invoice={invoice}
           companyId={company.id}
           totpPossible={totpPossible}

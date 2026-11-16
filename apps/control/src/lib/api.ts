@@ -781,6 +781,8 @@ export interface Task {
   title: string;
   reason: string;
   action: Action;
+  /** Die Rechnung hinter einer Rechnungsaufgabe; sie wird beim Klick nachgeladen. */
+  invoiceId?: string;
   /**
    * Bezug zur Organisation — OPTIONAL.
    *
@@ -1731,6 +1733,16 @@ export interface PriceSuggestion {
   subscriptionCalculableFrom: string | null;
   subscriptionCalculable: boolean;
   setupCalculable: boolean;
+  /**
+   * Der Vertrag der Organisation (Stufe samt Preisen, Zahlungsweise).
+   * Optional, weil Testdaten und ältere Antworten ihn nicht kennen; fehlt er,
+   * verhält sich die Oberfläche wie bei „kein Vertrag hinterlegt".
+   */
+  contract?: {
+    tierKey: string | null;
+    tier: PriceTier | null;
+    paymentInterval: PaymentInterval | null;
+  };
 }
 
 /**

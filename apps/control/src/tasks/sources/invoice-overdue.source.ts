@@ -82,18 +82,29 @@ export const invoiceOverdue: TaskSource = {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
+        // Ganze Tage seit der Fälligkeit; überfällig ist sie mindestens seit
+        // gestern, also nie unter einem Tag.
+        const days = Math.max(
+          1,
+          Math.round(
+            (Date.parse(`${context.todayDay}T00:00:00.000Z`) -
+              Date.parse(`${dueAt}T00:00:00.000Z`)) /
+              86_400_000,
+          ),
+        );
         return {
           kind: 'invoice_overdue' as const,
           dueAt,
           urgency: urgencyFrom(dueAt, context.todayDay),
-          title:
-            `Rechnung ${row.invoiceNumber ?? ''} an ` +
-            `${row.company.name} ist überfällig`,
-          reason:
-            `Fällig war sie am ${dueAt}; offen sind ${open} €. ` +
-            'Der Zahlungseingang wird von Hand vermerkt — es gibt keinen ' +
-            'Kontoabgleich. Prüfe den Kontoauszug und vermerke die Zahlung ' +
-            'oder schicke eine Erinnerung.',
+          invoiceId: row.id,
+          // KURZ, WEIL DIE ZEILE ES SO ZEIGT: Titel „Rechnung N überfällig ·
+          // Betrag", darunter Organisation und Alter. Der Name der
+          // Organisation steht im Feld `company` und wird nicht noch einmal
+          // in den Titel geschrieben. Der immer gleiche Erklärsatz („Der
+          // Zahlungseingang wird von Hand vermerkt …") steht einmal als
+          // Hinweis über der Gruppe in der Oberfläche, nicht in jeder Zeile.
+          title: `Rechnung ${row.invoiceNumber ?? ''} überfällig · ${open} €`,
+          reason: `seit ${days} ${days === 1 ? 'Tag' : 'Tagen'}`,
           action: {
             kind: 'payment_check' as const,
             label: 'Rechnung öffnen',

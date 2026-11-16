@@ -28,6 +28,7 @@ export { StatusPill, type StatusKind } from './components/StatusPill';
 export { Table } from './components/Table';
 export { ToastProvider, useToast } from './components/Toast';
 export { Tooltip } from './components/Tooltip';
+export { Menu, type MenuItem } from './components/Menu';
 export { RowLink, ROW_LINK_CLASSES } from './components/RowLink';
 
 export { ENTRY, type EntryType, type EntryStyle } from './entry-colors';

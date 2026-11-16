@@ -157,3 +157,21 @@ describe('InvoiceView: Bestätigung vor dem Versand', () => {
     await waitFor(() => expect(api.sendInvoice).toHaveBeenCalledTimes(1));
   });
 });
+
+describe('InvoiceView: Buchhaltung', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it('ohne Vermerk: eine verständliche Zeile und der Knopf „Als übergeben vermerken"', () => {
+    show({ paymentState: 'open', transferStatus: null });
+    expect(screen.getByText('An Buchhaltung übergeben')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Als übergeben vermerken' })).toBeInTheDocument();
+    expect(screen.queryByText('Übertragung an die Buchhaltung')).toBeNull();
+  });
+
+  it('mit Vermerk: zeigt ihn und bietet nur noch die Änderung an', () => {
+    show({ paymentState: 'open', transferStatus: 'lexoffice' });
+    expect(screen.getByText(/lexoffice/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Vermerk ändern' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Als übergeben vermerken' })).toBeNull();
+  });
+});
