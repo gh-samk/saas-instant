@@ -82,7 +82,6 @@ export function profileFromIssuer(issuer: Issuer): IssuerProfile {
             registerCourt: gp.registerCourt,
             registerNumber: gp.registerIdentifier,
             managingDirectors: [...gp.managingDirector],
-            supervisoryChair: '',
           }
         : p.generalPartner,
     vatId: issuer.vatId,

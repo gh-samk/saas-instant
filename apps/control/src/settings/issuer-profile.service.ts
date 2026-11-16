@@ -113,11 +113,14 @@ export function normalizeProfile(raw: unknown): IssuerProfile {
       ? obj['generalPartner']
       : {}
   ) as Record<string, unknown>;
+  // Nur bekannte Felder übernehmen: Altfelder im gespeicherten JSON werden ignoriert.
+  const known = (src: Record<string, unknown>, shape: object): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(src).filter(([k]) => k in shape));
   return {
     ...base,
-    ...(obj as Partial<IssuerProfile>),
+    ...(known(obj, base) as Partial<IssuerProfile>),
     legalForm: form,
-    generalPartner: { ...base.generalPartner, ...(gp as object) },
+    generalPartner: { ...base.generalPartner, ...known(gp, base.generalPartner) },
   };
 }
 

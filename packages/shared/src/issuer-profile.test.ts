@@ -77,17 +77,15 @@ describe('Rechtsformen', () => {
   it('GmbH', () => {
     const p = base('gmbh', {
       name: 'Muster GmbH', seat: 'Musterstadt', registerCourt: 'Musterstadt', registerNumber: 'HRB 99999',
-      managingPersons: ['Erika Mustermann', 'Max Muster'], supervisoryChair: 'Hans Vorsitz',
-      shareCapital: '25.000', outstandingContributions: '0', liquidation: true,
+      managingPersons: ['Erika Mustermann', 'Max Muster'],
     });
     expect(validateIssuerProfile(p)).toEqual([]);
     expect(buildIssuerBlocks(p).legalLines).toEqual([
       'Amtsgericht Musterstadt, HRB 99999', 'Geschäftsführung Erika Mustermann, Max Muster',
-      'Aufsichtsratsvorsitz Hans Vorsitz', 'Stammkapital 25.000 €, ausstehende Einlagen 0 €',
-      'In Liquidation', ...TAX,
+      ...TAX,
     ]);
-    expect(fields(base('gmbh', { name: 'Muster GmbH', shareCapital: '25.000' }))).toEqual(
-      ['managingPersons', 'outstandingContributions', 'registerCourt', 'registerNumber', 'seat'],
+    expect(fields(base('gmbh', { name: 'Muster GmbH' }))).toEqual(
+      ['managingPersons', 'registerCourt', 'registerNumber', 'seat'],
     );
   });
 
@@ -109,7 +107,7 @@ describe('Rechtsformen', () => {
       name: 'Beispiel GmbH & Co. KG', seat: 'Musterstadt', registerCourt: 'Musterstadt', registerNumber: 'HRA 99999',
       generalPartner: {
         name: 'Beispiel Verwaltungs GmbH', seat: 'Musterstadt', registerCourt: 'Musterstadt',
-        registerNumber: 'HRB 99999', managingDirectors: [person], supervisoryChair: '',
+        registerNumber: 'HRB 99999', managingDirectors: [person],
       },
       accountHolder: 'Beispiel Verwaltungs GmbH', bankName: 'Beispielbank', bic: 'COBADEFFXXX',
       phone: '+49 30 1234567', email: 'rechnung@example.com', web: 'www.example.com',
@@ -136,12 +134,12 @@ describe('Rechtsformen', () => {
   it('eG', () => {
     const p = base('eg', {
       name: 'Muster eG', seat: 'Bonn', registerCourt: 'Bonn', registerNumber: 'GnR 12',
-      managingPersons: [person], supervisoryChair: 'Hans Vorsitz',
+      managingPersons: [person],
     });
     expect(validateIssuerProfile(p)).toEqual([]);
     expect(buildIssuerBlocks(p).legalLines).toEqual([
       'Sitz Bonn', 'Genossenschaftsregister Bonn, GnR 12', 'Vorstand Erika Mustermann',
-      'Aufsichtsratsvorsitz Hans Vorsitz', ...TAX,
+      ...TAX,
     ]);
     expect(fields(base('eg', { name: 'Muster eG' }))).toEqual(['managingPersons', 'registerCourt', 'registerNumber', 'seat']);
   });

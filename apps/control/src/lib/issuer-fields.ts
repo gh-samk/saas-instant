@@ -76,15 +76,6 @@ export function planFields(profile: IssuerProfile): FieldSection[] {
   const legal: FieldSpec[] = [];
   if (REGISTER.some((p) => required.has(p))) legal.push(...REGISTER.map((p) => field(p)));
   if (is('gmbh', 'ug', 'eg', 'ev')) legal.push(field('managingPersons', 'list'));
-  if (is('gmbh', 'ug', 'eg')) legal.push(field('supervisoryChair', 'text', false));
-  if (is('gmbh', 'ug')) {
-    const capital = profile.shareCapital.trim() !== '';
-    legal.push(
-      field('shareCapital', 'text', false),
-      field('outstandingContributions', 'text', capital),
-      field('liquidation', 'switch', false),
-    );
-  }
   if (legal.length > 0) sections.push({ id: 'legal', fields: legal });
 
   if (is('gmbh_co_kg')) {
@@ -96,7 +87,6 @@ export function planFields(profile: IssuerProfile): FieldSection[] {
         field('generalPartner.registerCourt'),
         field('generalPartner.registerNumber'),
         field('generalPartner.managingDirectors', 'list'),
-        field('generalPartner.supervisoryChair', 'text', false),
       ],
     });
   }

@@ -219,7 +219,6 @@ describe('Pflichtangaben der Ausstellerin je Rechtsform (validateIssuerProfile)'
       registerCourt: 'Musterstadt',
       registerNumber: 'HRB 99999',
       managingDirectors: ['Erika Mustermann'],
-      supervisoryChair: '',
     },
   });
   const fields = (p: IssuerProfile): string[] =>

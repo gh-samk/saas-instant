@@ -40,8 +40,6 @@ export function fieldHint(t: TFunction, path: string, form: LegalForm): string |
       return t(`firma.hint_registerNumber_${form}`);
     case 'generalPartner.registerNumber':
       return t('firma.hint_gp_registerNumber');
-    case 'shareCapital':
-      return t('firma.hint_shareCapital');
     case 'iban':
       return t('firma.hint_iban');
     case 'vatId':

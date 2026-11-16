@@ -13,6 +13,7 @@ import {
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import { WITHOUT_SECOND_FACTOR } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
+import { RoleGuard } from '../common/guards/role.guard';
 import { SessionGuard } from '../common/guards/session.guard';
 import { IssuerConfigService } from '../invoices/document/issuer.config';
 import type { InvoiceRenderer } from '../invoices/document/invoice-renderer.client';
@@ -116,7 +117,6 @@ const COMPLETE: Record<LegalForm, Partial<IssuerProfile>> = {
       registerCourt: 'Amtsgericht Musterstadt',
       registerNumber: 'HRB 4321',
       managingDirectors: ['Erika Mustermann'],
-      supervisoryChair: '',
     },
   },
   eg: {
@@ -231,7 +231,8 @@ describe('Befüllung aus Manifest/Umgebung', () => {
 describe('Settings-API (Dienst und Controller)', () => {
   it('liegt hinter Sitzung und zweitem Faktor; nur Lesen ist davon befreit', () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, IssuerSettingsController) as unknown[];
-    expect(guards).toEqual([SessionGuard, SecondFactorGuard]);
+    // Dazwischen der RoleGuard: staff wird abgewiesen, ohne vorher nach einem Nachweis gefragt zu werden.
+    expect(guards).toEqual([SessionGuard, RoleGuard, SecondFactorGuard]);
     const proto = IssuerSettingsController.prototype as unknown as Record<string, object>;
     expect(Reflect.getMetadata(WITHOUT_SECOND_FACTOR, proto['get']!)).toBeTruthy();
     for (const method of ['update', 'uploadLogo', 'deleteLogo']) {

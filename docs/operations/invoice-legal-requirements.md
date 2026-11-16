@@ -11,6 +11,8 @@ Stand der Zusammenstellung: November 2026. **Keine Rechtsberatung.** Die Softwar
 | Bankverbindung (IBAN) | für Überweisung; BIC optional |
 | Ansprechangaben (Telefon, E-Mail, Web) | optional, gedruckt wenn hinterlegt |
 
+Weitere Angaben, die je nach Fall auf Geschäftsbriefen stehen können (etwa Aufsichtsratsvorsitz, Stammkapital oder Hinweis auf Liquidation), werden von der Software nicht abgefragt.
+
 Empfänger, Rechnungsnummer, Datum, Leistungszeitraum, Menge/Art, Entgelt, Steuersatz und -betrag stammen aus der Rechnung selbst.
 
 ## Zusätzlich je Rechtsform (Geschäftsbriefangaben)
@@ -21,10 +23,10 @@ Empfänger, Rechnungsnummer, Datum, Leistungszeitraum, Menge/Art, Entgelt, Steue
 | **Einzelunternehmen, eingetragen (e.K.)** | Firma mit Zusatz „e.K.", Sitz, Registergericht, HRA-Nummer | § 37a HGB, § 19 HGB |
 | **GbR** | Name der GbR und Namen der Gesellschafter (mindestens eine Person); bei eingetragener GbR (eGbR): Zusatz „eGbR", Registergericht und Registernummer | § 14 UStG, § 707a BGB |
 | **OHG** | Rechtsform, Sitz, Registergericht, HRA-Nummer | § 125a HGB, § 37a HGB |
-| **GmbH** | Rechtsform, Sitz, Registergericht, HRB-Nummer, **alle** Geschäftsführer mit Familienname und mindestens einem ausgeschriebenen Vornamen, ggf. Vorsitz des Aufsichtsrats; bei Angabe des Stammkapitals auch die ausstehenden Einlagen; Hinweis bei Liquidation | § 35a GmbHG |
+| **GmbH** | Rechtsform, Sitz, Registergericht, HRB-Nummer, **alle** Geschäftsführer mit Familienname und mindestens einem ausgeschriebenen Vornamen | § 35a GmbHG |
 | **UG (haftungsbeschränkt)** | wie GmbH; Firma mit „UG (haftungsbeschränkt)" oder „Unternehmergesellschaft (haftungsbeschränkt)" | § 35a GmbHG, § 5a GmbHG |
-| **GmbH & Co. KG** | für die KG: Rechtsform, Sitz, Registergericht, HRA-Nummer; **zusätzlich für die Komplementär-GmbH**: Firma, Rechtsform, Sitz, Registergericht, HRB-Nummer, alle Geschäftsführer (wie bei der GmbH), ggf. Vorsitz des Aufsichtsrats | § 125a Abs. 1 und 2 HGB, § 177a HGB |
-| **eG** | Rechtsform, Sitz, Registergericht, Nummer im Genossenschaftsregister (GnR), **alle** Vorstandsmitglieder, Vorsitzende oder Vorsitzender des Aufsichtsrats (falls vorhanden) mit Familienname und mindestens einem ausgeschriebenen Vornamen | § 25a GenG |
+| **GmbH & Co. KG** | für die KG: Rechtsform, Sitz, Registergericht, HRA-Nummer; **zusätzlich für die Komplementär-GmbH**: Firma, Rechtsform, Sitz, Registergericht, HRB-Nummer, alle Geschäftsführer (wie bei der GmbH) | § 125a Abs. 1 und 2 HGB, § 177a HGB |
+| **eG** | Rechtsform, Sitz, Registergericht, Nummer im Genossenschaftsregister (GnR), **alle** Vorstandsmitglieder mit Familienname und mindestens einem ausgeschriebenen Vornamen | § 25a GenG |
 | **e.V.** | Name mit Zusatz „e.V.", Sitz, Registergericht, Vereinsregisternummer, vertretungsberechtigter Vorstand | § 65 BGB, § 26 BGB. Eine ausdrückliche Geschäftsbriefpflicht wie im HGB gibt es für Vereine nicht; die Software verlangt die Angaben dennoch, weil sie üblich und zur Identifikation hilfreich sind |
 
 ## Umsetzung

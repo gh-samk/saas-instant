@@ -24,7 +24,6 @@ export class GeneralPartnerDto {
   @IsString() @MaxLength(SHORT) registerNumber!: string;
   @IsArray() @ArrayMaxSize(NAMES) @IsString({ each: true }) @MaxLength(SHORT, { each: true })
   managingDirectors!: string[];
-  @IsString() @MaxLength(SHORT) supervisoryChair!: string;
 }
 
 /** Das gesamte Firmenprofil, wie die Oberfläche es schickt (vollständig, nicht teilweise). */
@@ -45,10 +44,6 @@ export class IssuerProfileDto {
   @IsString() @MaxLength(SHORT) registerNumber!: string;
   @IsArray() @ArrayMaxSize(NAMES) @IsString({ each: true }) @MaxLength(SHORT, { each: true })
   managingPersons!: string[];
-  @IsString() @MaxLength(SHORT) supervisoryChair!: string;
-  @IsString() @MaxLength(40) shareCapital!: string;
-  @IsString() @MaxLength(40) outstandingContributions!: string;
-  @IsBoolean() liquidation!: boolean;
   @ValidateNested() @Type(() => GeneralPartnerDto) generalPartner!: GeneralPartnerDto;
   @IsString() @MaxLength(40) vatId!: string;
   @IsString() @MaxLength(40) taxNumber!: string;

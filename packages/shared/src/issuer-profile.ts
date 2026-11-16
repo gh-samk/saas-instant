@@ -33,7 +33,6 @@ export interface GeneralPartner {
   registerCourt: string;
   registerNumber: string;
   managingDirectors: string[];
-  supervisoryChair: string;
 }
 
 export interface IssuerProfile {
@@ -55,10 +54,6 @@ export interface IssuerProfile {
   registerNumber: string;
   /** Geschäftsführer (GmbH, UG) bzw. Vorstand (eG, e.V.). */
   managingPersons: string[];
-  supervisoryChair: string;
-  shareCapital: string;
-  outstandingContributions: string;
-  liquidation: boolean;
   generalPartner: GeneralPartner;
   vatId: string;
   taxNumber: string;
@@ -89,17 +84,12 @@ export function emptyIssuerProfile(
     registerCourt: '',
     registerNumber: '',
     managingPersons: [],
-    supervisoryChair: '',
-    shareCapital: '',
-    outstandingContributions: '',
-    liquidation: false,
     generalPartner: {
       name: '',
       seat: '',
       registerCourt: '',
       registerNumber: '',
       managingDirectors: [],
-      supervisoryChair: '',
     },
     vatId: '',
     taxNumber: '',
@@ -128,16 +118,11 @@ export const ISSUER_FIELD_LABELS: Record<string, string> = {
   registerCourt: 'Registergericht',
   registerNumber: 'Registernummer',
   managingPersons: 'Geschäftsführung / Vorstand',
-  supervisoryChair: 'Vorsitz des Aufsichtsrats',
-  shareCapital: 'Stammkapital',
-  outstandingContributions: 'Ausstehende Einlagen',
-  liquidation: 'In Liquidation',
   'generalPartner.name': 'Komplementärin: Firma',
   'generalPartner.seat': 'Komplementärin: Sitz',
   'generalPartner.registerCourt': 'Komplementärin: Registergericht',
   'generalPartner.registerNumber': 'Komplementärin: Registernummer (HRB)',
   'generalPartner.managingDirectors': 'Komplementärin: Geschäftsführung',
-  'generalPartner.supervisoryChair': 'Komplementärin: Vorsitz des Aufsichtsrats',
   vatId: 'USt-IdNr.',
   taxNumber: 'Steuernummer',
   phone: 'Telefon',
@@ -327,13 +312,6 @@ export function validateIssuerProfile(profile: IssuerProfile): IssuerIssue[] {
       label: 'USt-IdNr. oder Steuernummer',
     });
   }
-  if (
-    (profile.legalForm === 'gmbh' || profile.legalForm === 'ug') &&
-    t(profile.shareCapital) !== '' &&
-    t(profile.outstandingContributions) === ''
-  ) {
-    add('outstandingContributions', 'missing');
-  }
 
   if (!missing('name') && !nameSuffixOk(profile)) add('name', 'legalFormSuffix');
   if (
@@ -402,10 +380,6 @@ export function formatIban(iban: string): string {
 
 const normalize = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
-function money(value: string): string {
-  return `${t(value).replace(/\s*(€|EUR)\s*$/i, '')} €`;
-}
-
 function court(prefix: string, name: string, number: string): string {
   const n = t(name);
   const place = new RegExp(`^${prefix}\\b`, 'i').test(n) ? n : `${prefix} ${n}`;
@@ -442,8 +416,6 @@ export function buildIssuerBlocks(profile: IssuerProfile): IssuerBlocks {
     court(prefix, p.registerCourt, p.registerNumber);
   const persons = (label: string, names: string[]): string[] =>
     list(names).length ? [`${label} ${list(names).join(', ')}`] : [];
-  const chair = (name: string): string[] =>
-    t(name) ? [`Aufsichtsratsvorsitz ${t(name)}`] : [];
 
   switch (p.legalForm) {
     case 'einzelunternehmen':
@@ -462,16 +434,6 @@ export function buildIssuerBlocks(profile: IssuerProfile): IssuerBlocks {
     case 'ug':
       legal.push(...seat, amtsgericht('Amtsgericht'));
       legal.push(...persons('Geschäftsführung', p.managingPersons));
-      legal.push(...chair(p.supervisoryChair));
-      if (t(p.shareCapital)) {
-        legal.push(
-          `Stammkapital ${money(p.shareCapital)}` +
-            (t(p.outstandingContributions)
-              ? `, ausstehende Einlagen ${money(p.outstandingContributions)}`
-              : ''),
-        );
-      }
-      if (p.liquidation) legal.push('In Liquidation');
       break;
     case 'gmbh_co_kg': {
       const gp = p.generalPartner;
@@ -480,13 +442,11 @@ export function buildIssuerBlocks(profile: IssuerProfile): IssuerBlocks {
       legal.push(`${t(gp.name)}, Sitz ${t(gp.seat)}`);
       legal.push(court('Amtsgericht', gp.registerCourt, gp.registerNumber));
       legal.push(...persons('Geschäftsführung', gp.managingDirectors));
-      legal.push(...chair(gp.supervisoryChair));
       break;
     }
     case 'eg':
       legal.push(...seat, court('Genossenschaftsregister', p.registerCourt, p.registerNumber));
       legal.push(...persons('Vorstand', p.managingPersons));
-      legal.push(...chair(p.supervisoryChair));
       break;
     case 'ev':
       legal.push(...seat, amtsgericht('Amtsgericht'));

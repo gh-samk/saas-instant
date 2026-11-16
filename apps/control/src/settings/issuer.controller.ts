@@ -18,6 +18,8 @@ import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { WithoutSecondFactor } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
 import { SessionGuard } from '../common/guards/session.guard';
+import { RequireAdmin } from '../common/decorators/require-role.decorator';
+import { RoleGuard } from '../common/guards/role.guard';
 import { sourceFrom } from '../common/inquiry-source';
 import { IssuerUpdateDto } from './dto/issuer.dto';
 import {
@@ -57,7 +59,7 @@ export function readBody(req: Request, max: number): Promise<Buffer> {
  * Die Angaben stehen unveränderlich auf jeder künftigen Rechnung.
  */
 @Controller('settings/issuer')
-@UseGuards(SessionGuard, SecondFactorGuard)
+@UseGuards(SessionGuard, RoleGuard, SecondFactorGuard)
 export class IssuerSettingsController {
   constructor(private readonly issuer: IssuerProfileService) {}
 
@@ -69,6 +71,7 @@ export class IssuerSettingsController {
     return this.issuer.getResponse();
   }
 
+  @RequireAdmin()
   @Put()
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -85,6 +88,7 @@ export class IssuerSettingsController {
     );
   }
 
+  @RequireAdmin()
   @Post('logo')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -97,6 +101,7 @@ export class IssuerSettingsController {
     return this.issuer.setLogo(data, declared, user, sourceFrom(req));
   }
 
+  @RequireAdmin()
   @Delete('logo')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

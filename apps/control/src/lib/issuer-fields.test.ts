@@ -33,14 +33,6 @@ describe('Pflichtfelder je Rechtsform', () => {
     }
   }
 
-  it('Ausstehende Einlagen sind Pflicht, sobald ein Stammkapital steht', () => {
-    const base = emptyIssuerProfile('gmbh');
-    const flag = (p: typeof base) =>
-      planFields(p).flatMap((s) => s.fields).find((f) => f.path === 'outstandingContributions')!.required;
-    expect(flag(base)).toBe(false);
-    expect(flag({ ...base, shareCapital: '25.000' })).toBe(true);
-  });
-
   it('setzt und liest verschachtelte Pfade', () => {
     const p = setPathValue(emptyIssuerProfile('gmbh_co_kg'), 'generalPartner.seat', 'Berlin');
     expect(getPathValue(p, 'generalPartner.seat')).toBe('Berlin');
