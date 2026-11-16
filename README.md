@@ -28,6 +28,8 @@ Alle Punkte sind im Code vorhanden; ob sie in Ihrer Umgebung laufen, hängt von 
 - **Aufgabenliste „Heute“:** abgeleitete Hinweise (überfällige Rechnungen, fehlende Sicherung, fehlgeschlagener Kennzahlenabruf, Abweichung zu Coolify usw.).
 - **Betriebsschalter:** Feature-Flags, die Instanzen über `GET /api/flags` lesen.
 - **Anmeldung:** Passkey oder Passwort mit zweitem Faktor (E-Mail-Code, Authenticator-App oder Passkey), Wiederherstellungscodes, Audit- und Sicherheitslog, Notfallkommandos im Container. Rollen: `owner` und `administrator`.
+- **Feldverschlüsselung mit Tresor:** Kundendaten (Organisationen, Notizen, Rechnungsinhalte und -dokumente, Mails, Einwilligungen, Audit-Details) liegen in der Datenbank, in Dumps und Sicherungen nur als Chiffretext (AES-256-GCM). Der Schlüssel liegt nach jedem Neustart gesperrt im Tresor und wird per Passphrase oder Wiederherstellungsschlüssel entsperrt; erst dann laufen Oberfläche und Nachtjobs. Details: [docs/operations/security-model.md](docs/operations/security-model.md).
+- **Gemeinsame Anmeldung im Modus `portal`:** Konten, Passkeys und zweite Faktoren liegen zentral im Portal (Anmeldedienst `portal-auth`, OpenID Connect mit PKCE). Nach einer Anmeldung öffnen sich alle Verwaltungen ohne erneute Anmeldung; Rollen `admin` oder `staff` je Verwaltung, frischer zweiter Faktor (Step-up) für sensible Aktionen, Abmelden beendet alle Sitzungen, lokaler Notzugang bleibt. Details: [docs/operations/sso.md](docs/operations/sso.md).
 
 ## Screenshots
 
@@ -43,6 +45,11 @@ Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/
 | ![Preise](docs/screenshots/10-settings-prices.png)<br>**Einstellungen → Preise:** Stufen, Steuersatz, Zahlungsziel | ![Sicherung](docs/screenshots/11-settings-backup.png)<br>**Einstellungen → Sicherung:** S3 oder Storage Box |
 | ![Instanz-Sicherungen](docs/screenshots/12-instance-backups.png)<br>**Instanz → Sicherungen** | ![Wiederherstellen](docs/screenshots/12-instance-backups-restore.png)<br>**Als neue Instanz wiederherstellen** |
 | ![XRechnung](docs/screenshots/13-invoice-xrechnung.png)<br>**Rechnung** mit ZUGFeRD/XRechnung, Integrität, Verlauf | ![GoBD-Export](docs/screenshots/14-gobd-export.png)<br>**Export für die Betriebsprüfung** |
+| ![Portal-Anmeldung](docs/screenshots/20-portal-login.png)<br>**Portal-Anmeldung** (Modus „Portal“) | ![Verwaltungen](docs/screenshots/21-portal-launcher.png)<br>**Portal:** Verwaltungen nach der Anmeldung |
+| ![Konten und Zugriffe](docs/screenshots/22-portal-accounts.png)<br>**Konten und Zugriffe:** Rolle je Verwaltung | ![Verwaltung im Portal-Modus](docs/screenshots/23-control-portal-login.png)<br>**Verwaltung** leitet zur Portal-Anmeldung |
+| ![Kein Zugriff](docs/screenshots/24-control-no-access.png)<br>**Kein Zugriff** ohne Rolle für diese Verwaltung | ![Step-up](docs/screenshots/25-step-up.png)<br>**Step-up:** frischer zweiter Faktor im Portal |
+| ![Tresor einrichten](docs/screenshots/26-vault-setup.png)<br>**Tresor einrichten** mit Wiederherstellungsschlüssel | ![Entsperren](docs/screenshots/27-vault-unlock.png)<br>**Verwaltung entsperren** nach dem Neustart |
+| ![Sicherheit](docs/screenshots/28-settings-security-vault.png)<br>**Einstellungen → Sicherheit:** Passphrasen und Protokoll | ![Portal-Anmeldung, dunkel](docs/screenshots/20-portal-login-dark.png)<br>**Portal-Anmeldung** im Dunkelmodus |
 
 ## Architektur in Kürze
 
@@ -55,13 +62,13 @@ Aufgenommen mit den frei erfundenen Demo-Daten aus `pnpm --filter @saas-instant/
         Manifest ───┘   └── ruft je Instanz: Health, Setup-Status, Kennzahlen
    (saas-instant.manifest.yaml)              (Instanz-Vertrag)
 
- Modus portal: zusätzlich ein statisches Portal (Liste + Links) vor mehreren Verwaltungen.
+ Modus portal: zusätzlich ein Portal mit gemeinsamer Anmeldung (Anmeldedienst `portal-auth`, OIDC) vor mehreren Verwaltungen.
 ```
 
 Der Backup-Agent (`backup-agent`) und der `docker-socket-proxy` laufen im selben Compose-Stapel, ohne veröffentlichten Port; Details in [docs/architecture.md](docs/architecture.md).
 
 - **Eine Verwaltung je Software.** Jede Software bekommt ihre eigene Verwaltung mit eigener Datenbank und eigener Anmeldung.
-- **Modus bei der Erstinstallation, danach unveränderlich:** `single` (genau eine Verwaltung) oder `portal` (mehrere Verwaltungen plus ein schlankes Portal, das nur Liste und Links zeigt: keine Kundendaten, keine Anmeldung).
+- **Modus bei der Erstinstallation, danach unveränderlich:** `single` (genau eine Verwaltung) oder `portal` (mehrere Verwaltungen plus ein Portal: Liste der Verwaltungen und gemeinsame Anmeldung über den Anmeldedienst `portal-auth`, keine Kundendaten im Portal).
 - **Provisioner-Schnittstelle:** drei Operationen (anlegen, Auskunft, stoppen), in v1 nur Coolify.
 - **Regel R1, nie löschen:** Die Verwaltung kennt genau eine Datenbank (ihre eigene) und hat keinen Codepfad, der ein Deployment oder eine Datenbank löscht. Archivieren stoppt die Instanz, das Datenvolumen bleibt. Eine Wiederherstellung entsteht immer als **neue** Instanz; bei der Übernahme wird die alte gestoppt, nie gelöscht.
 - **Backup-Agent:** führt Sicherung und Wiederherstellung aus (die Verwaltung löst sie nur aus), HMAC-signierte Aufträge im internen Netz, Docker-Zugriff nur über einen `docker-socket-proxy` mit Allowlist.
@@ -99,6 +106,8 @@ git clone <dieses Repository> saas-instant && cd saas-instant
 bin/saas-instant add produkt-b        # weitere Verwaltung, nur im Modus portal
 ```
 
+Im Modus `portal` meldet jede Verwaltung über das Portal an: `install.sh` erzeugt die Geheimnisse (`portal/portal.env`, je Verwaltung ein eigenes Client-Secret), startet den Anmeldedienst, registriert die Verwaltung dort und legt beim ersten Mal das erste Portal-Konto an (Einmal-Link am Ende der Ausgabe; `--admin-email`, `--admin-name`). Hinter TLS: `--portal-url https://portal.example.com` und `--app-url https://verwaltung.example.com`. Rollen: `bin/saas-instant portal set-role <email> <slug> admin|staff`. Lokale Anmeldung gibt es dann nur noch als Notzugang (`bin/saas-instant emergency <slug> …`). Ablauf, Rollen, Step-up, Ausfall und Schlüsselwechsel: [docs/operations/sso.md](docs/operations/sso.md).
+
 `install.sh` legt je Verwaltung `installations/<slug>/` an (`.env` mit zufälligen Geheimnissen, Rechte 600, plus Kopie des Beispielmanifests), schreibt den Modus in `.saas-instant-mode` fest und startet die Container mit `docker compose`. Die Oberfläche steht danach unter `http://localhost:8080` (weitere Verwaltungen erhalten den nächsten freien Port, das Portal beginnt bei 8090).
 
 Das erste Konto wird im Container angelegt, es entsteht ein Registrierlink für einen Passkey:
@@ -113,15 +122,17 @@ Schritt für Schritt, mit TLS und Proxy-Hinweisen: [docs/installation.md](docs/i
 
 ## Einschränkungen in v1
 
-- **Teststand:** Unit-, Integrations- (echtes Postgres) und Oberflächentests sind grün (Verwaltung: 1470 Jest-, 568 Vitest-, 474 Integrationstests; Backup-Agent 50, Rechnungsdienst 26). Zusätzlich laufen drei Ende-zu-Ende-Suiten mit echten Containern (`bash tests/e2e/run.sh <backup|invoice|install>`, [tests/e2e/README.md](tests/e2e/README.md)): **Sicherung/Wiederherstellung** (MinIO mit Object Lock, SFTP als Storage-Box-Ersatz, Mock-Coolify; 21 Schritte), **Rechnung** (Rechnungsdienst, alle Rechtsformen mit Pflichtangaben-Prüfung, ZUGFeRD-PDF/A-3b mit veraPDF geprüft, XRechnung und Factur-X mit dem KoSIT-Validator als akzeptabel bewertet, GoBD-Export mit `sha256sum -c`, Mails über Mailpit; 40 Schritte) und **Installation** (`single`, `portal` mit zweiter Verwaltung, Bindung/Slug-Abweichung, Betrieb hinter TLS mit Caddy; 34 Schritte). Ein Beispiel der erzeugten Rechnung (fiktive Daten): [PDF](docs/examples/rechnung-zugferd-beispiel.pdf), [XRechnung-XML](docs/examples/rechnung-xrechnung-beispiel.xml). **Nicht geprüft:** Mailversand gegen einen echten Anbieter, Betrieb mit einem echten Coolify und mit einem Produktivspeicher, Prüfung der Rechnungen durch eine Behörde oder ein Steuerberatungssystem.
+- **Teststand:** Unit-, Integrations- (echtes Postgres) und Oberflächentests sind grün (Verwaltung: 1612 Jest-, 616 Vitest-, 574 Integrationstests; Backup-Agent 57, Rechnungsdienst 26, dazu Anmeldedienst und gemeinsames Anmeldepaket). Zusätzlich laufen fünf Ende-zu-Ende-Suiten mit echten Containern (`bash tests/e2e/run.sh <backup|invoice|install|vault|sso>`, [tests/e2e/README.md](tests/e2e/README.md)): **Sicherung/Wiederherstellung** (MinIO mit Object Lock, SFTP als Storage-Box-Ersatz, Mock-Coolify; 21 Schritte), **Rechnung** (Rechnungsdienst, alle Rechtsformen mit Pflichtangaben-Prüfung, ZUGFeRD-PDF/A-3b mit veraPDF geprüft, XRechnung und Factur-X mit dem KoSIT-Validator als akzeptabel bewertet, GoBD-Export mit `sha256sum -c`, Mails über Mailpit; 40 Schritte) und **Installation** (`single`, `portal` mit zweiter Verwaltung, Bindung/Slug-Abweichung, Betrieb hinter TLS mit Caddy; 34 Schritte), **Tresor** (nur Chiffretext in Tabellen und Dump, Sperre nach Neustart, falsche Passphrase, Wiederherstellungsschlüssel, Suche und GoBD-Prüfung; 21 Schritte) und **SSO** (Portal mit zwei Verwaltungen, Rollen, Step-up, gemeinsames Abmelden, Notzugang bei gestopptem Portal, manipulierte Token; 11 Schritte). Ein Beispiel der erzeugten Rechnung (fiktive Daten): [PDF](docs/examples/rechnung-zugferd-beispiel.pdf), [XRechnung-XML](docs/examples/rechnung-xrechnung-beispiel.xml). **Nicht geprüft:** Mailversand gegen einen echten Anbieter, Betrieb mit einem echten Coolify und mit einem Produktivspeicher, Prüfung der Rechnungen durch eine Behörde oder ein Steuerberatungssystem.
 - **Der Backup-Agent ist nur gegen eine kleine Compose-Attrappe und Ersatz-Gegenstellen getestet**, nicht gegen eine echte Coolify-Installation und nicht gegen einen Produktivspeicher. Die Prüfung in der Verwaltung ist eine Prüfsumme der verschlüsselten Datei; ob sich eine Sicherung entschlüsseln und einspielen lässt, zeigt nur eine Rückspielprobe mit Ihrem privaten Schlüssel (wird nur einmal angezeigt und nirgends gespeichert). Der Docker-Zugriff des Agents bleibt ein Restrisiko ([docs/operations/security-model.md](docs/operations/security-model.md)).
+- **Tresor: Wer alle Passphrasen und den Wiederherstellungsschlüssel verliert, verliert die Kundendaten**, auch in den Sicherungen. Die Verschlüsselung schützt Datenbank, Dumps und Sicherungen, nicht aber einen entsperrten, laufenden Server gegen Root-Zugriff; Mails und der Rechnungsdienst erhalten Klartext. Mitarbeiterkonten und Einträge vor dem ersten Entsperren bleiben unverschlüsselt. Suche und Sortierung laufen im Speicher und sind für Hunderte bis wenige Tausend Organisationen ausgelegt.
+- **Gemeinsame Anmeldung (Modus `portal`):** Das Portal wird zum zentralen Anmeldepunkt; fällt es aus, bleibt je Verwaltung nur der Notzugang. Nicht geprüft: Passkey in einem echten Browser mit echtem Authenticator, Betrieb des Anmeldedienstes hinter TLS. Admin-Aktionen im Portal selbst verlangen keinen Step-up, die Anmeldebremse zählt nur im Prozessspeicher, neue Konten erhalten keine Einladungsmail (Einmal-Link von Hand weitergeben).
 - **GoBD ist keine Rechtsberatung.** Die Software liefert technische Bausteine; ob Ihr Gesamtverfahren konform ist, entscheiden Sie mit Ihrer Steuerberatung. Die Trigger schützen nicht vor einem Superuser auf dem Datenbankserver; die Datenbankrolle der Anwendung sollte kein `TRUNCATE` besitzen (Betreiberaufgabe, [docs/operations/gobd.md](docs/operations/gobd.md)). Die E-Rechnungsformate prüft die Ende-zu-Ende-Suite mit KoSIT und veraPDF (Stand der Validator-Konfiguration: XRechnung 3.0.2); das ersetzt keine Prüfung durch die empfangende Stelle. UBL als XRechnung-Syntax gibt es in v1 nicht (nur CII).
 - **Nur Coolify** als Provisioner. Die Schnittstelle ist vorbereitet, ein zweiter Anbieter existiert nicht.
 - **Die Coolify-Anbindung ist nur gegen eine Attrappe getestet**, nicht gegen eine echte Coolify-Installation. Pfade und Abläufe sind aus einem funktionierenden Provisionierungsskript übernommen (`reference/provision-tenant.py`), aber nicht belegt. Rechnen Sie bei der ersten echten Inbetriebnahme mit Nacharbeit.
 - **Backend-Meldungen und Mailtexte sind nur deutsch.** Die Oberfläche ist über eine i18n-Schicht übersetzbar ([docs/i18n.md](docs/i18n.md)), liegt aber nur auf Deutsch vor.
 - **PDF-Rechnungen brauchen den Rechnungsdienst** (`invoice-renderer`, im Compose-Stapel, Quelle `tools/invoice-renderer`; Adresse `RECHNUNGSDIENST_URL`). Läuft er nicht oder ist die Variable leer gesetzt, bleiben Rechnungen als Datensatz und XML bestehen, ein PDF lässt sich nicht erzeugen.
 - **Der Modus (`single`/`portal`) ist nach der Erstinstallation nicht änderbar.** Ein anderer Modus erfordert eine neue Installation in einem leeren Verzeichnis.
-- **Portal-Adressen** werden von `install.sh` als `http://<host>:<port>` geschrieben. Für Verwaltungen hinter TLS müssen Sie `portal/registry.json` selbst anpassen; ein erneuter `install.sh`- oder `add`-Lauf schreibt die Datei neu.
+- **Portal-Adressen** schreibt `install.sh` aus `CONTROL_APP_URL` der Verwaltung in `portal/registry/registry.json` (ohne `--app-url`: `http://<host>:<port>`). Für Verwaltungen hinter TLS beim Anlegen `--app-url https://…` angeben; ein erneuter `install.sh`- oder `add`-Lauf schreibt die Registry neu.
 - Die Rechnungslogik (Steuersatz, Preisstufen, Leistungsangaben) ist auf deutsche Verhältnisse zugeschnitten; prüfen Sie Ausgabe und Pflichtangaben selbst.
 
 ## Dokumentation
@@ -139,7 +150,8 @@ Schritt für Schritt, mit TLS und Proxy-Hinweisen: [docs/installation.md](docs/i
 | [docs/operations/emergency-access.md](docs/operations/emergency-access.md) | Notfallzugang (Kommandos im Container) |
 | [docs/operations/coolify-setup.md](docs/operations/coolify-setup.md) | Coolify einrichten, bekannte Fallen |
 | [docs/operations/billing.md](docs/operations/billing.md) | Rechnungen, SEPA-Mandat, Mailabsender |
-| [docs/operations/security-model.md](docs/operations/security-model.md) | Regeln R1 bis R6, Anmeldung, Geheimnisse, Verschlüsselung |
+| [docs/operations/security-model.md](docs/operations/security-model.md) | Regeln R1 bis R6, Anmeldung, Geheimnisse, Verschlüsselung, Tresor |
+| [docs/operations/sso.md](docs/operations/sso.md) | Gemeinsame Anmeldung im Modus `portal`: Ablauf, Rollen, Step-up, Ausfall |
 
 Mitmachen: [CONTRIBUTING.md](CONTRIBUTING.md). Sicherheitslücken melden: [SECURITY.md](SECURITY.md). Herkunft und Drittlizenzen: [NOTICE](NOTICE).
 
