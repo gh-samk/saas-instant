@@ -2955,10 +2955,18 @@ export function saveIssuer(body: {
   });
 }
 
+/**
+ * Der Server liest den Rumpf ROH und prüft die Bildsignatur (PNG/JPEG) —
+ * also die Datei selbst schicken, mit ihrem Typ, nicht als Multipart-Formular.
+ * Ein Formular käme dort als `multipart/form-data` mit Grenzzeilen an und
+ * würde immer als „kein PNG oder JPEG“ abgelehnt.
+ */
 export function uploadIssuerLogo(file: File): Promise<unknown> {
-  const form = new FormData();
-  form.append('file', file);
-  return apiFetch<unknown>('/api/settings/issuer/logo', { method: 'POST', body: form });
+  return apiFetch<unknown>('/api/settings/issuer/logo', {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  });
 }
 
 export function deleteIssuerLogo(): Promise<unknown> {
