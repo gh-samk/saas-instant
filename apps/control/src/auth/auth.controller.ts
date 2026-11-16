@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
-import { randomBytes } from 'crypto';
+import { generateCsrfToken } from '@saas-instant/auth-core';
 import type { Request, Response } from 'express';
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/server';
 import { sourceFrom } from '../common/inquiry-source';
@@ -17,6 +17,15 @@ import {
 } from '../common/cookies';
 import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { SessionGuard } from '../common/guards/session.guard';
+import type { LoggedInRequest } from '../common/guards/session.guard';
+import {
+  authModeFrom,
+  envFrom,
+  portalLogoutUrl,
+  readSsoSettings,
+} from '../sso/sso-settings';
+import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
+import { SsoSessionService } from './sso-session.service';
 import { LoginService } from './login.service';
 import type { LoginDone } from './login.service';
 import {
@@ -55,6 +64,8 @@ export class AuthController {
     private readonly access: AccessService,
     private readonly emergency: EmergencyService,
     private readonly config: ConfigService,
+    private readonly ssoSessions: SsoSessionService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Setzt Sitzungs- und Merk-Cookie einer fertigen Anmeldung. */
@@ -80,16 +91,28 @@ export class AuthController {
    */
   @Get('csrf')
   csrf(@Res({ passthrough: true }) res: Response): { csrfToken: string } {
-    const csrfToken = randomBytes(24).toString('hex');
+    const csrfToken = generateCsrfToken();
     res.cookie(COOKIE_CSRF, csrfToken, csrfCookieOptions(this.config));
     return { csrfToken };
   }
 
-  /** Der angemeldete Benutzer samt Stand der Ersteinrichtung. */
+  /**
+   * Der angemeldete Benutzer samt Stand der Ersteinrichtung.
+   *
+   * Dazu die Betriebsart und die Rolle: die Oberfläche blendet daran
+   * Schreibaktionen aus und überspringt in einer Portal-Sitzung die lokale
+   * Ersteinrichtung (Faktoren verwaltet dort das Portal).
+   */
   @Get('me')
   @UseGuards(SessionGuard)
-  async me(@LoggedInUser() user: SessionUser) {
-    return this.access.state(user);
+  async me(@LoggedInUser() user: SessionUser, @Req() req: LoggedInRequest) {
+    const state = await this.access.state(user);
+    return {
+      ...state,
+      authMode: authModeFrom(envFrom(this.config)),
+      accessRole: req.accessRole ?? 'admin',
+      viaPortal: req.ssoSession != null,
+    };
   }
 
   @Post('logout')
@@ -97,11 +120,28 @@ export class AuthController {
   @UseGuards(SessionGuard)
   async logout(
     @LoggedInUser() user: SessionUser,
-    @Req() req: Request,
+    @Req() req: LoggedInRequest,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ ok: true }> {
+  ): Promise<{ ok: true; portalLogoutUrl?: string }> {
     await this.loginService.logout(user, sourceFrom(req));
     res.clearCookie(COOKIE_SESSION, sessionCookieOptions(this.config));
+    // Portal-Sitzung: die eigene Sitzung enden lassen und der Oberfläche die
+    // Adresse des Portal-Logouts geben. Erst dort endet die Portal-Sitzung,
+    // und das Portal meldet alle übrigen Verwaltungen per Front-Channel ab.
+    if (req.ssoSession) {
+      await this.ssoSessions.end(req.ssoSession.id);
+      await this.audit.log({
+        userId: user.id,
+        actor: user.username,
+        action: AUDIT_ACTION.ssoLogout,
+        objectType: 'User',
+        objectId: user.id,
+        afterValue: { sid: req.ssoSession.sid },
+        ...sourceFrom(req),
+      });
+      const settings = readSsoSettings(envFrom(this.config));
+      return { ok: true, portalLogoutUrl: portalLogoutUrl(settings) };
+    }
     return { ok: true };
   }
 

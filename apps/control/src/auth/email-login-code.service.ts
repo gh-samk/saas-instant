@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { randomInt } from 'crypto';
-import * as argon2 from 'argon2';
+import {
+  generateNumericCode,
+  hashPassword,
+  verifyPassword,
+} from '@saas-instant/auth-core';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Stellen des Codes. Acht Ziffern = 100 Millionen Möglichkeiten. */
@@ -37,11 +40,7 @@ export const CODE_AGAIN_BY_MS = 60 * 1000;
  * vorkommen.
  */
 export function generateCode(): string {
-  let code = '';
-  for (let place = 0; place < CODE_LENGTH; place += 1) {
-    code += String(randomInt(0, 10));
-  }
-  return code;
+  return generateNumericCode(CODE_LENGTH);
 }
 
 /**
@@ -258,7 +257,7 @@ export class EmailLoginCodeService {
     now: Date = new Date(),
   ): Promise<RequestResult> {
     const code = generateCode();
-    const codeHash = await argon2.hash(code, { type: argon2.argon2id });
+    const codeHash = await hashPassword(code);
     const expiresAt = new Date(now.getTime() + CODE_VALID_MS);
     const fields = {
       codeHash,
@@ -397,7 +396,7 @@ export class EmailLoginCodeService {
     let matches = false;
     if (normalized.length === CODE_LENGTH) {
       try {
-        matches = await argon2.verify(record.codeHash, normalized);
+        matches = await verifyPassword(record.codeHash, normalized);
       } catch {
         // Beschädigter Hash: gilt als falscher Code, nicht als Serverfehler.
         matches = false;

@@ -1,32 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_NAME_DEFAULT } from '../common/app-defaults';
-import { authenticator } from 'otplib';
+import {
+  TOTP_PENDING_VALID_MS,
+  buildOtpauthUrl,
+  checkTotpCode,
+  checkTotpStep,
+  generateTotpSecret,
+  isTotpPendingExpired,
+  normalizeTotpCode,
+  totpPendingValidUntil,
+} from '@saas-instant/auth-core';
 import { CryptoService } from '../crypto/crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-/**
- * Ein Zeitfenster Toleranz in beide Richtungen (± 30 Sekunden). Gleicht
- * Uhrenabweichung zwischen Telefon und Server aus, ohne das Zeitfenster
- * unnötig zu weiten.
- */
-authenticator.options = { window: 1 };
-
-/**
- * Wie lange ein noch unbestätigtes Geheimnis gilt: 10 Minuten — dieselbe
- * Spanne wie das Anmeldevorgang-Cookie und wie `FRISCHE_SITZUNG_MS`.
- *
- * Vorher gab es gar keine Frist. Wer den Einrichtungsdialog öffnete und
- * abbrach, ließ ein unbestätigtes Geheimnis DAUERHAFT am Konto liegen — der
- * Normalfall, nicht die Ausnahme. Und genau dieser Zustand ist die
- * Voraussetzung von [K5]: solange er besteht, ist `totp/bestaetigen` eine
- * Ratestrecke, deren Treffer sofort einen aktiven zweiten Faktor ergibt.
- *
- * Eine Einrichtung dauert das Scannen eines QR-Codes und das Abtippen von
- * sechs Ziffern. Zehn Minuten sind dafür reichlich; wer länger braucht,
- * startet den Dialog neu und verliert dabei nichts.
- */
-export const TOTP_PENDING_VALID_MS = 10 * 60 * 1000;
+// Die Frist (10 Minuten) und die Zeitfenster-Toleranz (± 30 Sekunden) wohnen in
+// `@saas-instant/auth-core`.
+export { TOTP_PENDING_VALID_MS };
 
 /** Ergebnis der TOTP-Einrichtung — der Klartext ist nur hier sichtbar. */
 export interface TotpSetup {
@@ -65,14 +55,12 @@ export class TotpService {
     email: string,
     now: Date = new Date(),
   ): Promise<TotpSetup> {
-    const secretBase32 = authenticator.generateSecret();
+    const secretBase32 = generateTotpSecret();
     await this.prisma.user.update({
       where: { id: userId },
       data: {
         totpSecretPending: this.crypto.encrypt(secretBase32),
-        totpPendingValidUntil: new Date(
-          now.getTime() + TOTP_PENDING_VALID_MS,
-        ),
+        totpPendingValidUntil: totpPendingValidUntil(now),
       },
     });
 
@@ -82,7 +70,7 @@ export class TotpService {
     );
     return {
       secretBase32,
-      otpauthUrl: authenticator.keyuri(email, issuer, secretBase32),
+      otpauthUrl: buildOtpauthUrl(email, issuer, secretBase32),
     };
   }
 
@@ -147,8 +135,7 @@ export class TotpService {
    * lassen, nicht unbegrenzt gelten lassen.
    */
   isExpired(validUntil: Date | null, now: Date = new Date()): boolean {
-    if (!validUntil) return true;
-    return validUntil.getTime() <= now.getTime();
+    return isTotpPendingExpired(validUntil, now);
   }
 
   /** Verwirft ein vorläufiges Geheimnis, ohne das aktive anzufassen. */
@@ -174,12 +161,10 @@ export class TotpService {
     now: Date = new Date(),
   ): Promise<boolean> {
     if (!totpSecretEncrypted) return false;
-    const cleaned = code.replace(/\D/g, '');
-    if (cleaned.length !== 6) return false;
+    if (normalizeTotpCode(code) === null) return false;
     const secret = this.crypto.decrypt(totpSecretEncrypted);
-    const delta = authenticator.checkDelta(cleaned, secret);
-    if (delta === null) return false;
-    const step = Math.floor(now.getTime() / 1000 / 30) + delta;
+    const step = checkTotpStep(secret, code, now);
+    if (step === null) return false;
     const written = await this.prisma.user.updateMany({
       where: {
         id: userId,
@@ -197,9 +182,8 @@ export class TotpService {
    */
   check(totpSecretEncrypted: string | null, code: string): boolean {
     if (!totpSecretEncrypted) return false;
-    const cleaned = code.replace(/\D/g, '');
-    if (cleaned.length !== 6) return false;
+    if (normalizeTotpCode(code) === null) return false;
     const secret = this.crypto.decrypt(totpSecretEncrypted);
-    return authenticator.check(cleaned, secret);
+    return checkTotpCode(secret, code);
   }
 }

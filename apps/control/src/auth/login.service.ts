@@ -1,6 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { randomBytes } from 'crypto';
-import * as argon2 from 'argon2';
+import { Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import {
+  burnHashTime,
+  verifyAgainstDummy,
+  verifyPassword,
+} from '@saas-instant/auth-core';
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -10,7 +14,9 @@ import type { InquirySource } from '../common/inquiry-source';
 import {
   LoginFailedError,
   AccountLockedError,
+  LocalLoginDisabledError,
 } from '../common/errors/business-error';
+import { authModeFrom, envFrom } from '../sso/sso-settings';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginFlowService } from './login-flow.service';
@@ -45,16 +51,9 @@ interface LoginAccount extends LockoutState {
   /** Zugang entzogen? Dann führt KEIN Anmeldeweg mehr hinein. */
   deactivatedAt: Date | null;
   loginFlowGeneration: number;
+  /** Notzugang: im Modus `portal` die einzige Erlaubnis zur lokalen Anmeldung. */
+  emergency?: boolean;
 }
-
-/**
- * Wird beim ersten Bedarf einmal erzeugt und dann wiederverwendet: gegen diesen
- * Hash wird verifiziert, wenn die Kennung unbekannt ist. Ohne das kehrt die
- * Anmeldung bei unbekannter Kennung sofort zurück, während sie bei bekannter
- * Kennung ~100 ms für argon2 braucht — dieser Unterschied ist über das Netz
- * messbar und verrät, welche Konten existieren.
- */
-let dummyHash: Promise<string> | null = null;
 
 /**
  * Feste Mindestdauer der anonymen Anforderungsroute.
@@ -73,18 +72,7 @@ export const REQUEST_MIN_DURATION_MS = 250;
  * frueher zurueck als der fuer ein echtes Konto.
  */
 async function consumedComputeTime(): Promise<void> {
-  await argon2.hash(randomBytes(16).toString('hex'), { type: argon2.argon2id });
-}
-
-function getDummyHash(): Promise<string> {
-  if (!dummyHash) {
-    // Inhalt egal, nur die Rechenzeit zählt. Zufällig, damit er nie zufällig
-    // zu einer echten Eingabe passt.
-    dummyHash = argon2.hash(randomBytes(32).toString('hex'), {
-      type: argon2.argon2id,
-    });
-  }
-  return dummyHash;
+  await burnHashTime();
 }
 
 /**
@@ -134,6 +122,7 @@ const ACCOUNT_SELECTION = {
   failedAttempts: true,
   lockedUntil: true,
   deactivatedAt: true,
+  emergency: true,
 } as const;
 
 /**
@@ -207,7 +196,18 @@ export class LoginService {
     private readonly devices: DeviceService,
     private readonly flow: LoginFlowService,
     private readonly audit: AuditService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
+
+  /**
+   * Modus `portal`: lokal anmelden dürfen sich nur Konten mit Notzugang.
+   * Im Modus `single` (und ohne Konfiguration) ändert sich nichts.
+   */
+  private assertLocalLoginAllowed(account: { emergency?: boolean }): void {
+    if (!this.config) return;
+    if (authModeFrom(envFrom(this.config)) !== 'portal') return;
+    if (account.emergency !== true) throw new LocalLoginDisabledError();
+  }
 
   /**
    * Löst die eingegebene Kennung auf — wahlweise Nutzername oder E-Mail.
@@ -232,6 +232,7 @@ export class LoginService {
 
   /** Merkt sich den erfolgreichen Zugang und gibt die fertige Sitzung zurück. */
   private async placeSessionFrom(account: LoginAccount): Promise<LoginDone> {
+    this.assertLocalLoginAllowed(account);
     await this.prisma.user.update({
       where: { id: account.id },
       data: {
@@ -336,7 +337,7 @@ export class LoginService {
     // Konto erst nach ~100 ms — daran ließe sich ablesen, welche Konten es gibt.
     // Der Aufruf MUSS bleiben, auch wenn sein Ergebnis verworfen wird.
     if (!account || !account.passwordHash) {
-      await argon2.verify(await getDummyHash(), password).catch(() => false);
+      await verifyAgainstDummy(password);
       throw await this.fail(
         account,
         account ? account.username : maskIdentifier(identifier),
@@ -356,7 +357,7 @@ export class LoginService {
 
     let matches = false;
     try {
-      matches = await argon2.verify(account.passwordHash, password);
+      matches = await verifyPassword(account.passwordHash, password);
     } catch {
       // Beschädigter Hash: gilt als falsches Passwort, aber nicht still —
       // der Grund landet im Audit-Log.
@@ -377,6 +378,10 @@ export class LoginService {
         source,
       );
     }
+
+    // Richtiges Passwort, aber Portalbetrieb ohne Notzugang: gleich hier
+    // abweisen, statt erst einen zweiten Faktor zu verlangen.
+    this.assertLocalLoginAllowed(account);
 
     const device = await this.devices.recognizeAndRotate(trustedToken, account.id);
     if (!device) {

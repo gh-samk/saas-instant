@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createHash, randomBytes } from 'crypto';
+import { generateToken, hashToken } from '@saas-instant/auth-core';
 import { TRUSTED_DEVICE_MAX_AGE_MS } from '../common/cookies';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,9 +13,7 @@ export interface RecognizedDevice {
 }
 
 /** Hasht den Merk-Token. Der Klartext existiert nur im Cookie des Geräts. */
-function hash(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
+const hash = hashToken;
 
 /**
  * Merk-Geräte für den TOTP-Pfad.
@@ -37,7 +35,7 @@ export class DeviceService {
     label: string,
     now: Date = new Date(),
   ): Promise<{ deviceId: string; token: string }> {
-    const token = randomBytes(32).toString('base64url');
+    const token = generateToken();
     const device = await this.prisma.device.create({
       data: {
         userId,
@@ -77,7 +75,7 @@ export class DeviceService {
     if (device.userId !== userId) return null;
     if (device.validUntil.getTime() <= now.getTime()) return null;
 
-    const newToken = randomBytes(32).toString('base64url');
+    const newToken = generateToken();
     await this.prisma.device.update({
       where: { id: device.id },
       data: {

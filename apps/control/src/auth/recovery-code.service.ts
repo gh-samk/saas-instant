@@ -1,39 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { randomInt } from 'crypto';
-import * as argon2 from 'argon2';
+import {
+  COUNT_CODES,
+  findMatchingRecoveryCode,
+  generateRecoveryCodes,
+  normalizeCode,
+} from '@saas-instant/auth-core';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Es werden immer genau acht Codes ausgegeben. */
-export const COUNT_CODES = 8;
-/** Zeichen je Code (zwei Gruppen zu vier). */
-const CHARS_PER_GROUP = 4;
-/**
- * Zeichenvorrat ohne verwechselbare Zeichen (kein 0/O, 1/l/I). Die Codes
- * werden ausgedruckt und von Hand abgetippt.
- */
-const ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
-
-/**
- * Bringt eine Eingabe auf die Normalform, gegen die gehasht wird:
- * Kleinbuchstaben, nur Zeichen aus dem Alphabet, keine Trenner.
- * So sind „ABCD-EFGH", „abcd efgh" und „abcdefgh" derselbe Code.
- */
-export function normalizeCode(input: string): string {
-  const small = input.toLowerCase();
-  let result = '';
-  for (const chars of small) {
-    if (ALPHABET.includes(chars)) result += chars;
-  }
-  return result;
-}
-
-function generateCode(): string {
-  let raw = '';
-  for (let i = 0; i < CHARS_PER_GROUP * 2; i += 1) {
-    raw += ALPHABET[randomInt(0, ALPHABET.length)];
-  }
-  return `${raw.slice(0, CHARS_PER_GROUP)}-${raw.slice(CHARS_PER_GROUP)}`;
-}
+// Anzahl, Zeichenvorrat, Normalform und Erzeugung wohnen in
+// `@saas-instant/auth-core`; hier bleiben die Namen erreichbar.
+export { COUNT_CODES, normalizeCode };
 
 /**
  * Acht Wiederherstellungscodes je Benutzer, argon2id-gehasht.
@@ -48,15 +24,7 @@ export class RecoveryCodeService {
    * zurück — das ist die einzige Gelegenheit, ihn zu sehen.
    */
   async generateNewCodes(userId: string): Promise<string[]> {
-    const codes: string[] = [];
-    const hashes: string[] = [];
-    for (let i = 0; i < COUNT_CODES; i += 1) {
-      const code = generateCode();
-      codes.push(code);
-      hashes.push(
-        await argon2.hash(normalizeCode(code), { type: argon2.argon2id }),
-      );
-    }
+    const { codes, hashes } = await generateRecoveryCodes(COUNT_CODES);
 
     await this.prisma.$transaction(async (tx) => {
       // Zeilen-Lock auf den Benutzer, bevor gelöscht und angelegt wird.
@@ -95,31 +63,18 @@ export class RecoveryCodeService {
    * `count === 0` und scheitert. Derselbe Code kann so nie zweimal gelten.
    */
   async resolve(userId: string, input: string): Promise<string | null> {
-    const normalized = normalizeCode(input);
-    if (normalized.length === 0) return null;
-
     const open = await this.prisma.recoveryCode.findMany({
       where: { userId, consumedAt: null },
       select: { id: true, codeHash: true },
     });
 
-    for (const candidate of open) {
-      let matches = false;
-      try {
-        matches = await argon2.verify(candidate.codeHash, normalized);
-      } catch {
-        // Beschädigter Hash: dieser Code ist unbrauchbar, nicht der ganze Vorgang.
-        matches = false;
-      }
-      if (!matches) continue;
+    const candidate = await findMatchingRecoveryCode(open, input);
+    if (!candidate) return null;
 
-      const result = await this.prisma.recoveryCode.updateMany({
-        where: { id: candidate.id, consumedAt: null },
-        data: { consumedAt: new Date() },
-      });
-      return result.count === 1 ? candidate.id : null;
-    }
-
-    return null;
+    const result = await this.prisma.recoveryCode.updateMany({
+      where: { id: candidate.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    return result.count === 1 ? candidate.id : null;
   }
 }

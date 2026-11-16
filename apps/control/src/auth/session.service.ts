@@ -7,6 +7,7 @@ import {
   SESSION_ABSOLUTE_MAX_MS,
 } from '../common/cookies';
 import { PrismaService } from '../prisma/prisma.service';
+import { authModeFrom, envFrom } from '../sso/sso-settings';
 
 /** Der an den Request gehängte, angemeldete Benutzer. */
 export interface SessionUser {
@@ -41,6 +42,12 @@ interface SessionPayload {
    * gilt das Token als ungültig.
    */
   sst?: number;
+  /**
+   * Kennung der SSO-Sitzung (`SsoSession.id`), nur bei einer Anmeldung über das
+   * Portal. Über sie lässt sich die Sitzung serverseitig beenden (Front-Channel-
+   * Logout) und der Step-up-Nachweis ablesen.
+   */
+  ssn?: string;
   /** Ausstellungszeitpunkt in Sekunden seit Epoche, von jsonwebtoken gesetzt. */
   iat?: number;
 }
@@ -61,7 +68,31 @@ export interface ResolvedSession {
   evidenceAt: Date | null;
   /** Beginn der Sitzung (erste Anmeldung), für die Erneuerung. */
   sessionStartedAt: Date;
+  /**
+   * Rolle für die Rechteprüfung. Im Modus `single` IMMER `admin`, auch wenn in
+   * der Datenbank etwas anderes steht (Rest aus einem früheren Portalbetrieb).
+   */
+  accessRole: 'admin' | 'staff';
+  /** Die SSO-Sitzung hinter diesem Token, oder `null` bei lokaler Anmeldung. */
+  ssoSession: ResolvedSsoSession | null;
 }
+
+/** Was die Verwaltung über eine Portal-Sitzung weiß. */
+export interface ResolvedSsoSession {
+  id: string;
+  /** Portal-Sitzungs-ID. */
+  sid: string;
+  /** Zeitpunkt des letzten gelungenen Step-ups, oder `null`. */
+  stepUpAt: Date | null;
+}
+
+/**
+ * Höchstdauer einer Portal-Sitzung: zwölf Stunden, ohne Verlängerung darüber
+ * hinaus. Das Portal kann eine Rolle entziehen, ohne dass die Verwaltung es
+ * mitbekommt; nach spätestens zwölf Stunden muss die Sitzung durch das Portal
+ * (still, solange dort eine Sitzung läuft) und übernimmt die Rolle neu.
+ */
+export const SSO_SESSION_MAX_MS = 12 * 60 * 60 * 1000;
 
 /** Mindestlänge des JWT-Geheimnisses. */
 export const JWT_SECRET_MIN_LENGTH = 32;
@@ -130,12 +161,15 @@ export class SessionService {
     userId: string,
     evidenceAt?: Date | null,
     sessionStartedAt?: Date,
+    ssoSessionId?: string,
   ): Promise<string> {
     const now = new Date();
     const started = sessionStartedAt ?? now;
+    const absoluteMax =
+      ssoSessionId === undefined ? SESSION_ABSOLUTE_MAX_MS : SSO_SESSION_MAX_MS;
     const remainingMs = Math.min(
       SESSION_MAX_AGE_MS,
-      started.getTime() + SESSION_ABSOLUTE_MAX_MS - now.getTime(),
+      started.getTime() + absoluteMax - now.getTime(),
     );
     if (remainingMs <= 0) {
       throw new UnauthorizedException(
@@ -161,6 +195,7 @@ export class SessionService {
       gen: account.sessionGeneration,
       sst: Math.floor(started.getTime() / 1000),
     };
+    if (ssoSessionId !== undefined) payload['ssn'] = ssoSessionId;
     if (evidenceAt !== null) {
       payload['auth_time'] = Math.floor(
         (evidenceAt ?? new Date()).getTime() / 1000,
@@ -235,10 +270,41 @@ export class SessionService {
         role: true,
         sessionGeneration: true,
         deactivatedAt: true,
+        accessRole: true,
+        emergency: true,
       },
     });
     if (!user) {
       throw new UnauthorizedException('Konto nicht gefunden.');
+    }
+
+    // Modus `portal`: Sitzungen entstehen durch das Portal. Ein Token ohne
+    // SSO-Sitzung (lokale Anmeldung) gilt nur für Konten mit Notzugang. Im
+    // Modus `single` dagegen gibt es keine SSO-Sitzungen.
+    const portal = authModeFrom(envFrom(this.config)) === 'portal';
+    let ssoSession: ResolvedSsoSession | null = null;
+    if (payload.ssn !== undefined) {
+      if (!portal || typeof payload.ssn !== 'string') {
+        throw new UnauthorizedException('Sitzung ungültig oder abgelaufen.');
+      }
+      const row = await this.prisma.ssoSession.findUnique({
+        where: { id: payload.ssn },
+        select: {
+          id: true,
+          userId: true,
+          ssoSid: true,
+          stepUpAt: true,
+          endedAt: true,
+        },
+      });
+      if (!row || row.userId !== user.id || row.endedAt !== null) {
+        throw new UnauthorizedException(
+          'Die Sitzung wurde beendet. Bitte erneut anmelden.',
+        );
+      }
+      ssoSession = { id: row.id, sid: row.ssoSid, stepUpAt: row.stepUpAt };
+    } else if (portal && !user.emergency) {
+      throw new UnauthorizedException('Sitzung ungültig oder abgelaufen.');
     }
 
     // ZUGANG ENTZOGEN: Die Sitzung endet SOFORT, nicht erst beim nächsten
@@ -266,7 +332,8 @@ export class SessionService {
     // gilt das Token nicht mehr.
     if (
       typeof payload.sst !== 'number' ||
-      Date.now() - payload.sst * 1000 >= SESSION_ABSOLUTE_MAX_MS
+      Date.now() - payload.sst * 1000 >=
+        (ssoSession === null ? SESSION_ABSOLUTE_MAX_MS : SSO_SESSION_MAX_MS)
     ) {
       throw new UnauthorizedException('Sitzung ungültig oder abgelaufen.');
     }
@@ -274,6 +341,8 @@ export class SessionService {
     const {
       sessionGeneration: _gen,
       deactivatedAt: _deactivated,
+      accessRole: storedRole,
+      emergency: _emergency,
       ...withoutGeneration
     } = user;
     // Fehlt `auth_time`, gilt die Sitzung als NICHT frisch — im Zweifel wird der
@@ -284,6 +353,8 @@ export class SessionService {
       issuedAt:
         typeof payload.iat === 'number' ? new Date(payload.iat * 1000) : null,
       sessionStartedAt: new Date(payload.sst * 1000),
+      accessRole: portal && storedRole === 'staff' ? 'staff' : 'admin',
+      ssoSession,
       evidenceAt:
         typeof payload.auth_time === 'number'
           ? new Date(payload.auth_time * 1000)

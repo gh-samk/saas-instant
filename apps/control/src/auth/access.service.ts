@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
-import * as argon2 from 'argon2';
+import { hashPassword, verifyPassword } from '@saas-instant/auth-core';
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   RegistrationResponseJSON,
@@ -592,7 +592,7 @@ export class AccessService {
 
     if (currentPassword && account.passwordHash) {
       try {
-        confirmed = await argon2.verify(account.passwordHash, currentPassword);
+        confirmed = await verifyPassword(account.passwordHash, currentPassword);
       } catch {
         confirmed = false;
       }
@@ -867,7 +867,7 @@ export class AccessService {
 
       let matches = false;
       try {
-        matches = await argon2.verify(previousHash, currentPassword);
+        matches = await verifyPassword(previousHash, currentPassword);
       } catch {
         matches = false;
       }
@@ -895,9 +895,7 @@ export class AccessService {
       }
     }
 
-    const passwordHash = await argon2.hash(newPassword, {
-      type: argon2.argon2id,
-    });
+    const passwordHash = await hashPassword(newPassword);
     await this.prisma.user.update({
       where: { id: account.id },
       data: {

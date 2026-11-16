@@ -2,45 +2,23 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_NAME_DEFAULT, APP_URL_DEFAULT } from '../common/app-defaults';
 import {
-  generateAuthenticationOptions,
-  generateRegistrationOptions,
-  verifyAuthenticationResponse,
-  verifyRegistrationResponse,
-} from '@simplewebauthn/server';
+  checkLoginResponse,
+  checkRegistrationResponse,
+  createLoginOptions,
+  createRegistrationOptions,
+} from '@saas-instant/auth-core';
 import type {
   AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
-} from '@simplewebauthn/server';
+  StoredPasskey,
+  VerifiedPasskeyRegistration,
+} from '@saas-instant/auth-core';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Gespeicherte Anmeldedaten in der Form, die WebAuthn zum Prüfen braucht. */
-export interface StoredPasskey {
-  id: string;
-  credentialId: string;
-  publicKey: string;
-  counter: number;
-  transports: string | null;
-}
-
-/** Ergebnis einer geprüften Registrierung. */
-export interface VerifiedPasskeyRegistration {
-  credentialId: string;
-  publicKeyBase64: string;
-  counter: number;
-  transports: string | null;
-}
-
-function transportsFromText(text: string | null): AuthenticatorTransportFuture[] | undefined {
-  if (!text) return undefined;
-  const parts = text
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  return parts.length > 0 ? (parts as AuthenticatorTransportFuture[]) : undefined;
-}
+// Die framework-freien Typen wohnen in `@saas-instant/auth-core`.
+export type { StoredPasskey, VerifiedPasskeyRegistration };
 
 /**
  * Passkeys (WebAuthn) als Hauptweg der Anmeldung.
@@ -90,29 +68,11 @@ export class PasskeyService {
     name: string;
   }): Promise<PublicKeyCredentialCreationOptionsJSON> {
     const existing = await this.passkeysOf(user.id);
-    return generateRegistrationOptions({
+    return createRegistrationOptions({
       rpName: this.rpName(),
-      rpID: this.rpId(),
-      userName: user.email,
-      userDisplayName: user.name,
-      userID: new TextEncoder().encode(user.id),
-      attestationType: 'none',
-      excludeCredentials: existing.map((passkey) => ({
-        id: passkey.credentialId,
-        transports: transportsFromText(passkey.transports),
-      })),
-      authenticatorSelection: {
-        // 'required', nicht 'preferred': die Anmeldung gibt bewusst KEINE
-        // `allowCredentials` mit (sonst verriete deren Länge die Existenz eines
-        // Kontos). Ein nicht auffindbarer Passkey wäre damit unbenutzbar — er
-        // muss also auffindbar auf dem Gerät liegen.
-        residentKey: 'required',
-        // 'required', weil @simplewebauthn v13 serverseitig
-        // `requireUserVerification: true` voreingestellt hat. Mit 'preferred'
-        // fordert der Browser keine Nutzerverifikation an und der Server lehnt
-        // anschließend ab, was er selbst nicht verlangt hat.
-        userVerification: 'required',
-      },
+      rpId: this.rpId(),
+      user,
+      existing,
     });
   }
 
@@ -125,26 +85,10 @@ export class PasskeyService {
     response: RegistrationResponseJSON,
     expectedChallenge: string,
   ): Promise<VerifiedPasskeyRegistration | null> {
-    let result;
-    try {
-      result = await verifyRegistrationResponse({
-        response: response,
-        expectedChallenge: expectedChallenge,
-        expectedOrigin: this.origin(),
-        expectedRPID: this.rpId(),
-      });
-    } catch {
-      return null;
-    }
-    if (!result.verified) return null;
-
-    const { credential } = result.registrationInfo;
-    return {
-      credentialId: credential.id,
-      publicKeyBase64: Buffer.from(credential.publicKey).toString('base64'),
-      counter: credential.counter,
-      transports: response.response.transports?.join(',') ?? null,
-    };
+    return checkRegistrationResponse(response, expectedChallenge, {
+      rpId: this.rpId(),
+      origin: this.origin(),
+    });
   }
 
   /**
@@ -155,15 +99,7 @@ export class PasskeyService {
   async loginOptions(
     passkeys: StoredPasskey[],
   ): Promise<PublicKeyCredentialRequestOptionsJSON> {
-    return generateAuthenticationOptions({
-      rpID: this.rpId(),
-      // Muss zur serverseitigen Erwartung passen, siehe registrierungsOptionen.
-      userVerification: 'required',
-      allowCredentials: passkeys.map((passkey) => ({
-        id: passkey.credentialId,
-        transports: transportsFromText(passkey.transports),
-      })),
-    });
+    return createLoginOptions(this.rpId(), passkeys);
   }
 
   /**
@@ -175,29 +111,18 @@ export class PasskeyService {
     expectedChallenge: string,
     passkey: StoredPasskey,
   ): Promise<boolean> {
-    let result;
-    try {
-      result = await verifyAuthenticationResponse({
-        response: response,
-        expectedChallenge: expectedChallenge,
-        expectedOrigin: this.origin(),
-        expectedRPID: this.rpId(),
-        credential: {
-          id: passkey.credentialId,
-          publicKey: new Uint8Array(Buffer.from(passkey.publicKey, 'base64')),
-          counter: passkey.counter,
-          transports: transportsFromText(passkey.transports),
-        },
-      });
-    } catch {
-      return false;
-    }
-    if (!result.verified) return false;
+    const result = await checkLoginResponse(
+      response,
+      expectedChallenge,
+      passkey,
+      { rpId: this.rpId(), origin: this.origin() },
+    );
+    if (!result) return false;
 
     await this.prisma.passkeyCredential.update({
       where: { id: passkey.id },
       data: {
-        counter: result.authenticationInfo.newCounter,
+        counter: result.newCounter,
         lastUsedAt: new Date(),
       },
     });

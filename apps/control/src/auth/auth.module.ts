@@ -16,6 +16,8 @@ import { TotpService } from './totp.service';
 import { RecoveryCodeService } from './recovery-code.service';
 import { AccessController } from './access.controller';
 import { AccessService } from './access.service';
+import { SsoSessionService } from './sso-session.service';
+import { RoleGuard } from '../common/guards/role.guard';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { AccessService } from './access.service';
     RecoveryCodeService,
     AccessService,
     SecondFactorGuard,
+    RoleGuard,
+    SsoSessionService,
   ],
   // `ZweitfaktorGuard` UND `ZugangService` werden mit ausgeführt, weil den
   // Guard seit [W4] auch der `OrganisationConfidentialController` verwendet.
@@ -59,6 +63,8 @@ import { AccessService } from './access.service';
     SessionService,
     AccessService,
     SecondFactorGuard,
+    RoleGuard,
+    SsoSessionService,
   ],
 })
 export class AuthModule {}

@@ -561,8 +561,9 @@ describe('[H1] Der Seed hat eine wirksame Schranke', () => {
 
 describe('[H4] Passkey-Optionen passen zur serverseitigen Erwartung', () => {
   it('fordert Nutzerverifikation an, weil der Server sie verlangt', async () => {
+    // Die Optionen wohnen seit W5c in `@saas-instant/auth-core`.
     const source = await import('fs').then((fs) =>
-      fs.readFileSync('src/auth/passkey.service.ts', 'utf8'),
+      fs.readFileSync('../../packages/auth-core/src/webauthn.ts', 'utf8'),
     );
     expect(source).not.toContain("userVerification: 'preferred'");
     expect(source.match(/userVerification: 'required'/g)).toHaveLength(2);

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_URL_DEFAULT } from '../common/app-defaults';
 import { generateToken, hashToken } from '../common/one-time-token';
-import * as argon2 from 'argon2';
+import { hashPassword } from '@saas-instant/auth-core';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { LoginFailedError } from '../common/errors/business-error';
@@ -97,6 +97,23 @@ export class EmergencyService {
    * E-Mail). Wirft, wenn es die Kennung nicht gibt — im Terminal ist eine
    * klare Fehlermeldung nützlicher als eine neutrale Antwort.
    */
+  /**
+   * Markiert das Konto als NOTZUGANG (`emergency = true`).
+   *
+   * Nur die Notfallkommandos der Kommandozeile rufen das auf. Im Modus
+   * `portal` darf sich ausschließlich ein so markiertes Konto lokal anmelden —
+   * der Weg zurück in die Verwaltung, wenn das Portal nicht erreichbar ist.
+   * Wer den Container bedienen kann, kann das ohnehin; eine Oberfläche, die
+   * Notzugänge vergibt, gibt es bewusst nicht.
+   */
+  async markEmergencyAccount(identifier: string): Promise<void> {
+    const cleaned = identifier.trim().toLowerCase();
+    await this.prisma.user.updateMany({
+      where: { OR: [{ username: cleaned }, { email: cleaned }] },
+      data: { emergency: true },
+    });
+  }
+
   async generateLink(
     identifier: string,
     kind: EmergencyKind,
@@ -311,9 +328,7 @@ export class EmergencyService {
   ): Promise<{ username: string }> {
     const verified = await this.resolve(token, 'password', source);
 
-    const passwordHash = await argon2.hash(newPassword, {
-      type: argon2.argon2id,
-    });
+    const passwordHash = await hashPassword(newPassword);
     await this.prisma.user.update({
       where: { id: verified.userId },
       data: {

@@ -3,18 +3,15 @@ import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { AccountLockedError } from '../common/errors/business-error';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  LOCKOUT_DURATION_MS,
+  MAX_FAILED_ATTEMPTS,
+  lockoutRemainingSeconds,
+} from '@saas-instant/auth-core';
 
-/** Ab dem fünften Fehlversuch wird gesperrt. */
-export const MAX_FAILED_ATTEMPTS = 5;
-/**
- * Dauer der Sperre: 15 Minuten. Die Sperre endet von selbst.
- *
- * Das ist eine bewusste Entscheidung: bei einem Ein-Benutzer-System wäre eine
- * Sperre ohne Selbstheilung ein Denial-of-Service — fünf Fehlversuche gegen den
- * bekannten Benutzer würden dauerhaft aussperren. Sofort aufheben lässt sie
- * sich zusätzlich über `emergency unlock`.
- */
-export const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+// Konstanten und Rechenregel wohnen in `@saas-instant/auth-core`; hier bleiben
+// sie unter den bisherigen Namen erreichbar.
+export { LOCKOUT_DURATION_MS, MAX_FAILED_ATTEMPTS };
 
 /** Kontostand für die Sperrprüfung. */
 export interface LockoutState {
@@ -40,9 +37,7 @@ export class LockoutService {
    * Bewusst aufgerundet: „noch 0 Sekunden" wäre für den Aufrufer irreführend.
    */
   remainingSeconds(lockedUntil: Date | null, now: Date = new Date()): number {
-    if (!lockedUntil) return 0;
-    const remaining = lockedUntil.getTime() - now.getTime();
-    return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
+    return lockoutRemainingSeconds(lockedUntil, now);
   }
 
   /** Wirft, solange das Konto gesperrt ist. Nach Ablauf passiert nichts. */
