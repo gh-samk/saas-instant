@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import {
   Button,
   Card,
@@ -20,11 +21,88 @@ import { ApiError, errorText } from '../lib/api-client';
 import { useSecondFactorEvidence } from '../lib/second-factor';
 import { formatDate } from '../utils/date';
 import { useT, type TFunction } from '../i18n';
+import { useDirtyState, useUnsavedChanges } from '../lib/unsaved-changes';
 import { SelectField } from './FormFields';
+import { StickySaveBar } from './StickySaveBar';
 import { AgeKeyDialog } from './AgeKeyDialog';
 import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
 
+/**
+ * Anbieter-Vorlagen für S3-Ziele. Sie füllen nur Endpunkt, Region und
+ * Path-Style vor und werden nicht gespeichert: Beim Laden erkennt
+ * `detectProvider` sie wieder an den Werten.
+ */
+export type S3Provider = 'hetzner' | 'aws' | 'minio' | 'other';
+
+/**
+ * Hetzner Object Storage: Standorte fsn1, nbg1, hel1; Endpunkt
+ * `https://<standort>.your-objectstorage.com`, der Standort ist zugleich die
+ * Region; Adressierung virtual-host (Quelle: docs.hetzner.com/storage/object-storage).
+ */
+export const HETZNER_LOCATIONS = ['fsn1', 'nbg1', 'hel1'] as const;
+/** AWS S3: regionaler Endpunkt `https://s3.<region>.amazonaws.com`, virtual-host (Quelle: AWS General Reference, S3-Endpunkte). */
+const AWS_DEFAULT_REGION = 'eu-central-1';
+/** MinIO: Path-Style, Standardregion us-east-1. */
+const MINIO_DEFAULT_REGION = 'us-east-1';
+const DEFAULT_RETENTION = '30';
+
+function hetznerEndpoint(location: string): string {
+  return `https://${location}.your-objectstorage.com`;
+}
+function awsEndpoint(region: string): string {
+  return `https://s3.${region.trim()}.amazonaws.com`;
+}
+function isHetznerLocation(value: string): boolean {
+  return (HETZNER_LOCATIONS as readonly string[]).includes(value);
+}
+
+/** Erkennt die Vorlage aus den gespeicherten Werten; passt keine, gilt „Anderer“. */
+export function detectProvider(endpoint: string, region: string, pathStyle: boolean): S3Provider {
+  if (!pathStyle && isHetznerLocation(region) && endpoint === hetznerEndpoint(region)) return 'hetzner';
+  if (!pathStyle && region !== '' && endpoint === awsEndpoint(region)) return 'aws';
+  if (pathStyle) return 'minio';
+  return 'other';
+}
+
+/** Wendet eine Vorlage an: setzt Endpunkt, Region und Path-Style; Präfix und Rest bleiben. */
+export function applyProvider(form: BackupForm, provider: S3Provider): BackupForm {
+  const previousDerived =
+    form.provider === 'hetzner' || form.provider === 'aws' ? form.endpoint : '';
+  const keepRegion = form.region !== '' && !(form.provider === 'hetzner' && provider !== 'hetzner');
+  if (provider === 'hetzner') {
+    const region = isHetznerLocation(form.region) ? form.region : HETZNER_LOCATIONS[0];
+    return { ...form, provider, region, endpoint: hetznerEndpoint(region), pathStyle: false };
+  }
+  if (provider === 'aws') {
+    const region = keepRegion ? form.region : AWS_DEFAULT_REGION;
+    return { ...form, provider, region, endpoint: awsEndpoint(region), pathStyle: false };
+  }
+  if (provider === 'minio') {
+    return {
+      ...form,
+      provider,
+      region: keepRegion ? form.region : MINIO_DEFAULT_REGION,
+      endpoint: form.endpoint === previousDerived ? '' : form.endpoint,
+      pathStyle: true,
+    };
+  }
+  return {
+    ...form,
+    provider,
+    region: keepRegion ? form.region : '',
+    endpoint: form.endpoint === previousDerived ? '' : form.endpoint,
+  };
+}
+
+/** Region geändert: bei Hetzner und AWS folgt der Endpunkt der Region. */
+function withRegion(form: BackupForm, region: string): BackupForm {
+  if (form.provider === 'hetzner') return { ...form, region, endpoint: hetznerEndpoint(region) };
+  if (form.provider === 'aws') return { ...form, region, endpoint: awsEndpoint(region) };
+  return { ...form, region };
+}
+
 export interface BackupForm {
+  provider: S3Provider;
   type: 's3' | 'storagebox';
   schedule: 'daily' | 'twice_daily';
   retentionDays: string;
@@ -49,16 +127,20 @@ export interface BackupForm {
 export function formFrom(settings: BackupSettings | null): BackupForm {
   const target = settings?.target ?? null;
   const isBox = target?.type === 'storagebox';
+  const endpoint = target?.endpoint ?? '';
+  const region = target?.region ?? '';
+  const pathStyle = target?.pathStyle ?? false;
   return {
+    provider: target?.type === 's3' ? detectProvider(endpoint, region, pathStyle) : 'other',
     type: target?.type ?? 's3',
     schedule: target?.schedule === 'twice_daily' ? 'twice_daily' : 'daily',
-    retentionDays: String(target?.retentionDays ?? 30),
+    retentionDays: target?.retentionDays != null ? String(target.retentionDays) : DEFAULT_RETENTION,
     objectLock: settings?.agent.objectLock ?? false,
-    endpoint: target?.endpoint ?? '',
-    region: target?.region ?? '',
+    endpoint,
+    region,
     bucket: target?.bucket ?? '',
     prefix: target?.type === 's3' ? (target.prefix ?? target.path ?? '') : '',
-    pathStyle: target?.pathStyle ?? false,
+    pathStyle,
     accessKeyId: '',
     secretAccessKey: '',
     host: target?.host ?? '',
@@ -165,7 +247,15 @@ export function validate(
   };
 }
 
-type Pending = 'save' | 'test';
+type Pending = 'saveTest' | 'test';
+
+/** Felder, die nach dem Speichern leer sind (Geheimnisse sind write-only). */
+function withoutSecrets(form: BackupForm): BackupForm {
+  return { ...form, accessKeyId: '', secretAccessKey: '', privateKey: '', password: '' };
+}
+
+/** Zwei Spalten ab `sm`, mobil untereinander. */
+const GRID = 'grid gap-x-4 sm:grid-cols-2';
 
 /**
  * Einstellungen → Sicherung.
@@ -173,6 +263,9 @@ type Pending = 'save' | 'test';
  * Geheimfelder sind write-only: Sie werden nie vorbelegt, nach dem Speichern
  * geleert und gehen ausschließlich im PUT an den Server, der sie an den Agent
  * weiterreicht. Speichern und Testen liegen hinter dem zweiten Faktor.
+ * „Speichern und testen“ ist EIN Ablauf: erst speichern, dann testen, mit
+ * demselben Nachweis. Verlangt der Server den Nachweis erst beim Test, fragt der
+ * Dialog dort nach und wiederholt nur den Test.
  */
 export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: boolean }) {
   const t = useT();
@@ -182,8 +275,11 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<BackupForm>(() => formFrom(null));
+  const { dirty, baseline, isDirty, markSaved } = useDirtyState(form);
+  useUnsavedChanges(isDirty);
   const [showProblems, setShowProblems] = useState(false);
-  const [pending, setPending] = useState<Pending>('save');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [pending, setPending] = useState<Pending>('saveTest');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -196,8 +292,10 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
     try {
       const response = await fetchBackupSettings();
       if (!lives.current) return;
+      const next = formFrom(response);
       setSettings(response);
-      setForm(formFrom(response));
+      setForm(next);
+      markSaved(() => next);
     } catch (e) {
       if (!lives.current) return;
       setLoadError(
@@ -208,7 +306,7 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
     } finally {
       if (lives.current) setLoaded(true);
     }
-  }, [t]);
+  }, [t, markSaved]);
 
   useEffect(() => {
     lives.current = true;
@@ -225,30 +323,52 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
 
   const check = validate(form, t, settings?.target ?? null);
 
+  async function runTest(evidence?: SecondFactorEvidence): Promise<boolean> {
+    try {
+      const result = await testBackupTarget(evidence);
+      evidenceState.close();
+      setTestResult({ ok: result.ok, message: result.message });
+      return true;
+    } catch (e) {
+      // Der Nachweis fehlt erst beim Test: Dialog dort, danach nur der Test.
+      setPending('test');
+      if (evidenceState.handle(e, evidence)) return false;
+      setActionError(
+        e instanceof ApiError && e.error.code === 'backup_agent_unavailable'
+          ? t('backup.agentUnavailable')
+          : errorText(e, t('backup.testRequestFailed')),
+      );
+      return false;
+    }
+  }
+
   async function run(action: Pending, evidence?: SecondFactorEvidence) {
     setBusy(true);
     setActionError(null);
     try {
-      if (action === 'test') {
-        const result = await testBackupTarget(evidence);
-        evidenceState.close();
-        setTestResult({ ok: result.ok, message: result.message });
-      } else if (check.input !== null) {
-        const response = await saveBackupSettings(check.input, evidence);
-        evidenceState.close();
+      if (action === 'saveTest' && check.input !== null) {
+        const input = check.input;
+        let response: BackupSettings;
+        try {
+          response = await saveBackupSettings(input, evidence);
+        } catch (e) {
+          if (evidenceState.handle(e, evidence)) return;
+          setActionError(
+            e instanceof ApiError && e.error.code === 'backup_agent_unavailable'
+              ? t('backup.agentUnavailable')
+              : errorText(e, t('backup.saveFailed')),
+          );
+          return;
+        }
         setSettings(response);
         // Geheimnisse sofort aus dem Speicher der Ansicht räumen.
-        setForm({ ...formFrom(response), accessKeyId: '', secretAccessKey: '', privateKey: '', password: '' });
+        const next = withoutSecrets(formFrom(response));
+        setForm(next);
+        markSaved(() => next);
         toast.show(t('backup.saved'));
         if (response.ageIdentity) setAgeIdentity(response.ageIdentity);
       }
-    } catch (e) {
-      if (evidenceState.handle(e, evidence)) return;
-      setActionError(
-        e instanceof ApiError && e.error.code === 'backup_agent_unavailable'
-          ? t('backup.agentUnavailable')
-          : errorText(e, action === 'save' ? t('backup.saveFailed') : t('backup.testRequestFailed')),
-      );
+      await runTest(evidence);
     } finally {
       setBusy(false);
     }
@@ -257,7 +377,7 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
   function start(action: Pending) {
     setPending(action);
     setTestResult(null);
-    if (action === 'save') {
+    if (action === 'saveTest') {
       setShowProblems(true);
       if (check.input === null) return;
     }
@@ -288,6 +408,28 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
   const secretPlaceholder =
     configured && target?.type === form.type ? t('backup.secretSetPlaceholder') : undefined;
   const isS3 = form.type === 's3';
+  const provider = form.provider;
+
+  // „Erweitert“ ist offen, wenn der Nutzer es öffnet, ein Fehler darin steckt
+  // oder ein Wert von der Vorgabe der Vorlage abweicht.
+  const retentionBad = showProblems && check.problems.includes(t('backup.errRetention'));
+  const defaultPathStyle = provider === 'minio';
+  const deviates =
+    form.retentionDays !== DEFAULT_RETENTION ||
+    (isS3 && (form.prefix !== '' || form.pathStyle !== defaultPathStyle));
+  const advancedShown = advancedOpen || retentionBad || deviates;
+
+  const endpointHint =
+    provider === 'hetzner'
+      ? t('backup.s3EndpointHintHetzner')
+      : provider === 'aws'
+        ? t('backup.s3EndpointHintAws')
+        : provider === 'minio'
+          ? t('backup.s3EndpointHintMinio')
+          : t('backup.s3EndpointHint');
+
+  const barError =
+    actionError ?? (showProblems && check.problems.length > 0 ? t('backup.errorsInForm') : null);
 
   return (
     <Card className="p-6">
@@ -309,52 +451,93 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          start('save');
+          if (!busy && agent?.configured !== false) start('saveTest');
         }}
         noValidate
       >
-        <SelectField
-          id="sicherung-typ"
-          label={t('backup.targetTypeLabel')}
-          value={form.type}
-          onChange={(value) => set('type', value === 'storagebox' ? 'storagebox' : 's3')}
-        >
-          <option value="s3">{t('backup.targetTypeS3')}</option>
-          <option value="storagebox">{t('backup.targetTypeStoragebox')}</option>
-        </SelectField>
+        <div className={GRID}>
+          <SelectField
+            id="sicherung-typ"
+            label={t('backup.targetTypeLabel')}
+            value={form.type}
+            onChange={(value) => set('type', value === 'storagebox' ? 'storagebox' : 's3')}
+          >
+            <option value="s3">{t('backup.targetTypeS3')}</option>
+            <option value="storagebox">{t('backup.targetTypeStoragebox')}</option>
+          </SelectField>
+          {isS3 && (
+            <SelectField
+              id="sicherung-anbieter"
+              label={t('backup.providerLabel')}
+              value={provider}
+              onChange={(value) =>
+                setForm((previous) =>
+                  applyProvider(
+                    previous,
+                    value === 'hetzner' || value === 'aws' || value === 'minio' ? value : 'other',
+                  ),
+                )
+              }
+            >
+              <option value="hetzner">{t('backup.providerHetzner')}</option>
+              <option value="aws">{t('backup.providerAws')}</option>
+              <option value="minio">{t('backup.providerMinio')}</option>
+              <option value="other">{t('backup.providerOther')}</option>
+            </SelectField>
+          )}
+        </div>
 
         {isS3 ? (
           <>
-            <InputField id="sicherung-endpunkt" label={t('backup.s3Endpoint')} helperText={t('backup.s3EndpointHint')} value={form.endpoint} onChange={(e) => set('endpoint', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-region" label={t('backup.s3Region')} value={form.region} onChange={(e) => set('region', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-bucket" label={t('backup.s3Bucket')} value={form.bucket} onChange={(e) => set('bucket', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-praefix" label={t('backup.s3Prefix')} helperText={t('backup.s3PrefixHint')} value={form.prefix} onChange={(e) => set('prefix', e.target.value)} autoComplete="off" />
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-text">{t('backup.s3PathStyle')}</p>
-                <p className="text-sm text-leise">{t('backup.s3PathStyleHint')}</p>
-              </div>
-              <Switch on={form.pathStyle} onToggle={(v) => set('pathStyle', v)} label={t('backup.s3PathStyle')} />
+            <InputField id="sicherung-endpunkt" label={t('backup.s3Endpoint')} helperText={endpointHint} value={form.endpoint} onChange={(e) => set('endpoint', e.target.value)} autoComplete="off" />
+            <div className={GRID}>
+              {provider === 'hetzner' ? (
+                <SelectField
+                  id="sicherung-region"
+                  label={t('backup.s3Location')}
+                  value={form.region}
+                  onChange={(value) => setForm((previous) => withRegion(previous, value))}
+                >
+                  <option value="fsn1">{t('backup.locationFsn1')}</option>
+                  <option value="nbg1">{t('backup.locationNbg1')}</option>
+                  <option value="hel1">{t('backup.locationHel1')}</option>
+                </SelectField>
+              ) : (
+                <InputField
+                  id="sicherung-region"
+                  label={t('backup.s3Region')}
+                  helperText={provider === 'minio' ? t('backup.s3RegionHintMinio') : provider === 'aws' ? t('backup.s3RegionHint') : undefined}
+                  value={form.region}
+                  onChange={(e) => setForm((previous) => withRegion(previous, e.target.value))}
+                  autoComplete="off"
+                />
+              )}
+              <InputField id="sicherung-bucket" label={t('backup.s3Bucket')} value={form.bucket} onChange={(e) => set('bucket', e.target.value)} autoComplete="off" />
+              <InputField id="sicherung-schluessel-id" label={t('backup.s3AccessKeyId')} placeholder={secretPlaceholder} value={form.accessKeyId} onChange={(e) => set('accessKeyId', e.target.value)} autoComplete="off" />
+              <InputField id="sicherung-geheimschluessel" label={t('backup.s3SecretAccessKey')} type="password" placeholder={secretPlaceholder} value={form.secretAccessKey} onChange={(e) => set('secretAccessKey', e.target.value)} autoComplete="new-password" />
             </div>
-            <InputField id="sicherung-schluessel-id" label={t('backup.s3AccessKeyId')} placeholder={secretPlaceholder} value={form.accessKeyId} onChange={(e) => set('accessKeyId', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-geheimschluessel" label={t('backup.s3SecretAccessKey')} type="password" placeholder={secretPlaceholder} value={form.secretAccessKey} onChange={(e) => set('secretAccessKey', e.target.value)} autoComplete="new-password" />
           </>
         ) : (
           <>
-            <InputField id="sicherung-host" label={t('backup.boxHost')} value={form.host} onChange={(e) => set('host', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-port" label={t('backup.boxPort')} inputMode="numeric" value={form.port} onChange={(e) => set('port', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-benutzer" label={t('backup.boxUsername')} value={form.username} onChange={(e) => set('username', e.target.value)} autoComplete="off" />
-            <InputField id="sicherung-pfad" label={t('backup.boxPath')} value={form.path} onChange={(e) => set('path', e.target.value)} autoComplete="off" />
-            <SelectField
-              id="sicherung-auth"
-              label={t('backup.boxAuthType')}
-              value={form.authType}
-              onChange={(value) => set('authType', value === 'password' ? 'password' : 'key')}
-            >
-              <option value="key">{t('backup.boxAuthKey')}</option>
-              <option value="password">{t('backup.boxAuthPassword')}</option>
-            </SelectField>
-            {form.authType === 'key' ? (
+            <div className={GRID}>
+              <InputField id="sicherung-host" label={t('backup.boxHost')} value={form.host} onChange={(e) => set('host', e.target.value)} autoComplete="off" />
+              <InputField id="sicherung-port" label={t('backup.boxPort')} inputMode="numeric" value={form.port} onChange={(e) => set('port', e.target.value)} autoComplete="off" />
+              <InputField id="sicherung-benutzer" label={t('backup.boxUsername')} value={form.username} onChange={(e) => set('username', e.target.value)} autoComplete="off" />
+              <InputField id="sicherung-pfad" label={t('backup.boxPath')} value={form.path} onChange={(e) => set('path', e.target.value)} autoComplete="off" />
+              <SelectField
+                id="sicherung-auth"
+                label={t('backup.boxAuthType')}
+                value={form.authType}
+                onChange={(value) => set('authType', value === 'password' ? 'password' : 'key')}
+              >
+                <option value="key">{t('backup.boxAuthKey')}</option>
+                <option value="password">{t('backup.boxAuthPassword')}</option>
+              </SelectField>
+              {form.authType === 'password' && (
+                <InputField id="sicherung-passwort" label={t('backup.boxPassword')} type="password" placeholder={secretPlaceholder} value={form.password} onChange={(e) => set('password', e.target.value)} autoComplete="new-password" />
+              )}
+            </div>
+            {form.authType === 'key' && (
               <div className="mb-4 text-left">
                 <label htmlFor="sicherung-privater-schluessel" className="mb-1 block text-sm font-medium text-text">
                   {t('backup.boxPrivateKey')}
@@ -370,8 +553,6 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
                   className="w-full rounded-lg border border-rahmen-ui bg-flaeche px-3 py-2 font-mono text-sm text-text placeholder:text-still focus:border-primaer"
                 />
               </div>
-            ) : (
-              <InputField id="sicherung-passwort" label={t('backup.boxPassword')} type="password" placeholder={secretPlaceholder} value={form.password} onChange={(e) => set('password', e.target.value)} autoComplete="new-password" />
             )}
           </>
         )}
@@ -389,23 +570,58 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
           </div>
         )}
 
-        <SelectField
-          id="sicherung-zeitplan"
-          label={t('backup.schedule')}
-          value={form.schedule}
-          onChange={(value) => set('schedule', value === 'twice_daily' ? 'twice_daily' : 'daily')}
-        >
-          <option value="daily">{t('backup.scheduleDaily')}</option>
-          <option value="twice_daily">{t('backup.scheduleTwiceDaily')}</option>
-        </SelectField>
-        <InputField id="sicherung-aufbewahrung" label={t('backup.retentionDays')} helperText={t('backup.retentionHint')} inputMode="numeric" value={form.retentionDays} onChange={(e) => set('retentionDays', e.target.value)} autoComplete="off" />
+        <div className={GRID}>
+          <SelectField
+            id="sicherung-zeitplan"
+            label={t('backup.schedule')}
+            value={form.schedule}
+            onChange={(value) => set('schedule', value === 'twice_daily' ? 'twice_daily' : 'daily')}
+          >
+            <option value="daily">{t('backup.scheduleDaily')}</option>
+            <option value="twice_daily">{t('backup.scheduleTwiceDaily')}</option>
+          </SelectField>
+        </div>
 
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p id="sicherung-objectlock-label" className="text-sm font-medium text-text">{t('backup.objectLock')}</p>
+            <p className="text-sm font-medium text-text">{t('backup.objectLockTitle')}</p>
             <p className="text-sm text-leise">{isS3 ? t('backup.objectLockHint') : t('backup.objectLockOnlyS3')}</p>
           </div>
           <Switch on={isS3 && form.objectLock} disabled={!isS3} onToggle={(v) => set('objectLock', v)} label={t('backup.objectLock')} />
+        </div>
+
+        <div className="mb-4 rounded-lg border border-rahmen">
+          <button
+            type="button"
+            aria-expanded={advancedShown}
+            aria-controls="sicherung-erweitert"
+            disabled={retentionBad || deviates}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-text"
+          >
+            <ChevronRight className={`h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none ${advancedShown ? 'rotate-90' : ''}`} aria-hidden="true" />
+            {t('backup.advancedTitle')}
+          </button>
+          {advancedShown && (
+            <div id="sicherung-erweitert" className="border-t border-rahmen px-3 pt-3">
+              <p className="mb-3 text-sm text-leise">{t('backup.advancedHint')}</p>
+              <div className={GRID}>
+                {isS3 && (
+                  <InputField id="sicherung-praefix" label={t('backup.s3Prefix')} helperText={t('backup.s3PrefixHint')} value={form.prefix} onChange={(e) => set('prefix', e.target.value)} autoComplete="off" />
+                )}
+                <InputField id="sicherung-aufbewahrung" label={t('backup.retentionDays')} helperText={t('backup.retentionHint')} inputMode="numeric" value={form.retentionDays} onChange={(e) => set('retentionDays', e.target.value)} autoComplete="off" />
+              </div>
+              {isS3 && (
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-text">{t('backup.s3PathStyle')}</p>
+                    <p className="text-sm text-leise">{t('backup.s3PathStyleHint')}</p>
+                  </div>
+                  <Switch on={form.pathStyle} onToggle={(v) => set('pathStyle', v)} label={t('backup.s3PathStyle')} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {showProblems && check.problems.length > 0 && (
@@ -415,9 +631,6 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
               {check.problems.map((p) => <li key={p}>{p}</li>)}
             </ul>
           </div>
-        )}
-        {actionError !== null && (
-          <p role="alert" className="mb-4 text-sm text-gefahr">{actionError}</p>
         )}
         {testResult !== null && (
           <NoticeBar kind={testResult.ok ? 'confirmed' : 'problem'} className="mb-4">
@@ -436,27 +649,39 @@ export function BackupSettingsCard({ totpPossible = false }: { totpPossible?: bo
             })}
           </p>
         )}
-
-        <div className="flex flex-wrap gap-3">
-          <Button type="submit" loading={busy && pending === 'save'} disabled={busy || (agent?.configured === false)}>
-            {t('backup.saveButton')}
-          </Button>
+        {configured && !dirty && (
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
             loading={busy && pending === 'test'}
-            disabled={busy || !configured}
+            disabled={busy || agent?.configured === false}
             onClick={() => start('test')}
           >
             {t('backup.testButton')}
           </Button>
-        </div>
+        )}
+
+        <StickySaveBar
+          dirty={dirty}
+          saving={busy}
+          error={barError}
+          label={t('backup.barRegion')}
+          saveLabel={t('backup.saveTestButton')}
+          onSave={() => {
+            if (!busy && agent?.configured !== false) start('saveTest');
+          }}
+          onDiscard={() => {
+            setForm(baseline);
+            setShowProblems(false);
+            setActionError(null);
+          }}
+        />
       </form>
 
       <SecondFactorEvidenceDialog
         open={evidenceState.open}
-        title={pending === 'save' ? t('backup.evidenceTitleSave') : t('backup.evidenceTitleTest')}
-        declaration={pending === 'save' ? t('backup.evidenceReasonSave') : t('backup.evidenceReasonTest')}
+        title={pending === 'saveTest' ? t('backup.evidenceTitleSave') : t('backup.evidenceTitleTest')}
+        declaration={pending === 'saveTest' ? t('backup.evidenceReasonSave') : t('backup.evidenceReasonTest')}
         totpPossible={totpPossible}
         loading={busy}
         error={evidenceState.error}

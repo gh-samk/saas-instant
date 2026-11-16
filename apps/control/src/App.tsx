@@ -30,6 +30,7 @@ import { InvoiceDetailPage } from './pages/InvoiceDetailPage';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { BroadcastPage } from './pages/BroadcastPage';
 import { BroadcastTemplatePage } from './pages/BroadcastTemplatePage';
+import { UnsavedChangesProvider } from './lib/unsaved-changes';
 import { useT } from './i18n';
 
 /** Ganzflächiger Ladezustand, solange der eigene Stand noch unbekannt ist. */
@@ -140,6 +141,8 @@ export default function App() {
       <VaultProvider>
       <ToastProvider>
         <Router>
+          {/* Fragt bei ungespeicherten Formularen vor dem Seiten- und Reiterwechsel nach. */}
+          <UnsavedChangesProvider>
           <Routes>
             <Route path="/login" element={<LoginArea />} />
             <Route path="/no-access" element={<NoAccessPage />} />
@@ -213,6 +216,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </UnsavedChangesProvider>
         </Router>
       </ToastProvider>
       </VaultProvider>

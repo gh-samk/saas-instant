@@ -95,7 +95,7 @@ describe('InvoiceDraftForm: Einheit als Auswahl', () => {
     show(draft('Stück'));
     await openMore();
     expect((screen.getByLabelText('Einheit') as HTMLSelectElement).value).toBe('C62');
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     await waitFor(() => expect(updateInvoiceDraft).toHaveBeenCalled());
     expect((updateInvoiceDraft.mock.calls[0]?.[1] as { lines: { unit: string }[] }).lines[0]?.unit).toBe('C62');
   });
@@ -106,7 +106,7 @@ describe('InvoiceDraftForm: Einheit als Auswahl', () => {
     const select = screen.getByLabelText('Einheit') as HTMLSelectElement;
     expect(select.value).toBe('Container');
     expect(within(select).getByRole('option', { name: 'Container' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     expect(await screen.findByText('Wähle eine Einheit aus der Liste.')).toBeInTheDocument();
     expect(updateInvoiceDraft).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(select);
@@ -127,7 +127,7 @@ describe('InvoiceDraftForm: Prüfmeldungen des Servers', () => {
       ]),
     );
     show();
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
 
     const summary = await screen.findByText('3 Angaben prüfen');
     const box = summary.parentElement as HTMLElement;
@@ -153,7 +153,7 @@ describe('InvoiceDraftForm: Prüfmeldungen des Servers', () => {
       validationError(['lines.0.unit must be shorter than or equal to 3 characters']),
     );
     show();
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     const unit = await screen.findByLabelText('Einheit');
     await waitFor(() => expect(document.activeElement).toBe(unit));
     expect(screen.getByText('1 Angabe prüfen')).toBeInTheDocument();
@@ -162,22 +162,24 @@ describe('InvoiceDraftForm: Prüfmeldungen des Servers', () => {
   it('zeigt bei einem unbekannten Serverfehler einen deutschen Standardtext statt des Rohtextes', async () => {
     updateInvoiceDraft.mockRejectedValue(new ApiError({ code: 'HTTP_500', message: 'Internal server error' }, 500));
     show();
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Der Entwurf konnte nicht gespeichert werden.');
     expect(document.body.textContent).not.toMatch(/Internal server error/);
   });
 });
 
-describe('InvoiceDraftForm: Hilfetext zum Festschreiben', () => {
-  it('hängt einen per Tastatur erreichbaren Hilfetext an „Festschreiben …"', () => {
+describe('InvoiceDraftForm: Hinweis zum Festschreiben', () => {
+  it('erklärt das Festschreiben im Satz über der Leiste, nicht per Hilfe-Icon in der Leiste', () => {
     show();
-    const tooltip = screen.getByRole('tooltip');
-    expect(tooltip).toHaveTextContent('Danach nicht mehr änderbar, nur noch per Storno.');
-    const trigger = document.querySelector(`[aria-describedby="${tooltip.id}"]`) as HTMLElement;
-    expect(trigger).not.toBeNull();
-    expect(trigger.tagName).toBe('BUTTON');
-    expect(trigger).toHaveAttribute('type', 'button');
-    expect(trigger).toHaveAccessibleName('Hilfe zu diesem Feld');
+    expect(screen.getByText(/lässt sich nicht mehr ändern oder löschen/)).toBeInTheDocument();
+    // Ein Icon-Knopf in der Leiste ließ sie mobil umbrechen.
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    const bar = screen.getByRole('region', { name: 'Rechnungsentwurf speichern' });
+    expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'Abbrechen',
+      'Speichern',
+      'Festschreiben …',
+    ]);
   });
 });
 
@@ -251,7 +253,7 @@ describe('InvoiceDraftForm: Leistungszeitraum nur einmal, vorbelegt aus dem Vert
       validationError(['lines.0.periodFrom must be a valid ISO 8601 date string']),
     );
     show();
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     const field = await screen.findByLabelText('Zeitraum von');
     await waitFor(() => expect(document.activeElement).toBe(field));
   });
@@ -292,10 +294,72 @@ describe('InvoiceDraftForm: Texte und Notiz eingeklappt', () => {
     );
     show();
     expect(screen.queryByLabelText('Einleitung')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     const field = await screen.findByLabelText('Einleitung');
     expect(field).toHaveAttribute('aria-invalid', 'true');
     await waitFor(() => expect(document.activeElement).toBe(field));
     expect(screen.getByRole('button', { name: /Texte und Notiz/ })).toHaveAttribute('aria-expanded', 'true');
+  });
+});
+
+describe('InvoiceDraftForm: Speicherleiste', () => {
+  beforeEach(() => {
+    updateInvoiceDraft.mockReset();
+    createInvoiceDraft.mockReset();
+  });
+
+  it('zeigt ohne Änderungen Abbrechen, Speichern und Festschreiben, aber keine Warnung', () => {
+    show();
+    expect(screen.getByRole('button', { name: 'Abbrechen' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Festschreiben …' })).toBeInTheDocument();
+    expect(screen.queryByText('Ungespeicherte Änderungen')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verwerfen' })).toBeNull();
+  });
+
+  it('zeigt nach einer Änderung Verwerfen, Speichern und Festschreiben; Verwerfen setzt zurück', () => {
+    show();
+    const date = screen.getByLabelText(/Rechnungsdatum/);
+    const before = (date as HTMLInputElement).value;
+    fireEvent.change(date, { target: { value: '2026-09-01' } });
+    expect(screen.getByText('Ungespeicherte Änderungen')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Festschreiben …' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+    expect((screen.getByLabelText(/Rechnungsdatum/) as HTMLInputElement).value).toBe(before);
+    expect(screen.queryByText('Ungespeicherte Änderungen')).toBeNull();
+  });
+
+  it('hat bei einem neuen Entwurf „Als Entwurf speichern" und kein Festschreiben', () => {
+    show(null);
+    expect(screen.getByRole('button', { name: 'Als Entwurf speichern' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Festschreiben …' })).toBeNull();
+  });
+});
+
+describe('InvoiceDraftForm: stabile Posten-IDs', () => {
+  it('behält nach „Verwerfen" dieselben Feld-IDs der Posten', () => {
+    show();
+    const idsBefore = () =>
+      [...document.querySelectorAll<HTMLElement>('[id^="posten-"]')].map((e) => e.id);
+    const before = idsBefore();
+    expect(before.length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText(/^Bezeichnung/), { target: { value: 'Geändert' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+    expect(idsBefore()).toEqual(before);
+    // Auch ein zweites Mal: Kein Zähler, der bei jedem Zurücksetzen weiterläuft.
+    fireEvent.change(screen.getByLabelText(/^Bezeichnung/), { target: { value: 'Nochmal' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+    expect(idsBefore()).toEqual(before);
+  });
+
+  it('stellt nach Verwerfen auch einen gelöschten Posten unter seinem alten Schlüssel wieder her', () => {
+    const two = draft('C62');
+    two.lines = [...two.lines, { ...two.lines[0], id: 'p2', label: 'Zweiter Posten' }];
+    show(two);
+    const before = [...document.querySelectorAll<HTMLElement>('[id^="posten-"]')].map((e) => e.id);
+    fireEvent.click(screen.getAllByRole('button', { name: /^Posten 1 entfernen/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+    const after = [...document.querySelectorAll<HTMLElement>('[id^="posten-"]')].map((e) => e.id);
+    expect(after).toEqual(before);
   });
 });

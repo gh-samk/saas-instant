@@ -6,21 +6,14 @@ export default {
   loadError: 'Die Firmendaten konnten nicht geladen werden.',
   saveFailed: 'Die Firmendaten konnten nicht gespeichert werden.',
   saved: 'Firmendaten gespeichert.',
-  save: 'Speichern',
-  discard: 'Änderungen verwerfen',
-  noChanges: 'Keine ungespeicherten Änderungen.',
+  saveRegion: 'Firmendaten speichern',
   legend: 'Mit * markierte Felder sind Pflichtangaben für Rechnungen.',
   noAdvice:
     'Keine Rechtsberatung: Die Zusammenstellung folgt den gesetzlichen Geschäftsbriefangaben. Ob sie für deinen Fall genügt, klärst du mit deiner Steuerberatung.',
 
   // Vollständigkeit
-  completeTitle: 'Alle Pflichtangaben sind hinterlegt.',
-  completeText: 'Rechnungen können festgeschrieben werden.',
-  incompleteTitle_one: '{count} Pflichtangabe fehlt oder ist ungültig',
-  incompleteTitle_other: '{count} Pflichtangaben fehlen oder sind ungültig',
   incompleteHint:
     'Rechnungen können erst festgeschrieben werden, wenn alles ausgefüllt ist. Ein Klick auf einen Eintrag springt zum Feld.',
-  incompleteJump: 'Zum Feld springen',
   savedIncomplete_one: 'Gespeichert. Für Rechnungen fehlt noch {count} Pflichtangabe.',
   savedIncomplete_other: 'Gespeichert. Für Rechnungen fehlen noch {count} Pflichtangaben.',
   savedComplete: 'Gespeichert. Alle Pflichtangaben sind vollständig.',
@@ -29,9 +22,21 @@ export default {
   issue_legalFormSuffix: 'Der Rechtsformzusatz fehlt im Namen.',
   issue_personName: 'Bitte Vor- und Nachname ausschreiben.',
   issue_iban: 'Diese IBAN ist ungültig.',
-  issue_vatId: 'Diese USt-IdNr. ist ungültig (z. B. DE123456789).',
+  issue_vatId: 'Diese USt-IdNr. ist ungültig (deutsche: DE und 9 Ziffern, z. B. DE123456789).',
+  issue_registerPrefix: 'Die Nummer beginnt mit {prefix}, z. B. {prefix} 12345.',
   taxEither: 'Mindestens eine von beiden angeben: USt-IdNr. oder Steuernummer.',
   fieldRequired: 'Diese Angabe ist nötig.',
+
+  progressComplete: 'Pflichtangaben vollständig',
+  progressOpen_one: 'Noch {count} Pflichtangabe offen',
+  progressOpen_other: 'Noch {count} Pflichtangaben offen',
+  // Kurzform für die haftende, verdichtete Anzeige (eine Zeile).
+  progressOpenShort_one: 'Noch {count} offen',
+  progressOpenShort_other: 'Noch {count} offen',
+  progressLabel: 'Fortschritt der Pflichtangaben',
+  progressJump: 'Zum ersten offenen Feld',
+  progressList: 'Alle offenen Angaben anzeigen',
+  sectionStatus: '{filled} von {total} ausgefüllt',
 
   // Rechtsform
   legalFormLegend: 'Rechtsform',
@@ -62,6 +67,7 @@ export default {
   section_generalPartner: 'Persönlich haftende Gesellschafterin (Komplementär-GmbH)',
   section_generalPartnerHint:
     'Bei einer GmbH & Co. KG gehören auch Register und Geschäftsführung der Komplementär-GmbH auf die Rechnung.',
+  section_branding: 'Logo und Farbe',
   section_bank: 'Bankverbindung',
   section_contact: 'Kontakt',
   section_contactHint: 'Freiwillig. Gedruckt wird, was hier steht.',

@@ -9,7 +9,9 @@ import {
   Button,
   useToast,
 } from '@saas-instant/ui';
-import { HelpHint, SelectField, TextArea } from './FormFields';
+import { SelectField, TextArea } from './FormFields';
+import { BAR_BUTTON, BAR_BUTTON_GHOST, StickySaveBar } from './StickySaveBar';
+import { useDirtyState, useUnsavedChanges } from '../lib/unsaved-changes';
 import { InvoiceFinalizeDialog } from './InvoiceFinalizeDialog';
 import {
   InvoicePriceSuggestion,
@@ -224,6 +226,36 @@ function targetFor(issue: ValidationIssue, lines: LinesDraft[]): FieldTarget | n
     : { key: head.key, focusId: head.focusId, expand: head.expand, rank: head.rank };
 }
 
+/** Was ein Entwurf bearbeitbar macht — Grundlage des Änderungsstands (ohne React-Schlüssel). */
+interface DraftSnapshot {
+  invoiceDate: string;
+  period: { from: string; until: string };
+  dueDate: string;
+  introduction: string;
+  paymentNote: string;
+  internalNote: string;
+  lines: Omit<LinesDraft, 'key'>[];
+}
+
+/** Aufklapper, die offen starten: alles, worin schon etwas steht. */
+function openSections(
+  lines: LinesDraft[],
+  texts: { introduction: string; paymentNote: string; internalNote: string },
+): Set<string> {
+  const open = new Set<string>();
+  for (const p of lines) {
+    if (p.periodFrom !== '' || p.periodUntil !== '') open.add(periodKey(p.key));
+  }
+  if (
+    texts.introduction.trim() !== '' ||
+    texts.paymentNote.trim() !== '' ||
+    texts.internalNote.trim() !== ''
+  ) {
+    open.add(TEXTS_KEY);
+  }
+  return open;
+}
+
 /**
  * Das Entwurfsformular einer Rechnung.
  *
@@ -232,10 +264,10 @@ function targetFor(issue: ValidationIssue, lines: LinesDraft[]): FieldTarget | n
  * waagerecht scrollende Bearbeitungsfläche, die in Etappe 2 zurückgewiesen
  * wurde. Stattdessen gestapelte Postenkarten, die untereinander umbrechen.
  *
- * DAS FESTSCHREIBEN STEHT ÜBER DER FUSSLEISTE, nicht daneben: Unterschiedliches
- * Gewicht braucht unterschiedliche Position. Der Erklärsatz dazu steht immer
- * da, nicht erst beim Überfahren — es ist genau die Sorte Information, die man
- * VOR dem ersten Mal lesen soll.
+ * SPEICHERN UND FESTSCHREIBEN STEHEN NEBENEINANDER in der festen Speicherleiste
+ * (`StickySaveBar`). Der Erklärsatz zum Festschreiben steht immer da, nicht erst
+ * beim Überfahren — es ist genau die Sorte Information, die man VOR dem ersten
+ * Mal lesen soll.
  *
  * „ENTWURF LÖSCHEN" STEHT UNTEN UND KLEIN, nicht neben „Speichern": Primäre
  * und zerstörende Handlung treffen in dieser Anwendung nirgends aufeinander.
@@ -303,16 +335,9 @@ export function InvoiceDraftForm({
   // Abschnitt, der Inhalt versteckt (eigener Posten-Zeitraum eines bestehenden
   // Entwurfs, ein Einleitungssatz), wäre eine Falle — gedruckt wird, was
   // darin steht, ob man es sieht oder nicht.
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const open = new Set<string>();
-    for (const p of lines) {
-      if (p.periodFrom !== '' || p.periodUntil !== '') open.add(periodKey(p.key));
-    }
-    if (introduction.trim() !== '' || paymentNote.trim() !== '' || internalNote.trim() !== '') {
-      open.add(TEXTS_KEY);
-    }
-    return open;
-  });
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    openSections(lines, { introduction, paymentNote, internalNote }),
+  );
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -327,6 +352,29 @@ export function InvoiceDraftForm({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // ÄNDERUNGSSTAND: Abbild der bearbeitbaren Felder gegen den zuletzt
+  // gespeicherten Stand. Die React-Schlüssel der Posten bleiben draußen — sie
+  // sind keine Eingabe.
+  const snapshot: DraftSnapshot = {
+    invoiceDate,
+    period,
+    dueDate,
+    introduction,
+    paymentNote,
+    internalNote,
+    lines: lines.map(({ key: _key, ...rest }) => rest),
+  };
+  const { dirty, baseline, isDirty, markSaved } = useDirtyState(snapshot);
+  useUnsavedChanges(isDirty);
+
+  // SCHLÜSSEL DES GESPEICHERTEN STANDS: „Verwerfen" stellt die Posten unter
+  // denselben React-Schlüsseln wieder her. Neue Schlüssel würden die Posten
+  // neu einhängen und ihre Feld-IDs (`posten-1-…` → `posten-2-…`) wechseln —
+  // Beschriftungen, Fokus und Fehlerverweise zeigten ins Leere.
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
+  const savedKeys = useRef<string[]>(lines.map((l) => l.key));
+
   // Wechselt die Rechnung (Neuanlage → gespeicherter Entwurf), zieht das
   // Formular nach: Der Server kann Werte gerechnet haben, die es nicht kennt.
   useEffect(() => {
@@ -337,7 +385,14 @@ export function InvoiceDraftForm({
       until: invoice.servicePeriodUntil,
     });
     setDueDate(invoice.dueDate);
-  }, [invoice]);
+    // Der Server kann Werte gerechnet haben: Sie gelten als gespeicherter Stand.
+    markSaved((current) => ({
+      ...current,
+      invoiceDate: invoice.invoiceDate,
+      period: { from: invoice.servicePeriodFrom, until: invoice.servicePeriodUntil },
+      dueDate: invoice.dueDate,
+    }));
+  }, [invoice, markSaved]);
 
   // Fokus erst nach dem Rendern setzen: Das Feld kann hinter „Weitere Angaben"
   // liegen, das im selben Schritt erst aufklappt.
@@ -587,6 +642,9 @@ export function InvoiceDraftForm({
         invoice === null
           ? await createInvoiceDraft(company.id, body)
           : await updateInvoiceDraft(invoice.id, body);
+      // Vor `onSaved`: Der Aufrufer navigiert dort unter Umständen sofort weiter.
+      savedKeys.current = linesRef.current.map((l) => l.key);
+      markSaved();
       onSaved(saved, invoice === null, message);
       return saved;
     } catch (f) {
@@ -628,12 +686,31 @@ export function InvoiceDraftForm({
     if (saved !== null) setPreviewOpen(true);
   }
 
+  /** „Verwerfen": zurück auf den letzten gespeicherten Stand. */
+  function discard() {
+    const b = baseline;
+    const restored = b.lines.map((p, i) => ({ ...p, key: savedKeys.current[i] ?? newKey() }));
+    setInvoiceDate(b.invoiceDate);
+    setPeriod(b.period);
+    setDueDate(b.dueDate);
+    setIntroduction(b.introduction);
+    setPaymentNote(b.paymentNote);
+    setInternalNote(b.internalNote);
+    setLines(restored);
+    setExpanded(openSections(restored, b));
+    setFieldError({});
+    setSummary([]);
+    setError(null);
+  }
+
   async function deleteIt() {
     if (invoice === null) return;
     setDeleteLoading(true);
     setDeleteError(null);
     try {
       await deleteInvoiceDraft(invoice.id);
+      // Gelöscht ist gelöscht: keine Rückfrage wegen offener Änderungen.
+      markSaved();
       onDeleted();
     } catch (f) {
       setDeleteError(
@@ -659,6 +736,27 @@ export function InvoiceDraftForm({
         })
       : undefined;
   const textsOpen = expanded.has(TEXTS_KEY);
+  const saveLabel = isNew
+    ? t('components.invoiceDraftForm.button6')
+    : t('components.invoiceDraftForm.button7');
+  /**
+   * „Festschreiben …"; erst möglich, wenn der Entwurf auf dem Server liegt.
+   * Ein Hilfe-Icon daneben gibt es nicht mehr: Der Satz über der Leiste sagt
+   * schon, was danach nicht mehr geht — und das Icon ließ die Leiste mobil
+   * umbrechen.
+   */
+  const finalizeAction = (variant: 'primary' | 'secondary') =>
+    invoice === null ? null : (
+      <Button
+        variant={variant}
+        className={BAR_BUTTON}
+        loading={loading}
+        onClick={() => void saveAndPreview()}
+        type="button"
+      >
+        {t('components.invoiceDraftForm.button4')}
+      </Button>
+    );
   const filledTexts = [
     introduction.trim() !== '' ? t('components.invoiceDraftForm.label14') : null,
     paymentNote.trim() !== '' ? t('components.invoiceDraftForm.label15') : null,
@@ -1094,41 +1192,44 @@ export function InvoiceDraftForm({
           {t('components.invoiceDraftForm.text17')}</p>
       )}
 
-      {error && (
-        <p role="alert" className="mt-4 text-sm text-gefahr">
-          {error}
-        </p>
-      )}
-
-      <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
-        <Button
-          variant="ghost"
-          onClick={onCancel}
-          disabled={loading}
-          type="button"
-        >
-          {t('components.invoiceDraftForm.button5')}</Button>
-        <Button
-          variant={invoice !== null ? 'secondary' : 'primary'}
-          loading={loading}
-          onClick={() => void save()}
-          type="button"
-        >
-          {isNew ? t('components.invoiceDraftForm.button6') : t('components.invoiceDraftForm.button7')}
-        </Button>
-        {invoice !== null && (
-          <span className="inline-flex items-center gap-2">
+      {/* DIE SPEICHERLEISTE. Ohne Änderungen bleiben die Aktionen von früher
+          stehen (Abbrechen, Speichern, Festschreiben …) — keine verschwindet.
+          Mit Änderungen kommt „Ungespeicherte Änderungen · Verwerfen ·
+          Speichern" dazu, „Festschreiben …" bleibt daneben. Bei einem NEUEN
+          Entwurf ist „Als Entwurf speichern" die Hauptaktion. */}
+      <StickySaveBar
+        dirty={dirty}
+        saving={loading}
+        error={error}
+        saveLabel={saveLabel}
+        label={t('components.invoiceDraftForm.barRegion')}
+        onSave={() => save()}
+        onDiscard={discard}
+        actions={finalizeAction('secondary')}
+        idle={
+          <>
             <Button
-              variant="primary"
-              loading={loading}
-              onClick={() => void saveAndPreview()}
+              variant="ghost"
+              className={BAR_BUTTON_GHOST}
+              onClick={onCancel}
+              disabled={loading}
               type="button"
             >
-              {t('components.invoiceDraftForm.button4')}</Button>
-            <HelpHint text={t('components.invoiceDraftForm.finalizeHint')} />
-          </span>
-        )}
-      </div>
+              {t('components.invoiceDraftForm.button5')}
+            </Button>
+            <Button
+              variant={invoice !== null ? 'secondary' : 'primary'}
+              className={BAR_BUTTON}
+              loading={loading}
+              onClick={() => void save()}
+              type="button"
+            >
+              {saveLabel}
+            </Button>
+            {finalizeAction('primary')}
+          </>
+        }
+      />
 
       {/* „Entwurf verwerfen" steht seit dem Redesign in der rechten Spalte,
           bei der internen Notiz — dort, wo der Entwurf als Vorgang endet.

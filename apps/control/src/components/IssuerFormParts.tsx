@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { IssuerProfile, LegalForm } from '@saas-instant/shared';
 import { Button, Switch } from '@saas-instant/ui';
+import { ChevronDown } from 'lucide-react';
 import { useT, type TFunction } from '../i18n';
 import { fieldId, getPathValue, type FieldSpec } from '../lib/issuer-fields';
 
@@ -63,6 +64,8 @@ interface TextFieldProps {
   onChange: (value: string) => void;
   inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric';
   maxLength?: number;
+  /** Beim Verlassen des Feldes (löst die Inline-Prüfung aus). */
+  onBlur?: () => void;
 }
 
 export function TextField({
@@ -74,6 +77,7 @@ export function TextField({
   onChange,
   inputMode,
   maxLength = 200,
+  onBlur,
 }: TextFieldProps) {
   const id = fieldId(spec.path);
   const hintId = hint ? `${id}-hinweis` : undefined;
@@ -96,6 +100,7 @@ export function TextField({
         maxLength={maxLength}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         className={INPUT_CLASS}
       />
       {hint && (
@@ -119,10 +124,12 @@ interface ListFieldProps {
   error?: string | undefined;
   values: string[];
   onChange: (values: string[]) => void;
+  /** Wenn der Fokus die Liste verlässt. */
+  onBlur?: () => void;
 }
 
 /** Liste von Namen mit „Hinzufügen" und „Entfernen" (mindestens eine Zeile bleibt sichtbar). */
-export function ListField({ spec, label, hint, error, values, onChange }: ListFieldProps) {
+export function ListField({ spec, label, hint, error, values, onChange, onBlur }: ListFieldProps) {
   const t = useT();
   const id = fieldId(spec.path);
   const hintId = hint ? `${id}-hinweis` : undefined;
@@ -143,6 +150,9 @@ export function ListField({ spec, label, hint, error, values, onChange }: ListFi
       data-field={spec.path}
       data-required={spec.required ? 'true' : 'false'}
       aria-describedby={describedBy(hintId, errorId)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onBlur?.();
+      }}
     >
       <legend className="mb-1 block text-sm font-medium text-text">
         {label}
@@ -231,12 +241,15 @@ export function IssuerField({
   profile,
   error,
   onChange,
+  onBlur,
 }: {
   spec: FieldSpec;
   form: LegalForm;
   profile: IssuerProfile;
   error?: string | undefined;
   onChange: (path: string, value: string | string[] | boolean) => void;
+  /** Das Feld wurde verlassen. */
+  onBlur?: (path: string) => void;
 }) {
   const t = useT();
   const label = fieldLabel(t, spec.path, form);
@@ -261,6 +274,7 @@ export function IssuerField({
         error={error}
         values={Array.isArray(value) ? value : []}
         onChange={(v) => onChange(spec.path, v)}
+        onBlur={() => onBlur?.(spec.path)}
       />
     );
   }
@@ -281,7 +295,22 @@ export function IssuerField({
       value={typeof value === 'string' ? value : ''}
       inputMode={inputMode}
       onChange={(v) => onChange(spec.path, v)}
+      onBlur={() => onBlur?.(spec.path)}
     />
+  );
+}
+
+/** Spaltenzahl einer Zeile ab `sm`; auf dem Handy stehen die Felder untereinander. */
+const ROW_COLUMNS: Record<number, string> = {
+  1: '',
+  2: 'sm:grid-cols-2',
+  3: 'sm:grid-cols-[repeat(3,minmax(0,1fr))]',
+};
+
+/** Eine Zeile zusammengehöriger Kurzfelder. */
+export function FieldRow({ children, count }: { children: ReactNode; count: number }) {
+  return (
+    <div className={`grid gap-x-4 ${ROW_COLUMNS[count] ?? ROW_COLUMNS[3]}`}>{children}</div>
   );
 }
 
@@ -290,20 +319,54 @@ export function FormSection({
   hint,
   children,
   id,
+  status,
+  open = true,
+  onToggle,
 }: {
   title: string;
   hint?: string;
   children: ReactNode;
   id: string;
+  /** Statuszeile neben dem Titel („3 von 5 ausgefüllt"), nur bei einklappbaren Abschnitten. */
+  status?: string;
+  /** Nur mit `onToggle`: Abschnitt ist aufgeklappt. */
+  open?: boolean;
+  /** Gesetzt: Abschnitt lässt sich ein- und ausklappen (optionale Angaben). */
+  onToggle?: (open: boolean) => void;
 }) {
   const headingId = `firma-abschnitt-${id}`;
+  const bodyId = useId();
+  const collapsible = onToggle !== undefined;
   return (
     <section aria-labelledby={headingId} className="mb-4 rounded-lg border border-rahmen bg-flaeche p-5">
       <h3 id={headingId} className="text-base font-semibold text-text">
-        {title}
+        {collapsible ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={open ? bodyId : undefined}
+            onClick={() => onToggle(!open)}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <span>{title}</span>
+            <span className="flex shrink-0 items-center gap-2 text-sm font-normal text-leise">
+              {status && <span data-testid={`section-status-${id}`}>{status}</span>}
+              <ChevronDown
+                className={`h-4 w-4 transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+                aria-hidden="true"
+              />
+            </span>
+          </button>
+        ) : (
+          title
+        )}
       </h3>
-      {hint && <p className="mb-3 mt-1 text-sm text-leise">{hint}</p>}
-      <div className={hint ? '' : 'mt-3'}>{children}</div>
+      {(!collapsible || open) && (
+        <div id={bodyId}>
+          {hint && <p className="mb-3 mt-1 text-sm text-leise">{hint}</p>}
+          <div className={hint ? '' : 'mt-3'}>{children}</div>
+        </div>
+      )}
     </section>
   );
 }

@@ -432,7 +432,7 @@ describe('Festschreiben — unumkehrbar, deshalb Wort UND zweiter Faktor', () =>
     open(DRAFT_ID);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Änderungen speichern' }),
+      await screen.findByRole('button', { name: 'Speichern' }),
     );
     expect(await screen.findByText('Entwurf gespeichert.')).toBeInTheDocument();
   });
@@ -526,7 +526,7 @@ describe('Die festgeschriebene Rechnung — kein Weg, der ändert oder löscht',
       /bearbeiten/i,
       /^Löschen$/,
       /Entwurf löschen/,
-      /Änderungen speichern/,
+      /^Speichern$/,
       /Festschreiben/,
     ]) {
       expect(screen.queryByRole('button', { name: forbidden })).toBeNull();
@@ -1387,7 +1387,7 @@ describe('Rechnung bearbeiten — die zweispaltige Maske', () => {
     fireEvent.change(screen.getByLabelText('Notiz'), {
       target: { value: 'Zahlt spät — im Oktober nachfassen.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Änderungen speichern/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Speichern$/ }));
 
     await waitFor(() => {
       const patch = called.mock.calls.find(
@@ -1420,7 +1420,7 @@ describe('Rechnung bearbeiten — die zweispaltige Maske', () => {
     fireEvent.change(await screen.findByLabelText('Einleitung'), {
       target: { value: '' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Änderungen speichern/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Speichern$/ }));
 
     await waitFor(() => {
       const patch = called.mock.calls.find(
@@ -1474,7 +1474,7 @@ describe('Rechnung bearbeiten — die zweispaltige Maske', () => {
     fireEvent.change(await screen.findByLabelText('Zeitraum von'), {
       target: { value: '2026-08-01' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Änderungen speichern/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Speichern$/ }));
 
     expect(
       await screen.findByText('Bitte beide Daten angeben oder beide leer lassen.'),

@@ -6,7 +6,7 @@ import * as matchers from 'vitest-axe/matchers';
 import { ToastProvider } from '@saas-instant/ui';
 import { ApiError } from '../lib/api-client';
 import type { BackupSettings } from '../lib/api';
-import { BackupSettingsCard, validate, formFrom } from './BackupSettingsCard';
+import { BackupSettingsCard, validate, formFrom, detectProvider } from './BackupSettingsCard';
 import { t } from '../i18n';
 
 expect.extend(matchers);
@@ -35,6 +35,14 @@ const CONFIGURED: BackupSettings = {
     prefix: 'si/meins', pathStyle: true, authType: null, hostKeyFingerprint: null,
   },
   agent: { configured: true, reachable: true, version: '1.2.0', targetConfigured: true, objectLock: true, ageRecipient: 'age1abc' },
+};
+
+const HETZNER: BackupSettings = {
+  ...CONFIGURED,
+  target: {
+    ...CONFIGURED.target!, endpoint: 'https://nbg1.your-objectstorage.com', region: 'nbg1',
+    prefix: null, pathStyle: false, retentionDays: 30,
+  },
 };
 
 function renderCard() {
@@ -76,10 +84,12 @@ describe('BackupSettingsCard', () => {
   it('speichert mit gespeichertem Ziel ohne Geheimfelder: leer = unverändert', async () => {
     fetchBackupSettings.mockResolvedValue(CONFIGURED);
     saveBackupSettings.mockResolvedValue(CONFIGURED);
+    testBackupTarget.mockResolvedValue({ ok: true, message: 'ok', testedAt: 'x' });
     renderCard();
     await screen.findByLabelText('Bucket');
     expect(screen.getByText(/Leer lassen = unverändert/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    fireEvent.change(screen.getByLabelText('Bucket'), { target: { value: 'neu' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
     await waitFor(() => expect(saveBackupSettings).toHaveBeenCalledTimes(1));
     const sent = saveBackupSettings.mock.calls[0]?.[0] as { s3: Record<string, unknown> };
     expect(sent.s3).not.toHaveProperty('accessKeyId');
@@ -109,10 +119,12 @@ describe('BackupSettingsCard', () => {
     };
     fetchBackupSettings.mockResolvedValue(BOX);
     saveBackupSettings.mockResolvedValue(BOX);
+    testBackupTarget.mockResolvedValue({ ok: true, message: 'ok', testedAt: 'x' });
     renderCard();
     expect(await screen.findByTestId('host-key-fingerprint')).toHaveTextContent('SHA256:abc123');
     expect(screen.getByLabelText('Authentifizierung')).toHaveValue('password');
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    fireEvent.change(screen.getByLabelText('Pfad'), { target: { value: '/c' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
     await waitFor(() => expect(saveBackupSettings).toHaveBeenCalledTimes(1));
     const sent = saveBackupSettings.mock.calls[0]?.[0] as { storagebox: Record<string, unknown> };
     expect(sent.storagebox).not.toHaveProperty('password');
@@ -131,16 +143,18 @@ describe('BackupSettingsCard', () => {
 
   it('meldet fehlende Pflichtfelder und ruft den Server nicht', async () => {
     renderCard();
-    fireEvent.click(await screen.findByRole('button', { name: 'Speichern' }));
+    fireEvent.change(await screen.findByLabelText('Bucket'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
     expect(await screen.findByText('Die Region fehlt.')).toBeInTheDocument();
     expect(saveBackupSettings).not.toHaveBeenCalled();
   });
 
   it('speichert und zeigt den Schlüssel einmalig; Schließen erst nach Bestätigung', async () => {
     saveBackupSettings.mockResolvedValue({ ...CONFIGURED, ageIdentity: 'AGE-SECRET-KEY-1ABC' });
+    testBackupTarget.mockResolvedValue({ ok: true, message: 'ok', testedAt: 'x' });
     renderCard();
     await fillS3();
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
     await screen.findByText('Entschlüsselungsschlüssel – wird nur jetzt angezeigt');
     expect(screen.getByDisplayValue('AGE-SECRET-KEY-1ABC')).toBeInTheDocument();
     expect(screen.getByText(/ohne diesen Schlüssel ist keine Wiederherstellung möglich/i)).toBeInTheDocument();
@@ -160,13 +174,15 @@ describe('BackupSettingsCard', () => {
     saveBackupSettings
       .mockRejectedValueOnce(new ApiError({ code: 'login_failed', message: 'x' }, 401))
       .mockResolvedValueOnce(CONFIGURED);
+    testBackupTarget.mockResolvedValue({ ok: true, message: 'ok', testedAt: 'x' });
     renderCard();
     await fillS3();
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
     fireEvent.change(await screen.findByLabelText('Aktuelles Passwort'), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Weiter' }));
     await waitFor(() => expect(saveBackupSettings).toHaveBeenCalledTimes(2));
     expect(saveBackupSettings.mock.calls[1]?.[1]).toEqual({ currentPassword: 'pw' });
+    await waitFor(() => expect(testBackupTarget).toHaveBeenCalledWith({ currentPassword: 'pw' }));
   });
 
   it('zeigt einen verständlichen Fehler, wenn der Agent nicht erreichbar ist', async () => {
@@ -182,8 +198,106 @@ describe('BackupSettingsCard', () => {
     fetchBackupSettings.mockResolvedValue(CONFIGURED);
     testBackupTarget.mockResolvedValue({ ok: false, message: 'Zugriff verweigert', testedAt: '2026-11-02T10:00:00.000Z' });
     renderCard();
-    fireEvent.click(await screen.findByRole('button', { name: 'Verbindung testen' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Verbindung erneut testen' }));
     expect(await screen.findByText(/Verbindung fehlgeschlagen: Zugriff verweigert/)).toBeInTheDocument();
+  });
+
+  it('Anbieter-Vorlage Hetzner füllt Endpunkt, Region und Path-Style und folgt dem Standort', async () => {
+    renderCard();
+    fireEvent.change(await screen.findByLabelText('Anbieter'), { target: { value: 'hetzner' } });
+    expect(screen.getByLabelText('Endpunkt')).toHaveValue('https://fsn1.your-objectstorage.com');
+    expect(screen.getByLabelText('Standort')).toHaveValue('fsn1');
+    fireEvent.change(screen.getByLabelText('Standort'), { target: { value: 'hel1' } });
+    expect(screen.getByLabelText('Endpunkt')).toHaveValue('https://hel1.your-objectstorage.com');
+  });
+
+  it('Vorlagen AWS und MinIO setzen Endpunkt, Region und Path-Style', async () => {
+    renderCard();
+    fireEvent.change(await screen.findByLabelText('Anbieter'), { target: { value: 'aws' } });
+    expect(screen.getByLabelText('Region')).toHaveValue('eu-central-1');
+    expect(screen.getByLabelText('Endpunkt')).toHaveValue('https://s3.eu-central-1.amazonaws.com');
+    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu-west-1' } });
+    expect(screen.getByLabelText('Endpunkt')).toHaveValue('https://s3.eu-west-1.amazonaws.com');
+    fireEvent.change(screen.getByLabelText('Anbieter'), { target: { value: 'minio' } });
+    expect(screen.getByLabelText('Endpunkt')).toHaveValue('');
+    expect(screen.getByLabelText('Region')).toHaveValue('eu-west-1');
+    // Path-Style ist an, also weicht nichts ab; Erweitert bleibt zu, bis man es öffnet.
+    fireEvent.click(screen.getByRole('button', { name: 'Erweitert' }));
+    expect(screen.getByRole('switch', { name: 'Path-Style-Adressierung' })).toBeChecked();
+  });
+
+  it('erkennt die Vorlage beim Laden aus den Werten', async () => {
+    expect(detectProvider('https://nbg1.your-objectstorage.com', 'nbg1', false)).toBe('hetzner');
+    expect(detectProvider('https://s3.eu-west-1.amazonaws.com', 'eu-west-1', false)).toBe('aws');
+    expect(detectProvider('https://m.example.com', 'us-east-1', true)).toBe('minio');
+    expect(detectProvider('https://x.example.com', 'eu', false)).toBe('other');
+    fetchBackupSettings.mockResolvedValue(HETZNER);
+    renderCard();
+    expect(await screen.findByLabelText('Anbieter')).toHaveValue('hetzner');
+    expect(screen.getByLabelText('Standort')).toHaveValue('nbg1');
+  });
+
+  it('klappt Erweitert zu, wenn alles der Vorgabe entspricht, und auf, wenn ein Wert abweicht', async () => {
+    fetchBackupSettings.mockResolvedValue(HETZNER);
+    const first = renderCard();
+    const toggle = await screen.findByRole('button', { name: 'Erweitert' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Präfix')).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByLabelText('Präfix')).toBeInTheDocument();
+    expect(screen.getByLabelText('Aufbewahrung in Tagen')).toBeInTheDocument();
+    first.unmount();
+    fetchBackupSettings.mockResolvedValue(CONFIGURED);
+    renderCard();
+    expect(await screen.findByLabelText('Präfix')).toHaveValue('si/meins');
+    expect(screen.getByRole('button', { name: 'Erweitert' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('klappt Erweitert bei einem Fehler darin auf', async () => {
+    fetchBackupSettings.mockResolvedValue(HETZNER);
+    renderCard();
+    fireEvent.click(await screen.findByRole('button', { name: 'Erweitert' }));
+    fireEvent.change(screen.getByLabelText('Aufbewahrung in Tagen'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
+    expect(await screen.findByText('Die Aufbewahrung muss zwischen 1 und 3650 Tagen liegen.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Erweitert' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('speichert erst, testet dann, und zeigt das Ergebnis', async () => {
+    const order: string[] = [];
+    saveBackupSettings.mockImplementation(async () => { order.push('save'); return CONFIGURED; });
+    testBackupTarget.mockImplementation(async () => { order.push('test'); return { ok: true, message: 'läuft', testedAt: 'x' }; });
+    renderCard();
+    await fillS3();
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
+    expect(await screen.findByText(/Verbindung erfolgreich: läuft/)).toBeInTheDocument();
+    expect(order).toEqual(['save', 'test']);
+  });
+
+  it('fragt den Nachweis erst beim Test ab und wiederholt dann nur den Test', async () => {
+    saveBackupSettings.mockResolvedValue(CONFIGURED);
+    testBackupTarget
+      .mockRejectedValueOnce(new ApiError({ code: 'login_failed', message: 'x' }, 401))
+      .mockResolvedValueOnce({ ok: true, message: 'ok', testedAt: 'x' });
+    renderCard();
+    await fillS3();
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern und testen' }));
+    fireEvent.change(await screen.findByLabelText('Aktuelles Passwort'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }));
+    await waitFor(() => expect(testBackupTarget).toHaveBeenCalledTimes(2));
+    expect(saveBackupSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('zeigt die Speicherleiste nur bei Änderungen und Verwerfen setzt zurück', async () => {
+    fetchBackupSettings.mockResolvedValue(HETZNER);
+    renderCard();
+    await screen.findByLabelText('Bucket');
+    expect(screen.queryByRole('button', { name: 'Speichern und testen' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Bucket'), { target: { value: 'anders' } });
+    expect(screen.getByText('Ungespeicherte Änderungen')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+    expect(screen.getByLabelText('Bucket')).toHaveValue('sicherung');
+    expect(screen.queryByRole('button', { name: 'Speichern und testen' })).not.toBeInTheDocument();
   });
 
   it('validate: Storage Box braucht den passenden Zugang', () => {
