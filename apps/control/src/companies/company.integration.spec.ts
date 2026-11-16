@@ -214,6 +214,41 @@ describe('Liste', () => {
     expect(onlyPaying.total).toBe(1);
   });
 
+  it('findet nach einer Änderung sofort (Cache wird ungültig) und sortiert nach Name', async () => {
+    const identifier = newPrefix('cache');
+    const b = await service.create({ name: `${identifier} Bravo`, city: 'Fulda' }, actor, Source);
+    const a = await service.create({ name: `${identifier} Alpha`, city: 'Fulda' }, actor, Source);
+
+    const before = await service.list({ search: identifier });
+    expect(before.companies.map((o) => o.id)).toEqual([a.id, b.id]);
+
+    expect((await service.list({ search: 'Kassel' })).companies.map((o) => o.id)).not.toContain(b.id);
+    await service.update(b.id, { city: 'Kassel' }, actor, Source);
+    const after = await service.list({ search: 'kassel' });
+    expect(after.companies.map((o) => o.id)).toContain(b.id);
+
+    // Seitenweise nach der Suche: Gesamtzahl bleibt, die Seite ist begrenzt.
+    const page = await service.list({ search: identifier, perPage: 1, page: 2 });
+    expect(page.total).toBe(2);
+    expect(page.companies.map((o) => o.id)).toEqual([b.id]);
+  });
+
+  it('legt Name, Ort und Kontakt verschlüsselt ab (Rohabfrage zeigt das Präfix)', async () => {
+    const identifier = newPrefix('roh');
+    const created = await service.create(
+      { name: `${identifier} Geheim`, city: 'Weimar', contactEmail: `x.${identifier}@example.com` },
+      actor,
+      Source,
+    );
+    const rows = await prisma.$queryRaw<{ name: string; city: string; contactEmail: string; idx: string | null }[]>`
+      SELECT "name", "city", "contactEmail", "contactEmailIdx" AS idx FROM "Company" WHERE "id" = ${created.id}`;
+    expect(rows[0].name.startsWith('enc:v1:')).toBe(true);
+    expect(rows[0].city.startsWith('enc:v1:')).toBe(true);
+    expect(rows[0].contactEmail.startsWith('enc:v1:')).toBe(true);
+    expect(rows[0].idx).toMatch(/^[0-9a-f]{64}$/);
+    expect(rows[0].name).not.toContain('Geheim');
+  });
+
   it('filtert auf MEHRERE Status zugleich — der Chip „Pilot" ist zwei Werte', async () => {
     // `pilot_approved` und `pilot_running` sind derselbe Lebensabschnitt.
     // Wer die Liste durchsieht, sucht „die Piloten" und nicht die eine oder
@@ -688,8 +723,19 @@ describe('Organisation vollständig löschen', () => {
     // Das AuditLog ist append-only (GoBD-Trigger): `deleteMany` ist dort
     // verboten, nur der Testpfad darf es per TRUNCATE leeren.
     await truncateAuditLog(prisma);
+    // E-Mail ist verschlüsselt: im Speicher auswählen, dann per id löschen.
+    const orphans = await prisma.consent.findMany({
+      where: { companyId: null },
+      select: { id: true, email: true },
+    });
     await prisma.consent.deleteMany({
-      where: { companyId: null, email: { contains: '@loeschprobe.test' } },
+      where: {
+        id: {
+          in: orphans
+            .filter((c) => c.email.includes('@loeschprobe.test'))
+            .map((c) => c.id),
+        },
+      },
     });
   });
 

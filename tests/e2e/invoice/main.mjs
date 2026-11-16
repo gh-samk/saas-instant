@@ -434,14 +434,17 @@ try {
       assert(att.xml, 'eingebettetes CII-XML nicht im PDF gefunden');
       assert(sha256(Buffer.from(att.xml, 'utf8')) === sha256(xml.body) || att.xml.trim() === xml.body.toString().trim(),
         'eingebettetes XML ist nicht identisch mit GET /xml');
+      // Die Inhaltsspalten sind feldverschluesselt (Chiffretext in der DB); ein SQL-Hash darueber waere
+      // der Hash des Chiffretexts. Verglichen wird daher mit den bei der Festschreibung gespeicherten
+      // Klartext-Hashes (pdfSha256/xmlSha256); die Integritaetspruefung der API deckt den Rest ab.
       const row = await db(
-        `SELECT encode(sha256("pdfContent"),'hex'), "pdfSha256", "xmlSha256", encode(sha256("xmlContent"::bytea),'hex') FROM "Invoice" WHERE id='${inv[key].id}'`,
+        `SELECT "pdfSha256", "xmlSha256", length("pdfContent") > 0, length("xmlContent") > 0 FROM "Invoice" WHERE id='${inv[key].id}'`,
         { allowFail: true },
       );
       assert(row.code === 0, `SQL-Hash: ${row.err.slice(0, 200)}`);
-      const [calc, storedPdf, storedXml] = row.out.split('|');
-      assert(sha256(pdf.body) === calc, 'SHA-256 des abgerufenen PDF != Hash der DB-Bytes');
-      assert(storedPdf === calc, `gespeicherter pdfSha256 (${storedPdf}) != berechneter (${calc})`);
+      const [storedPdf, storedXml, hasPdf, hasXml] = row.out.split('|');
+      assert(hasPdf === 't' && hasXml === 't', 'pdfContent/xmlContent in der DB leer');
+      assert(storedPdf === sha256(pdf.body), `gespeicherter pdfSha256 (${storedPdf}) != SHA-256 des abgerufenen PDF`);
       assert(storedXml === sha256(xml.body), 'xmlSha256 in der DB != SHA-256 des abgerufenen XML');
       note(`${label}: PDF ${pdf.body.length} B sha256 ${sha256(pdf.body).slice(0, 16)}…, XML ${xml.body.length} B, XRechnung ${xr.body.length} B`);
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E2E-Läufe: ./tests/e2e/run.sh <backup|invoice|install|smoke|all>
+# E2E-Läufe: ./tests/e2e/run.sh <backup|invoice|install|vault|sso|smoke|all>
 # Räumt am Ende IMMER auf (Docker-Ressourcen mit Label e2e=true, Control-Prozesse, e2e_*-Datenbanken).
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,8 +8,8 @@ export E2E_OUT="${E2E_OUT:-${TMPDIR:-/tmp}/saas-instant-e2e}"
 mkdir -p "$E2E_OUT"
 
 case "$SUITE" in
-  backup|invoice|install|smoke|all) ;;
-  *) echo "Aufruf: $0 <backup|invoice|install|smoke|all>" >&2; exit 2 ;;
+  backup|invoice|install|vault|sso|smoke|all) ;;
+  *) echo "Aufruf: $0 <backup|invoice|install|vault|sso|smoke|all>" >&2; exit 2 ;;
 esac
 
 cleanup() {
@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-if [ "$SUITE" = all ]; then LIST="smoke backup invoice install"; else LIST="$SUITE"; fi
+if [ "$SUITE" = all ]; then LIST="smoke backup invoice vault sso install"; else LIST="$SUITE"; fi
 RC=0
 for S in $LIST; do
   F="$HERE/suites/$S.mjs"

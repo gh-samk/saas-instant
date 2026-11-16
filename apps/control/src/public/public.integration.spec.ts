@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { companyContactEmailIndex, consentEmailIndex, mailRecipientIndex } from '../crypto/field-crypto';
 import { today } from '@saas-instant/shared';
 import { dayReadable } from '../common/calendar';
 import type { ConfigService } from '@nestjs/config';
@@ -101,7 +102,7 @@ function newAddress(): string {
 
 async function companyTo(email: string) {
   return prisma.company.findMany({
-    where: { contactEmail: { equals: email, mode: 'insensitive' } },
+    where: { contactEmailIdx: companyContactEmailIndex(email) },
   });
 }
 
@@ -213,12 +214,12 @@ describe('Honeypot', () => {
     expect(double.demoAccesses).toEqual([]);
     expect(double.notifications).toEqual([]);
 
-    const discarded = await prisma.auditLog.findMany({
-      where: {
-        action: AUDIT_ACTION.publicInquiryDiscarded,
-        ip: SOURCE.ip,
-      },
-    });
+    // `ip` ist verschlüsselt: im Speicher filtern.
+    const discarded = (
+      await prisma.auditLog.findMany({
+        where: { action: AUDIT_ACTION.publicInquiryDiscarded },
+      })
+    ).filter((entry) => entry.ip === SOURCE.ip);
     expect(discarded.length).toBeGreaterThanOrEqual(1);
     await truncateAuditLog(prisma);
   });
@@ -431,7 +432,7 @@ describe('[W2] Kontingent fuer die Eingangsbestaetigung der Pilotanfrage', () =>
     );
 
     const evidence = await prisma.mailDelivery.findMany({
-      where: { recipientAddress: email },
+      where: { recipientIdx: mailRecipientIndex(email) },
     });
     expect(evidence).toHaveLength(1);
     expect(evidence[0].subject).toBe(PILOT_SUBJECT);
@@ -454,7 +455,7 @@ describe('[W2] Kontingent fuer die Eingangsbestaetigung der Pilotanfrage', () =>
     // Ohne Versand kein Nachweis — sonst verbrauchte ein Fehlschlag das
     // Kontingent, und der zweite Anlauf liefe ins Leere.
     expect(
-      await prisma.mailDelivery.findMany({ where: { recipientAddress: email } }),
+      await prisma.mailDelivery.findMany({ where: { recipientIdx: mailRecipientIndex(email) } }),
     ).toHaveLength(0);
   });
 });
@@ -595,7 +596,7 @@ describe('[W2] Kontingent fuer die Demo-Zugangsmail', () => {
     await service.inquiry({ inquiryKind: 'demo', email }, SOURCE);
 
     const send = await prisma.mailDelivery.findMany({
-      where: { recipientAddress: email },
+      where: { recipientIdx: mailRecipientIndex(email) },
     });
     expect(send).toHaveLength(1);
     expect(send[0].deliveryStatus).toBe('sent');
@@ -674,7 +675,7 @@ describe('Newsletter-Einwilligung im Anfrageformular', () => {
     const email = newAddress();
     await service.inquiry(inquiry(email), SOURCE);
 
-    expect(await prisma.consent.findUnique({ where: { email } })).toBeNull();
+    expect(await prisma.consent.findUnique({ where: { emailIdx: consentEmailIndex(email) } })).toBeNull();
     expect(double.confirmations).toHaveLength(0);
   });
 
@@ -691,7 +692,7 @@ describe('Newsletter-Einwilligung im Anfrageformular', () => {
       SOURCE,
     );
 
-    expect(await prisma.consent.findUnique({ where: { email } })).toBeNull();
+    expect(await prisma.consent.findUnique({ where: { emailIdx: consentEmailIndex(email) } })).toBeNull();
     expect(double.confirmations).toHaveLength(0);
   });
 
@@ -706,7 +707,7 @@ describe('Newsletter-Einwilligung im Anfrageformular', () => {
     );
 
     const row = await prisma.consent.findUniqueOrThrow({
-      where: { email },
+      where: { emailIdx: consentEmailIndex(email) },
     });
     expect(row.status).toBe('unconfirmed');
     expect(row.confirmedAt).toBeNull();
@@ -723,7 +724,7 @@ describe('Newsletter-Einwilligung im Anfrageformular', () => {
     );
 
     const row = await prisma.consent.findUniqueOrThrow({
-      where: { email },
+      where: { emailIdx: consentEmailIndex(email) },
     });
     expect(row.formText).toBe(WORDING);
     expect(row.origin).toBe('webseite-anfrageformular');
@@ -740,7 +741,7 @@ describe('Newsletter-Einwilligung im Anfrageformular', () => {
     );
 
     const row = await prisma.consent.findUniqueOrThrow({
-      where: { email },
+      where: { emailIdx: consentEmailIndex(email) },
     });
     expect(row.companyId).not.toBeNull();
   });
@@ -760,7 +761,7 @@ describe('Newsletter-Einwilligung im Anfrageformular', () => {
     ).resolves.toBeDefined();
 
     const company = await prisma.company.findFirst({
-      where: { contactEmail: email },
+      where: { contactEmailIdx: companyContactEmailIndex(email) },
     });
     expect(company).not.toBeNull();
   });

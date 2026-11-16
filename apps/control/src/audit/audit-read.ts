@@ -41,6 +41,13 @@ export const SECURITY_ACTIONS: readonly string[] = [
   'login.recovery_code.success',
   'login.recovery_code.failure',
   'second_factor.failure',
+  // Anmeldung über das Portal.
+  'sso.login.success',
+  'sso.login.failure',
+  'sso.step_up.success',
+  'sso.step_up.failure',
+  'sso.logout',
+  'sso.front_channel_logout',
   // Einrichtung und Entzug von Faktoren.
   'login_code.requested',
   'login_code.not_sent',
@@ -63,6 +70,14 @@ export const SECURITY_ACTIONS: readonly string[] = [
   'device.renewed',
   'device.revoked',
   'device.all_revoked',
+  // Tresor: Entsperren, Einrichten, Umpacken der Schlüssel.
+  'vault.initialized',
+  'vault.unlocked',
+  'vault.unlock.failure',
+  'vault.locked',
+  'vault.passphrase.added',
+  'vault.passphrase.changed',
+  'vault.recovery.regenerated',
   // Sperren.
   'account.locked',
   'account.unlocked',
@@ -111,6 +126,12 @@ export const SECURITY_TEXTS: Record<string, string> = {
   'login.recovery_code.failure':
     'Wiederherstellungscode falsch',
   'second_factor.failure': 'Nachweis für eine geschützte Handlung falsch',
+  'sso.login.success': 'Anmeldung über das Portal',
+  'sso.login.failure': 'Fehlgeschlagene Anmeldung über das Portal',
+  'sso.step_up.success': 'Bestätigung über das Portal (Step-up)',
+  'sso.step_up.failure': 'Bestätigung über das Portal fehlgeschlagen',
+  'sso.logout': 'Abmeldung vom Portal',
+  'sso.front_channel_logout': 'Sitzungen durch Portal-Abmeldung beendet',
   'login_code.requested': 'Code per E-Mail angefordert',
   'login_code.not_sent': 'Code per E-Mail konnte nicht zugestellt werden',
   'login_code.address_change_requested':
@@ -146,6 +167,14 @@ export const SECURITY_TEXTS: Record<string, string> = {
   'company.payment_details.read': 'Zahlungsdaten angesehen',
   'company.payment_details.updated': 'Zahlungsdaten geändert',
   'company.contact_data.deleted': 'Kontaktdaten gelöscht',
+  'vault.initialized': 'Datenverschlüsselung eingerichtet',
+  'vault.unlocked': 'Datenverschlüsselung entsperrt',
+  'vault.unlock.failure': 'Entsperren der Datenverschlüsselung fehlgeschlagen',
+  'vault.locked': 'Datenverschlüsselung gesperrt',
+  'vault.passphrase.added': 'Weitere Passphrase hinzugefügt',
+  'vault.passphrase.changed': 'Passphrase geändert',
+  'vault.recovery.regenerated': 'Wiederherstellungsschlüssel neu erzeugt',
+  'vault.encrypt_existing': 'Bestehende Daten verschlüsselt',
 };
 
 /**
@@ -162,6 +191,8 @@ export const SUSPICIOUS_ACTIONS: readonly string[] = [
   'login.passkey.failure',
   'login.recovery_code.failure',
   'second_factor.failure',
+  'sso.login.failure',
+  'sso.step_up.failure',
   'password.change.failure',
   'totp.setup.failure',
   'factor.removal_rejected',

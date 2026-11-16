@@ -21,6 +21,8 @@ import { GobdExportController } from './gobd-export.controller';
 import { GobdExportService } from './gobd-export.service';
 import { InvoiceHistoryService } from './invoice-history.service';
 import { IntegrityService } from './integrity.service';
+import { InvoiceArchiveService } from './invoice-archive.service';
+import { InternalInvoiceArchiveController } from './internal-invoice-archive.controller';
 
 /**
  * Rechnungen (Etappe 4).
@@ -45,6 +47,8 @@ import { IntegrityService } from './integrity.service';
     InvoicePaymentController,
     // GoBD-Pruefer-Export: Session + zweiter Faktor.
     GobdExportController,
+    // Entschlüsseltes Archiv für den Sicherungs-Agent (x-backup-key).
+    InternalInvoiceArchiveController,
   ],
   providers: [
     PricingConfigService,
@@ -58,6 +62,7 @@ import { IntegrityService } from './integrity.service';
     IntegrityService,
     InvoiceHistoryService,
     GobdExportService,
+    InvoiceArchiveService,
     {
       provide: INVOICE_RENDERER,
       inject: [ConfigService],

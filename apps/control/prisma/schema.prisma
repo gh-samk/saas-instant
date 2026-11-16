@@ -52,6 +52,14 @@ enum UserRole {
   staff
 }
 
+/// Zugriffsrolle im Modus `portal` (SSO). Unabhängig von `UserRole`, die nur
+/// festhält, welches Konto am Anfang stand. Altbestand und der Modus `single`
+/// kennen nur `admin`; `staff` kommt ausschließlich aus dem Portal-Token.
+enum AccessRole {
+  admin
+  staff
+}
+
 /// Zweck eines Notfall-Links. Ein Link fuer den einen Zweck taugt nie fuer den
 /// anderen — deshalb ein Feld und nicht zwei Tabellen mit gleicher Struktur.
 enum EmergencyKind {
@@ -256,6 +264,21 @@ model User {
   lockedUntil           DateTime?
   createdAt             DateTime  @default(now())
 
+  /// SSO (Modus `portal`): stabile Konto-ID des Portals (`sub`), eindeutig.
+  /// NULL = lokales Konto ohne Portal-Verknüpfung.
+  ssoSubject            String?   @unique
+  /// Aussteller (`iss`), bei dem `ssoSubject` gilt. Ein anderer Aussteller
+  /// trifft dieses Konto nie.
+  ssoIssuer             String?
+  /// Rolle für die Rechteprüfung (admin/staff). Im Modus `portal` wird sie bei
+  /// jeder Anmeldung aus `roles[client_id]` des ID-Tokens übernommen; Altbestand
+  /// und der Modus `single` bleiben `admin`.
+  accessRole            AccessRole @default(admin)
+  /// Notzugang: nur diese Konten dürfen sich im Modus `portal` lokal anmelden.
+  /// Gesetzt von den Notfallkommandos (`bin/saas-instant emergency`).
+  emergency             Boolean   @default(false)
+
+  ssoSessions          SsoSession[]
   passkeys             PasskeyCredential[]
   recoveryCodes        RecoveryCode[]
   emailLoginCodes      EmailLoginCode[]
@@ -385,6 +408,10 @@ model Company {
   // genau eine Person je Rolle, kein Verwaltungsaufwand für Etappe 2).
   contactName  String?
   contactEmail String?
+  /// BLIND-INDEX (HMAC-SHA256) der normalisierten Kontaktadresse. `contactEmail`
+  /// ist verschluesselt und nicht mehr abfragbar; Dublettenpruefung und exakte
+  /// Treffer laufen ueber diese Spalte. Wird von der Prisma-Erweiterung gesetzt.
+  contactEmailIdx String?
   contactPhone String?
   contactRole  String?
 
@@ -497,6 +524,7 @@ model Company {
   inquiries        Inquiry[]
 
   @@index([status])
+  @@index([contactEmailIdx])
 }
 
 model Instance {
@@ -1063,6 +1091,8 @@ model MailDelivery {
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   recipientAddress    String
+  /// BLIND-INDEX der normalisierten Empfaengeradresse (siehe `Company.contactEmailIdx`).
+  recipientIdx        String?
   channel             MailChannel
   subject             String
   // Wortlaut der versendeten Mail zum Versandzeitpunkt (Nachweis).
@@ -1120,12 +1150,19 @@ model MailDelivery {
   @@index([consentId])
   @@index([templateId])
   @@index([recipientAddress, createdAt])
+  @@index([recipientIdx, createdAt])
   @@index([nextAttemptFrom])
 }
 
 model Consent {
   id        String   @id @default(uuid())
   email     String
+  /// BLIND-INDEX der normalisierten Adresse. ERSETZT `@@unique([email])`: `email`
+  /// ist verschluesselt (zufaelliger IV je Wert, damit nicht eindeutig
+  /// pruefbar). Die Eindeutigkeit je Adresse haengt jetzt an dieser Spalte.
+  /// NULL nur bei Altzeilen vor der Verschluesselung (mehrere NULL sind erlaubt);
+  /// der Einmal-Lauf `encrypt-existing` fuellt sie.
+  emailIdx  String?  @unique
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
@@ -1202,16 +1239,9 @@ model Consent {
 
   deliveries MailDelivery[]
 
-  /// DIE SPERRLISTE IST NUR DANN EINE, WENN ES JE ADRESSE GENAU EINE ZEILE
-  /// GIBT.
-  ///
-  /// Ohne diese Eindeutigkeit koennte neben einem Sperreintrag eine zweite,
-  /// bestaetigte Zeile derselben Adresse stehen — und dann entschiede die
-  /// Reihenfolge der Abfrage darueber, ob jemand angeschrieben wird, der
-  /// widersprochen hat. Adressen werden vor jedem Schreibvorgang in
-  /// Kleinschreibung normalisiert (`consent.norm.ts`), sonst waere
-  /// "Anna@..." eine zweite Adresse.
-  @@unique([email])
+  // DIE SPERRLISTE IST NUR DANN EINE, WENN ES JE ADRESSE GENAU EINE ZEILE GIBT.
+  // Diese Eindeutigkeit erzwingt `emailIdx @unique` (Blind-Index der normalisierten
+  // Adresse; Normalisierung in `consent.norm.ts`/`field-crypto.ts`).
 }
 
 // ---------------------------------------------------------------------------
@@ -1397,4 +1427,72 @@ model IssuerProfile {
   logoSha256  String?
   updatedAt   DateTime @updatedAt
   updatedBy   String?
+}
+
+// ---------------------------------------------------------------------------
+// Tresor (Schluesselverwahrung der Feldverschluesselung)
+// ---------------------------------------------------------------------------
+
+/// Ein Eintrag je Verpackung des Datenschluessels (DEK, 256 Bit): je Admin-
+/// Passphrase einmal (`kind = 'passphrase'`) und einmal mit dem
+/// Wiederherstellungsschluessel (`kind = 'recovery'`). Der DEK selbst steht nie
+/// im Klartext in der Datenbank; er wird mit dem aus Passphrase bzw.
+/// Wiederherstellungsschluessel per argon2id abgeleiteten KEK mit AES-256-GCM
+/// verpackt. Umpacken aendert nur diese Zeilen, nie den DEK (festgeschriebene
+/// Rechnungen koennten nicht neu verschluesselt werden).
+model Vault {
+  id        String   @id @default(uuid())
+  kind      String
+  label     String
+  userId    String?
+  kdf       String   @default("argon2id")
+  /// argon2id-Parameter, mit denen DIESER Eintrag erzeugt wurde.
+  kdfMemoryKib   Int
+  kdfTimeCost    Int
+  kdfParallelism Int
+  salt       Bytes
+  iv         Bytes
+  tag        Bytes
+  wrappedDek Bytes
+  createdAt  DateTime @default(now())
+
+  @@index([kind])
+}
+
+
+/// Eine über das Portal angemeldete Sitzung der Verwaltung (Modus `portal`).
+///
+/// Das Sitzungs-Cookie bleibt ein signiertes JWT; es trägt hier nur die ID
+/// dieser Zeile (`ssn`). Die Zeile macht zwei Dinge möglich, die ein reines
+/// JWT nicht kann: den Front-Channel-Logout (alle Sitzungen mit derselben
+/// Portal-Sitzungs-ID `sid` serverseitig beenden) und den Step-up-Nachweis
+/// (`stepUpAt`).
+model SsoSession {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Portal-Sitzungs-ID aus dem ID-Token (`sid`).
+  ssoSid    String
+  /// Wann zuletzt ein frischer SSO-Durchlauf mit zweitem Faktor gelungen ist.
+  stepUpAt  DateTime?
+  createdAt DateTime  @default(now())
+  /// Gesetzt = die Sitzung ist beendet (Abmeldung, Front-Channel-Logout).
+  endedAt   DateTime?
+
+  @@index([ssoSid])
+  @@index([userId])
+}
+
+/// Ein laufender SSO-Durchlauf (von `/sso/start` bis `/sso/callback`).
+///
+/// Zweck ist die EINMALIGKEIT von `state` und `nonce`: Der Callback verbraucht
+/// die Zeile atomar. Ein zweiter Callback mit demselben Cookie scheitert damit,
+/// auch wenn der Code zufällig noch gültig wäre.
+model SsoAttempt {
+  id            String    @id @default(uuid())
+  /// SHA-256 des `state`; der Klartext steht nur im Cookie und in der Adresse.
+  stateHash     String    @unique
+  /// Beginn des Durchlaufs. Step-up gilt nur, wenn `auth_time` nicht davor liegt.
+  startedAt     DateTime  @default(now())
+  consumedAt    DateTime?
 }

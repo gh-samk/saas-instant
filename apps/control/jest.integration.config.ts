@@ -18,6 +18,8 @@ const config: Config = {
     '^.+\\.(t|j)s$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
   },
   testEnvironment: 'node',
+  // Tresor der Test-Datenbank einrichten und entsperren (Feldverschlüsselung).
+  setupFilesAfterEnv: ['<rootDir>/src/test-support/integration-setup.ts'],
   // Die Suiten teilen sich eine Datenbank — strikt seriell, damit sie sich
   // nicht gegenseitig die Zählerstände verfälschen.
   maxWorkers: 1,

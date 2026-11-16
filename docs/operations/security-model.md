@@ -83,11 +83,45 @@ Kontoverwaltung den Nachweis verlangen, damit keine vergessen wird.
 **Notfallzugang** erzeugt nur **Links** (15 Minuten, einmalig), nie ein Passwort.
 Ein Passkey kann nur im Browser entstehen.
 
+## 2a. Anmeldung über das Portal (Modus portal)
+
+Im Modus `portal` ersetzt der Anmeldedienst `portal-auth` die lokale Anmeldung der
+Verwaltungen; Ablauf, Rollen, Step-up und Betrieb stehen in [sso.md](sso.md). Die
+Sicherheitsannahmen:
+
+- **Ein Anbieter, eine Prüfung.** Die Verwaltung nimmt nur ein ID-Token an, das sie
+  selbst über Authorization Code mit PKCE S256 geholt hat: `state` (Cookie) und `nonce`
+  sind einmalig, Signatur nur EdDSA über das JWKS des Portals, dazu `iss`, `aud`, `exp`,
+  `iat` (60 s) und ein nicht leeres `amr`. Fehler nach außen immer `401 sso_invalid`.
+- **Rolle aus dem Token, bei jedem Login.** `roles[<Kennung>]` entscheidet. Ohne Rolle
+  kein Konto und kein Zugang. `staff` kann nichts an Einstellungen, Tresor und
+  Wiederherstellung schreiben (`403 forbidden_role`); im Modus `single` ist jedes
+  Konto `admin`.
+- **Step-up.** Wo ein zweiter Faktor verlangt wird, braucht eine Portal-Sitzung einen
+  frischen Durchlauf mit zweitem Faktor (höchstens 5 Minuten alt).
+- **Notzugang ohne Portal nur für markierte Konten.** Lokal anmelden darf nur
+  `emergency=true` (`403 local_login_disabled` sonst); gesetzt wird das nur durch die
+  Notfallkommandos im Container.
+- **Sitzungen** einer Portal-Anmeldung gelten höchstens 12 Stunden; die
+  Front-Channel-Abmeldung beendet alle Sitzungen einer Portal-Sitzung.
+- **Geheimnisse des Portals:** `PORTAL_KEY_SECRET` (verschlüsselt Signaturschlüssel und
+  TOTP-Geheimnisse, nicht wechselbar), `PORTAL_DB_PASSWORD`, je Verwaltung ein eigenes
+  `PORTAL_CLIENT_SECRET` (argon2id-Hash im Portal, Klartext nur in der `.env` der
+  Verwaltung). Alle von `install.sh` mit `openssl rand -hex` erzeugt, in Dateien mit
+  Rechten 600, nie als Argument einer Prozessliste (`client upsert` liest über stdin).
+  Der Einrichtungslink des ersten Kontos wird nur einmal angezeigt und nicht gespeichert.
+- **Netz.** `portal-auth` hat keinen veröffentlichten Port; die Verwaltungen erreichen
+  es über das Docker-Netz `saas-instant-portal-auth`. Die Datenbank des Anmeldedienstes
+  liegt nicht in diesem Netz. Verwaltungen am selben Portal sehen sich in dem Netz
+  untereinander (gleicher Betreiber vorausgesetzt).
+- **Portalausfall:** laufende Sitzungen bleiben bis zum Ablauf, neue Anmeldungen und
+  Step-ups fehlen; der Notzugang bleibt.
+
 ## 3. Geheimnisse
 
 **Was nie ins Repository gehört:** Werte aus `.env`, Tokens, Schlüssel, Zugangsdaten.
 Im Repository liegen nur Beispieldateien mit Platzhaltern (`.env.example`).
-`.gitignore` schließt `.env`, `installations/`, `portal/registry.json`,
+`.gitignore` schließt `.env`, `installations/`, `portal/registry.json`, `portal/registry/`,
 `.saas-instant-mode` und `backups` aus.
 
 | Geheimnis | Zweck | Besonderheit |
@@ -102,13 +136,22 @@ Im Repository liegen nur Beispieldateien mit Platzhaltern (`.env.example`).
 | `CONTROL_INQUIRY_KEY` | Ausweis des Webserver-Proxys für das öffentliche Anfrageformular | derselbe Wert im Proxy der Webseite, mindestens 32 Zeichen; ungesetzt existiert die Route nicht (404) |
 | `CONTROL_COOLIFY_TOKEN` | Zugriff auf Coolify | eigenes Token, siehe [coolify-setup.md](coolify-setup.md) |
 | `SMTP_PASS`, `CONTROL_INSTANCE_SMTP_PASS` | Postausgang | je Rolle getrennt |
+| `PORTAL_KEY_SECRET`, `PORTAL_DB_PASSWORD` (`portal/portal.env`, nur Modus portal) | Anmeldedienst: Schlüsselmaterial und Datenbank | nicht wechseln, siehe [sso.md](sso.md) |
+| `PORTAL_CLIENT_SECRET` je Verwaltung (Modus portal) | Ausweis der Verwaltung beim Token-Endpunkt des Portals | je Verwaltung eigen; Wechsel mit `portal register <slug> --force` |
 | `SETUP_TOKEN`, `METRICS_TOKEN` je Instanz | Erst-Setup und Kennzahlen | von der Verwaltung erzeugt, je Instanz eigen, verschlüsselt gespeichert |
 
 Grundsätze:
 
 - **Erzeugt wird mit `openssl rand -hex`**, nicht von Hand und nicht von Coolify.
   `install.sh` erzeugt zufällige Werte und schreibt sie in `installations/<slug>/.env`
-  mit Rechten 600.
+  (im Modus `portal` zusätzlich in `portal/portal.env`) mit Rechten 600.
+- **Der Portal-nginx sieht nur die Registry.** In ihn wird allein
+  `portal/registry/` (mit `registry.json`, ohne Geheimnisse) schreibgeschützt
+  gemountet, nicht das Verzeichnis `portal/`. `portal/portal.env` mit
+  `PORTAL_KEY_SECRET`, `PORTAL_DB_PASSWORD` und den Client-Secrets bleibt außerhalb;
+  Dateirechte und `cap_drop` sind damit nicht mehr die einzige Schutzschicht.
+  Eine ältere `portal/registry.json` verschiebt `install.sh` bzw. `bin/saas-instant`
+  beim nächsten Lauf dorthin (idempotent, ohne neue Geheimnisse).
 - **Pflichtschlüssel sind bei Fehlen ein Startfehler**, kein stiller Rückfall auf
   einen bekannten Wert. Dasselbe gilt für eine fehlerhafte Preistafel, eine
   Absenderadresse auf der falschen Domäne und `SMTP_TLS_ERZWINGEN=0` in Produktion:
@@ -210,6 +253,8 @@ Sicherungsspeicher und mit Docker-Zugriff. Aufbau und Betrieb:
 | Geheimnisse **write-only** in der Oberfläche | Eingabe geht über die Verwaltung an den Agent und kommt nie zurück; weder Datenbank noch Audit-Log noch Log der Verwaltung sehen sie |
 | Sicherungen sind nur mit dem Betreiberschlüssel lesbar | Verschlüsselung mit **age** (nur der öffentliche Schlüssel im Agent); der private Schlüssel wird einmal angezeigt und nirgends gespeichert; bei der Wiederherstellung kommt er write-only, nur im Arbeitsspeicher |
 | Wiederherstellung nur in neue, fremde Stacks | Zielprojekt muss das Compose-Label tragen und darf weder der Stack des Agents noch der der Verwaltung sein; nicht ermittelbarer eigener Stack bedeutet Ablehnung |
+| Der Dump enthält keinen Klartext sensibler Felder | die Verwaltungs-Datenbank hält Chiffretext; wer den Dump hat, braucht zum Lesen Passphrase oder Wiederherstellungsschlüssel (Tresor). Das Rechnungsarchiv ist davon getrennt und mit age lesbar |
+| Der Agent hat keinen SQL-Zugriff auf Rechnungen | er holt das Archiv über `GET /api/internal/invoice-archive` (nur mit `x-backup-key`, nur im entsperrten Zustand, sonst 423), prüft je Dokument die SHA-256 und verschlüsselt mit age; bei 423 meldet er den Lauf als `deferred` und versucht es erneut. `CONTROL_DATABASE_URL` dient nur dem `pg_dump` |
 | Rechnungsarchive bleiben | der Agent löscht nie unter `invoices/`; bei S3 mit Object Lock (GOVERNANCE) versehen |
 
 **Das Restrisiko:** Auch durch den Proxy bleibt `EXEC` auf Containern des Hosts ein

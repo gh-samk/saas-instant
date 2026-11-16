@@ -115,7 +115,7 @@ export function InstanceBackups({
           if (!lives.current) return;
           setJob(view);
           setJobMessage(null);
-          if (view.status === 'succeeded') void loadBackups();
+          if (view.status === 'succeeded' || view.status === 'deferred') void loadBackups();
         } catch (e) {
           if (!lives.current) return;
           setJobMessage(errorText(e, t('backup.jobPollFailed')));
@@ -168,7 +168,9 @@ export function InstanceBackups({
           ? t('backup.jobRunning')
           : job.status === 'succeeded'
             ? t('backup.jobSucceeded')
-            : job.message
+            : job.status === 'deferred'
+              ? t('backup.jobDeferred')
+              : job.message
               ? t('backup.jobFailedWithMessage', { message: job.message })
               : t('backup.jobFailed');
 

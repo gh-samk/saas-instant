@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '.prisma/control-client';
 import type { DbClient } from '../prisma/db-client';
 import { PrismaService } from '../prisma/prisma.service';
+import { normalizeIp } from '../common/ip-address';
 import {
   SUSPICIOUS_ACTIONS,
   SECURITY_ACTIONS,
@@ -33,6 +34,13 @@ export const AUDIT_ACTION = {
   /** Serverseitige Sperre gegen das Entfernen des letzten zweiten Faktors. */
   factorRemoveRejected: 'factor.removal_rejected',
   sessionRenewed: 'session.renewed',
+  // Anmeldung über das Portal (Modus `portal`). Nie mit Token oder Code im Eintrag.
+  ssoLoginSuccess: 'sso.login.success',
+  ssoLoginError: 'sso.login.failure',
+  ssoStepUpSuccess: 'sso.step_up.success',
+  ssoStepUpError: 'sso.step_up.failure',
+  ssoLogout: 'sso.logout',
+  ssoFrontChannelLogout: 'sso.front_channel_logout',
   // Einstufiger Passkey-Weg
   loginPasskeySuccess: 'login.passkey.success',
   loginPasskeyError: 'login.passkey.failure',
@@ -350,6 +358,18 @@ export const AUDIT_ACTION = {
    * großer Felder (Logo-Bytes).
    */
   issuerUpdated: 'issuer.updated',
+
+  // --- Tresor (Feldverschlüsselung). NIEMALS mit Passphrase, Wiederherstellungs-
+  // schlüssel oder Schlüsselmaterial: protokolliert wird nur, DASS etwas geschah.
+  vaultInitialized: 'vault.initialized',
+  vaultUnlocked: 'vault.unlocked',
+  vaultUnlockError: 'vault.unlock.failure',
+  vaultLocked: 'vault.locked',
+  vaultPassphraseAdded: 'vault.passphrase.added',
+  vaultPassphraseChanged: 'vault.passphrase.changed',
+  vaultRecoveryRegenerated: 'vault.recovery.regenerated',
+  /** Einmal-Lauf nach dem Entsperren: nur Anzahl je Tabelle. */
+  vaultEncryptExisting: 'vault.encrypt_existing',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
@@ -495,7 +515,7 @@ export class AuditService {
         objectId: entry.objectId ?? null,
         beforeValue: sanitizeForAudit(entry.beforeValue) as Prisma.InputJsonValue,
         afterValue: sanitizeForAudit(entry.afterValue) as Prisma.InputJsonValue,
-        ip: entry.ip ?? null,
+        ip: normalizeIp(entry.ip),
         userAgent: entry.userAgent ?? null,
       },
     });
@@ -539,7 +559,8 @@ export class AuditService {
       text: SECURITY_TEXTS[line.action] ?? line.action,
       actor: line.actor,
       suspicious: SUSPICIOUS_ACTIONS.includes(line.action),
-      ip: line.ip,
+      // Ältere Einträge tragen noch die IPv4-mapped-Form.
+      ip: normalizeIp(line.ip),
     }));
   }
 }

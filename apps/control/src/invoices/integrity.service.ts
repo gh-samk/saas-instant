@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { Prisma } from '.prisma/control-client';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { PrismaService } from '../prisma/prisma.service';
@@ -41,64 +40,67 @@ export interface DocumentFindings {
   total: number;
 }
 
-interface FindingRow {
-  id: string;
-  invoiceNumber: string | null;
-  pdf: DocumentStatus;
-  xml: DocumentStatus;
-  xrechnung: DocumentStatus;
-  total: number;
-}
+type InvoiceDb = Pick<PrismaService, 'invoice'>;
 
-type RawDb = Pick<PrismaService, '$queryRaw'>;
+/** Wie viele Rechnungen je Durchgang geladen werden (die Dokumente sind gross). */
+const FINDINGS_PAGE_SIZE = 50;
 
 /**
  * Findet Rechnungen, deren gespeicherte Dokumente nicht zu ihren Pruefsummen
- * passen — in der DATENBANK gerechnet (`sha256(bytea)`), ohne die Bytes zu
- * uebertragen. Dieselbe Bedeutung wie `checkDocument` in `integrity.ts`.
+ * passen. Dieselbe Bedeutung wie `checkDocument` in `integrity.ts`.
+ *
+ * Die Dokumentspalten sind verschluesselt; die Pruefsummen gelten dem KLARTEXT.
+ * Deshalb laedt der erweiterte Client die Rechnungen seitenweise (er
+ * entschluesselt beim Lesen) und die Pruefsumme wird hier ueber die
+ * entschluesselten Bytes gebildet. Rechnet man in der Datenbank, hasht man den
+ * Chiffretext und meldet fuer jede neue Zeile eine Abweichung.
  *
  * Nur festgeschriebene Rechnungen. Liest ausschliesslich.
  */
 export async function findDocumentFindings(
-  db: RawDb,
+  db: InvoiceDb,
   limit: number = MAX_FINDINGS,
 ): Promise<DocumentFindings> {
-  const status = (content: string, hash: string): Prisma.Sql =>
-    Prisma.sql`CASE
-      WHEN ${Prisma.raw(`"${content}"`)} IS NULL THEN
-        CASE WHEN ${Prisma.raw(`"${hash}"`)} IS NULL THEN 'absent' ELSE 'missing_content' END
-      WHEN ${Prisma.raw(`"${hash}"`)} IS NULL THEN 'missing_hash'
-      WHEN encode(sha256(${Prisma.raw(`"${content}"`)}), 'hex') = lower(${Prisma.raw(`"${hash}"`)}) THEN 'ok'
-      ELSE 'mismatch'
-    END`;
-
-  // `content`/`hash` kommen aus der festen Liste `DOCUMENT_COLUMNS`, nie von aussen.
-  const [pdf, xml, xr] = DOCUMENT_COLUMNS.map((c) => status(c.content, c.hash));
-  const rows = await db.$queryRaw<FindingRow[]>(Prisma.sql`
-    WITH s AS (
-      SELECT "id", "invoiceNumber",
-             ${pdf} AS pdf, ${xml} AS xml, ${xr} AS xrechnung
-      FROM "Invoice"
-      WHERE "finalizedAt" IS NOT NULL
-    )
-    SELECT "id", "invoiceNumber", pdf, xml, xrechnung,
-           (count(*) OVER ())::int AS total
-    FROM s
-    WHERE pdf NOT IN ('ok', 'absent')
-       OR xml NOT IN ('ok', 'absent')
-       OR xrechnung NOT IN ('ok', 'absent')
-    ORDER BY "invoiceNumber" ASC NULLS LAST, "id" ASC
-    LIMIT ${limit}
-  `);
-
-  const findings = rows.map((row) => ({
-    id: row.id,
-    invoiceNumber: row.invoiceNumber,
-    formats: (['pdf', 'xml', 'xrechnung'] as const)
-      .map((format) => ({ format, status: row[format] }))
-      .filter((f) => f.status !== 'ok' && f.status !== 'absent'),
-  }));
-  return { findings, total: rows[0]?.total ?? 0 };
+  const all: DocumentFinding[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await db.invoice.findMany({
+      where: { finalizedAt: { not: null } },
+      orderBy: { id: 'asc' },
+      take: FINDINGS_PAGE_SIZE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        invoiceNumber: true,
+        pdfContent: true,
+        xmlContent: true,
+        xrechnungContent: true,
+        pdfSha256: true,
+        xmlSha256: true,
+        xrechnungSha256: true,
+      },
+    });
+    if (page.length === 0) break;
+    for (const row of page) {
+      const formats = DOCUMENT_COLUMNS.map((c) => ({
+        format: c.format,
+        status: checkDocument(row[c.content], row[c.hash]).status,
+      })).filter((f) => f.status !== 'ok' && f.status !== 'absent');
+      if (formats.length > 0) {
+        all.push({ id: row.id, invoiceNumber: row.invoiceNumber, formats });
+      }
+    }
+    cursor = page[page.length - 1].id;
+    if (page.length < FINDINGS_PAGE_SIZE) break;
+  }
+  // Wie vorher in SQL: nach Rechnungsnummer (NULL zuletzt), dann id.
+  all.sort((a, b) => {
+    if (a.invoiceNumber === b.invoiceNumber) return a.id < b.id ? -1 : 1;
+    if (a.invoiceNumber === null) return 1;
+    if (b.invoiceNumber === null) return -1;
+    return a.invoiceNumber < b.invoiceNumber ? -1 : 1;
+  });
+  return { findings: all.slice(0, limit), total: all.length };
 }
 
 /** Alle vergebenen Rechnungsnummern (optional eines Jahres). */

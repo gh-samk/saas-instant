@@ -17,6 +17,8 @@ import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { WithoutSecondFactor } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
 import { SessionGuard } from '../common/guards/session.guard';
+import { RequireAdmin } from '../common/decorators/require-role.decorator';
+import { RoleGuard } from '../common/guards/role.guard';
 import { sourceFrom } from '../common/inquiry-source';
 import { EvidenceOnlyDto, RestoreStartDto } from './dto/instance-backup.dto';
 import {
@@ -36,7 +38,7 @@ import { InstanceRestoreService, type RestoreView } from './instance-restore.ser
  * Übernahme STOPPT die alte Instanz.
  */
 @Controller('instances/:id')
-@UseGuards(SessionGuard, SecondFactorGuard)
+@UseGuards(SessionGuard, RoleGuard, SecondFactorGuard)
 export class InstanceBackupsController {
   constructor(
     private readonly backups: InstanceBackupService,
@@ -94,6 +96,7 @@ export class InstanceBackupsController {
   }
 
   // Der private Schlüssel steckt im Body, nie in der Antwort.
+  @RequireAdmin()
   @Post('restores')
   @HttpCode(202)
   @Header('Cache-Control', 'no-store')
@@ -107,6 +110,7 @@ export class InstanceBackupsController {
     return this.recoveries.start(id, dto, { userId: user.id, name: user.username }, sourceFrom(req));
   }
 
+  @RequireAdmin()
   @Post('restores/:restoreId/adopt')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })

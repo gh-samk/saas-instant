@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { consentEmailIndex } from '../crypto/field-crypto';
 import type { ConfigService } from '@nestjs/config';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { MailService } from '../mail/mail.service';
@@ -82,7 +83,7 @@ async function enter(email: string, origin = 'webseite-newsletter') {
 }
 
 async function rowFrom(email: string) {
-  return prisma.consent.findUnique({ where: { email } });
+  return prisma.consent.findUnique({ where: { emailIdx: consentEmailIndex(email) } });
 }
 
 afterAll(async () => {
@@ -300,7 +301,7 @@ describe('Die einzige automatische Löschung: 72 Stunden', () => {
   /** Verschiebt den Anmeldezeitpunkt um die angegebenen Stunden zurück. */
   async function age(email: string, hours: number): Promise<void> {
     await prisma.consent.update({
-      where: { email },
+      where: { emailIdx: consentEmailIndex(email) },
       data: { subscribedAt: new Date(Date.now() - hours * 60 * 60 * 1000) },
     });
   }
@@ -397,7 +398,7 @@ describe('Die einzige automatische Löschung: 72 Stunden', () => {
         // soll aber das Zusammentreffen der SCHREIBVORGÄNGE. Deshalb der
         // direkte, bedingte Schreibvorgang — genau wie ihn der Dienst macht.
         const { count } = await prisma.consent.updateMany({
-          where: { email: entry.email, status: 'unconfirmed' },
+          where: { emailIdx: consentEmailIndex(entry.email), status: 'unconfirmed' },
           data: {
             status: 'confirmed',
             confirmedAt: new Date(),
@@ -454,7 +455,9 @@ describe('Je Adresse genau ein Eintrag', () => {
   it('legt bei zwei gleichzeitigen Eintragungen keine zweite Zeile an', async () => {
     const email = newAddress('gleichzeitig');
     await Promise.all([enter(email), enter(email), enter(email)]);
-    const all = await prisma.consent.findMany({ where: { email } });
+    const all = await prisma.consent.findMany({
+      where: { emailIdx: consentEmailIndex(email) },
+    });
     expect(all).toHaveLength(1);
   });
 
@@ -462,9 +465,10 @@ describe('Je Adresse genau ein Eintrag', () => {
     const email = newAddress('schreibweise');
     await enter(email);
     await enter(email.toUpperCase());
-    const all = await prisma.consent.findMany({
-      where: { email: { contains: 'schreibweise' } },
-    });
+    // E-Mail ist verschlüsselt: im Speicher filtern.
+    const all = (await prisma.consent.findMany()).filter((c) =>
+      c.email.includes('schreibweise'),
+    );
     expect(all).toHaveLength(1);
   });
 });
@@ -487,7 +491,7 @@ describe('[K2] Eine fremde Adresse lässt sich nicht mit Post belegen', () => {
     minutes: number,
   ): Promise<void> {
     await prisma.consent.update({
-      where: { email },
+      where: { emailIdx: consentEmailIndex(email) },
       data: {
         confirmationMailAt: new Date(Date.now() - minutes * 60 * 1000),
       },
@@ -744,7 +748,7 @@ describe('[K4] Eine Sperre lässt sich nicht abschwächen', () => {
     // Die drei Sperrzustände direkt setzen — der Weg dorthin ist hier nicht
     // der Gegenstand, der ÜBERGANG von dort ist es.
     await prisma.consent.update({
-      where: { email },
+      where: { emailIdx: consentEmailIndex(email) },
       data: { status: outcome as ConsentStatus },
     });
     return email;

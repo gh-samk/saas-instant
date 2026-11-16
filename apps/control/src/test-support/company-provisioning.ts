@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { PrismaClient } from '.prisma/control-client';
 import type { CompanyStatus, Prisma } from '.prisma/control-client';
 import { toDate } from '@saas-instant/shared';
+import { withFieldEncryption } from '../prisma/field-encryption';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   truncateAuditLog as truncateAuditLogOn,
@@ -19,7 +20,11 @@ import {
  * ihre eigenen Zeilen weg. Ein abgebrochener Lauf hinterlässt damit höchstens
  * Reste, die keiner anderen Suite in die Quere kommen.
  */
-export const prisma = new PrismaClient() as unknown as PrismaService;
+// Mit Feldverschlüsselung wie im Betrieb: die Integrationstests prüfen, was die
+// Dienste wirklich tun. Entsperrt wird der Tresor in `integration-setup.ts`.
+export const prisma = withFieldEncryption(
+  new PrismaClient(),
+) as unknown as PrismaService;
 
 const truncateAuditLog = () => truncateAuditLogOn(prisma);
 const truncateInvoices = () => truncateInvoicesOn(prisma);
@@ -87,10 +92,10 @@ export async function statusFrom(id: string): Promise<CompanyStatus> {
  * deshalb über die Kennungen aufgeräumt werden.
  */
 export async function cleanUp(prefix: string): Promise<void> {
-  const companies = await prisma.company.findMany({
-    where: { name: { startsWith: prefix } },
-    select: { id: true },
-  });
+  // `name` ist verschlüsselt und nicht filterbar: im Speicher filtern.
+  const companies = (
+    await prisma.company.findMany({ select: { id: true, name: true } })
+  ).filter((o) => o.name.startsWith(prefix));
   const identifiers = companies.map((o) => o.id);
   if (identifiers.length === 0) return;
 
@@ -176,10 +181,10 @@ export async function cleanUpConsents(
   if (addressPrefix.trim() === '') {
     throw new Error('raeumeEinwilligungenAuf verlangt einen Praefix.');
   }
-  const rows = await prisma.consent.findMany({
-    where: { email: { startsWith: addressPrefix } },
-    select: { id: true },
-  });
+  // `email` ist verschlüsselt und nicht filterbar: im Speicher filtern.
+  const rows = (
+    await prisma.consent.findMany({ select: { id: true, email: true } })
+  ).filter((row) => row.email.startsWith(addressPrefix));
   const identifiers = rows.map((row) => row.id);
   if (identifiers.length === 0) return;
   const deliveries = await prisma.mailDelivery.findMany({

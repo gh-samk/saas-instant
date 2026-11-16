@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { createApp, type App } from '../src/app.js';
-import type { BackupReport, ControlClient } from '../src/control-client.js';
+import type { BackupReport, ControlClient, InvoiceArchivePage } from '../src/control-client.js';
 import type { ContainerRef, DockerClient, ExecHandle } from '../src/docker/types.js';
 import { signRequest } from '../src/hmac.js';
 import type { InvoiceDoc, InvoiceSource } from '../src/jobs/context.js';
@@ -85,6 +85,9 @@ export class FakeControl implements ControlClient {
   async getPlan() {
     return { ...(this.retentionYears !== undefined ? { retentionYears: this.retentionYears } : {}), instances: this.plan };
   }
+  async getInvoiceArchivePage(): Promise<InvoiceArchivePage> {
+    return { items: [], next: null };
+  }
   async report(e: BackupReport) {
     this.reports.push(e);
   }
@@ -92,11 +95,11 @@ export class FakeControl implements ControlClient {
 
 export class FakeInvoices implements InvoiceSource {
   constructor(public docs: Record<string, InvoiceDoc[]> = {}) {}
-  async years() {
-    return Object.keys(this.docs).sort();
-  }
-  async *ofYear(y: string) {
-    for (const d of this.docs[y] ?? []) yield d;
+  /** Setzt ein Fehlerobjekt, das fetchAll wirft (z. B. ControlLockedError). */
+  failWith: Error | null = null;
+  async fetchAll() {
+    if (this.failWith) throw this.failWith;
+    return new Map(Object.entries(this.docs));
   }
 }
 

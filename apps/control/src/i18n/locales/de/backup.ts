@@ -119,6 +119,8 @@ export default {
   jobQueued: 'Die Sicherung wartet auf den Start.',
   jobRunning: 'Die Sicherung läuft.',
   jobSucceeded: 'Die Sicherung ist fertig.',
+  jobDeferred:
+    'Die Datenbank ist gesichert. Das Rechnungsarchiv folgt, sobald die Verwaltung entsperrt ist.',
   jobFailed: 'Die Sicherung ist fehlgeschlagen.',
   jobFailedWithMessage: 'Die Sicherung ist fehlgeschlagen: {message}',
   jobStartFailed: 'Die Sicherung ließ sich nicht anstoßen.',

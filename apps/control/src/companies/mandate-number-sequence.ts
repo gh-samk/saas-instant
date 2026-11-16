@@ -82,10 +82,17 @@ export async function assignNextMandateReference(
   // zurück, und daran scheitert die Ergebnisumwandlung von Prisma.
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${blockKeyForMandateYear(year)})`;
 
-  const assigned = await tx.company.findMany({
-    where: { sepaMandateReference: { startsWith: `SOZ-${year}-` } },
+  // Die Referenz ist verschluesselt: kein `startsWith` in der Datenbank. Die
+  // Referenzen werden gelesen (entschluesselt) und hier nach dem Jahr gefiltert;
+  // die Sperre oben haelt die Vergabe serialisiert.
+  const withReference = await tx.company.findMany({
+    where: { sepaMandateReference: { not: null } },
     select: { sepaMandateReference: true },
   });
+  const prefix = `SOZ-${year}-`;
+  const assigned = withReference.filter((row) =>
+    row.sepaMandateReference?.startsWith(prefix),
+  );
 
   const highest = assigned.reduce((largest, row) => {
     const split =

@@ -38,15 +38,32 @@ export const controlBackupMissing: TaskSource = {
 
     const limit = new Date(context.now.getTime() - CONTROL_BACKUP_MISSING_AFTER_DAYS * DAY_MS);
     const overdue: { label: string; last: Date | null }[] = [];
-    for (const part of PARTS) {
-      const last = await context.prisma.auditLog.findFirst({
-        where: {
-          action: AUDIT_ACTION.backupReported,
-          afterValue: { path: ['kind'], equals: part.kind },
-        },
+    // `afterValue` ist verschluesselt: Der Pfadfilter in der Datenbank geht
+    // nicht. Die Meldungen kommen neueste zuerst in Stuecken und werden im
+    // Speicher nach `kind` ausgewertet, bis jede Art ihre juengste Meldung hat.
+    const latestByKind = new Map<string, Date>();
+    const BATCH = 200;
+    for (let skip = 0; latestByKind.size < PARTS.length; skip += BATCH) {
+      const batch = await context.prisma.auditLog.findMany({
+        where: { action: AUDIT_ACTION.backupReported },
         orderBy: { timestamp: 'desc' },
-        select: { timestamp: true },
+        skip,
+        take: BATCH,
+        select: { timestamp: true, afterValue: true },
       });
+      for (const entry of batch) {
+        const value = entry.afterValue as { kind?: unknown } | null;
+        const kind = typeof value?.kind === 'string' ? value.kind : null;
+        if (kind !== null && !latestByKind.has(kind)) {
+          latestByKind.set(kind, entry.timestamp);
+        }
+      }
+      if (batch.length < BATCH) break;
+    }
+    for (const part of PARTS) {
+      const last = latestByKind.has(part.kind)
+        ? { timestamp: latestByKind.get(part.kind)! }
+        : null;
       if (last === null || last.timestamp < limit) {
         overdue.push({ label: part.label, last: last?.timestamp ?? null });
       }

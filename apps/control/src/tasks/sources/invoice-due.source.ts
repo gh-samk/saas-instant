@@ -61,8 +61,9 @@ export const invoiceDue: TaskSource = {
           },
         },
       },
-      orderBy: { name: 'asc' },
     });
+    // Der Name ist verschluesselt: im Speicher sortieren.
+    candidates.sort((a, b) => a.name.localeCompare(b.name, 'de'));
 
     const due = candidates.flatMap((row) => {
       if (row.instanceStartDate === null || row.paymentInterval === null) {

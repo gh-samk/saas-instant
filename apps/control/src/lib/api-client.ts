@@ -35,7 +35,35 @@ export const ERROR_CODE = {
   /** Der letzte eingerichtete zweite Faktor lässt sich nicht entfernen. */
   lastFactor: 'last_factor',
   mailSendFailed: 'mail_versand_fehlgeschlagen',
+  /** Die Verwaltung ist nach einem Neustart noch gesperrt (HTTP 423). */
+  vaultLocked: 'vault_locked',
+  /** Modus portal: für diese Aktion fehlt ein frischer Nachweis über das Portal. */
+  stepUpRequired: 'step_up_required',
+  /** Modus portal: die Rolle des Kontos reicht für diese Aktion nicht. */
+  forbiddenRole: 'forbidden_role',
+  vaultWrongSecret: 'vault_wrong_secret',
+  vaultRateLimited: 'vault_rate_limited',
+  vaultUninitialized: 'vault_uninitialized',
+  vaultAlreadyInitialized: 'vault_already_initialized',
 } as const;
+
+/**
+ * Globaler Handler für „Verwaltung gesperrt" (HTTP 423).
+ *
+ * `apiFetch` und `apiFile` rufen ihn auf, bevor sie den Fehler weiterreichen.
+ * So landet jede Seite — egal, welche Anfrage zuerst auf die Sperre stößt —
+ * auf der Entsperrseite, ohne dass eine Seite davon wissen muss. Gesetzt wird
+ * er vom `VaultProvider`; ohne Handler passiert nichts (Tests, Anmeldeseite).
+ */
+let vaultLockedHandler: (() => void) | null = null;
+
+export function setVaultLockedHandler(handler: (() => void) | null): void {
+  vaultLockedHandler = handler;
+}
+
+function reportLocked(response: Response): void {
+  if (response.status === 423) vaultLockedHandler?.();
+}
 
 /**
  * Grund eines gescheiterten E-Mail-Codes.
@@ -202,6 +230,7 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
+    reportLocked(response);
     throw await asError(response);
   }
 
@@ -249,6 +278,7 @@ export async function apiFile(
   });
 
   if (!response.ok) {
+    reportLocked(response);
     throw await asError(response);
   }
 

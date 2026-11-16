@@ -12,8 +12,8 @@ export interface InvoiceDoc {
 }
 
 export interface InvoiceSource {
-  years(): Promise<string[]>;
-  ofYear(year: string): AsyncIterable<InvoiceDoc>;
+  /** Alle festgeschriebenen Rechnungen, nach Jahr gruppiert (Pruefsummen sind bereits geprueft). */
+  fetchAll(): Promise<Map<string, InvoiceDoc[]>>;
 }
 
 export interface JobContext {

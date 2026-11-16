@@ -67,7 +67,7 @@ export type AgentJobRequest =
 export interface AgentJob {
   id: string;
   kind: 'backup' | 'backup-control' | 'verify' | 'restore';
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'deferred';
   startedAt: string;
   finishedAt?: string;
   message?: string;

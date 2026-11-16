@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, Optional } from '@nestjs/common';
+import { VaultService } from '../vault/vault.service';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as nodemailer from 'nodemailer';
@@ -129,6 +130,9 @@ export class OutboxService implements OnApplicationBootstrap {
     private readonly config: ConfigService,
     private readonly mail: MailService,
     private readonly coolifyConfig: CoolifyConfigService,
+    // Optional: die Probe selbst liest keine Kundendaten, wartet aber wie alle
+    // Hintergrundläufe auf das Entsperren.
+    @Optional() private readonly vault?: VaultService,
   ) {}
 
   private active(): boolean {
@@ -138,9 +142,13 @@ export class OutboxService implements OnApplicationBootstrap {
   /** Startprobe — ohne den Start aufzuhalten. */
   onApplicationBootstrap(): void {
     if (!this.active()) return;
-    void this.checkAll().catch((error: unknown) =>
-      this.logger.error(`Startprobe des Postausgangs gescheitert: ${String(error)}`),
-    );
+    const start = (): void => {
+      void this.checkAll().catch((error: unknown) =>
+        this.logger.error(`Startprobe des Postausgangs gescheitert: ${String(error)}`),
+      );
+    };
+    if (this.vault) this.vault.onUnlocked(start);
+    else start();
   }
 
   @Cron(CronExpression.EVERY_HOUR, { name: 'postausgang-probe' })

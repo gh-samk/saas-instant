@@ -155,10 +155,11 @@ function dto(backupId: string, instanceName: string, extra: Partial<RestoreStart
 }
 
 async function wipe(): Promise<void> {
-  const ours = await prisma.instance.findMany({
-    where: { company: { name: { startsWith: 'teilf-sicherung' } } },
-    select: { id: true },
+  // Der Name ist verschlüsselt: im Speicher auswählen.
+  const all = await prisma.instance.findMany({
+    select: { id: true, company: { select: { name: true } } },
   });
+  const ours = all.filter((i) => i.company.name.startsWith('teilf-sicherung'));
   await prisma.instanceRestore.deleteMany({ where: { instanceId: { in: ours.map((i) => i.id) } } });
   await cleanUp('teilf-sicherung');
 }

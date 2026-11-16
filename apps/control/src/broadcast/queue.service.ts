@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import type { DeliveryStatus } from '.prisma/control-client';
 import { today } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
+import { consentEmailIndex, mailRecipientIndex } from '../crypto/field-crypto';
 import type { InquirySource } from '../common/inquiry-source';
 import { dayReadable } from '../common/calendar';
 import { NoMarketingApprovalError } from '../consent/consent.errors';
@@ -284,7 +285,7 @@ export class QueueService {
     if (!user.email) throw new TestSendWithoutAddressError();
 
     const entry = await this.prisma.consent.findFirst({
-      where: { email: user.email.trim().toLowerCase() },
+      where: { emailIdx: consentEmailIndex(user.email) },
       select: {
         id: true,
         email: true,
@@ -727,7 +728,7 @@ export class QueueService {
   ): Promise<void> {
     const rows = await this.prisma.mailDelivery.findMany({
       where: {
-        recipientAddress: email,
+        recipientIdx: mailRecipientIndex(email),
         deliveryStatus: { in: ['sent', 'failed'] },
         lastAttemptAt: { not: null },
       },

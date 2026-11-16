@@ -5,6 +5,7 @@ import type { ConfigService } from '@nestjs/config';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import { WITHOUT_SECOND_FACTOR } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
+import { RoleGuard } from '../common/guards/role.guard';
 import { SessionGuard } from '../common/guards/session.guard';
 import { loadManifest } from '../manifest/manifest.loader';
 import type { ManifestService } from '../manifest/manifest.service';
@@ -208,7 +209,8 @@ describe('Preise als Admin (Integration)', () => {
     expect(result.tiers.map((s) => s.key).slice(0, 2)).toEqual(['klein', 'gross']);
 
     const guards = Reflect.getMetadata(GUARDS_METADATA, PricesController) as unknown[];
-    expect(guards).toEqual([SessionGuard, SecondFactorGuard]);
+    // Dazwischen der RoleGuard: staff wird abgewiesen, ohne vorher nach einem Nachweis gefragt zu werden.
+    expect(guards).toEqual([SessionGuard, RoleGuard, SecondFactorGuard]);
     const proto = PricesController.prototype as unknown as Record<string, object>;
     expect(Reflect.getMetadata(WITHOUT_SECOND_FACTOR, proto['get']!)).toBeTruthy();
     expect(Reflect.getMetadata(WITHOUT_SECOND_FACTOR, proto['update']!)).toBeUndefined();

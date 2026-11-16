@@ -479,7 +479,7 @@ export class InstanceRestoreService {
       try {
         const job = await this.agent.getJob(jobId);
         failures = 0;
-        if (job.status === 'succeeded' || job.status === 'failed') {
+        if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'deferred') {
           return { ...job, message: job.message ? scrub(job.message, [ageIdentity]).slice(0, 300) : undefined };
         }
       } catch (exception) {

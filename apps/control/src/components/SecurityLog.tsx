@@ -44,6 +44,22 @@ function asTimestamp(iso: string): string {
   });
 }
 
+/**
+ * Akteur (meist eine E-Mail-Adresse) mit Umbruchstelle vor dem „@“: Lange
+ * Adressen brechen dort, nicht mitten im Wort. Der volle Wert steht im `title`.
+ */
+function ActorText({ actor }: { actor: string }) {
+  const at = actor.indexOf('@');
+  if (at <= 0) return <>{actor}</>;
+  return (
+    <>
+      {actor.slice(0, at)}
+      <wbr />
+      {actor.slice(at)}
+    </>
+  );
+}
+
 export function SecurityLog({ className }: { className?: string }) {
   const t = useT();
   const [rows, setRows] = useState<SecurityEvent[] | null>(null);
@@ -108,7 +124,7 @@ export function SecurityLog({ className }: { className?: string }) {
             variant="list"
             label={t('components.securityLog.label')}
             columns={[t('components.securityLog.columns'), t('components.securityLog.columns2'), t('components.securityLog.columns3'), t('components.securityLog.columns4')]}
-            columnsWidths={['w-3/12', 'w-5/12', 'w-2/12', 'w-2/12']}
+            columnsWidths={['w-3/12', 'w-4/12', 'w-3/12', 'w-2/12']}
             minWidth="min-w-[680px]"
           >
             {rows.map((row) => (
@@ -133,8 +149,8 @@ export function SecurityLog({ className }: { className?: string }) {
                     <span className="text-text">{row.text}</span>
                   )}
                 </td>
-                <td className="break-all px-3 py-2.5 text-sm text-leise">
-                  {row.actor}
+                <td className="break-words px-3 py-2.5 text-sm text-leise" title={row.actor}>
+                  <ActorText actor={row.actor} />
                 </td>
                 <td className="ziffern-tabellarisch break-all px-3 py-2.5 text-sm text-leise">
                   {row.ip ?? '—'}

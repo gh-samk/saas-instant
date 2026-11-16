@@ -3,7 +3,7 @@ import { createApp } from './app.js';
 import { HttpControlClient } from './control-client.js';
 import { localPgDump } from './control-dump.js';
 import { DockerodeClient, dockerFromEnv } from './docker/dockerode.js';
-import { pgInvoiceSource } from './invoices-pg.js';
+import { controlInvoiceSource } from './invoices-http.js';
 import { Redactor, createLogger } from './log.js';
 import { StateStore } from './state.js';
 import { defaultStorageFactory } from './storage/index.js';
@@ -25,6 +25,7 @@ async function main(): Promise<void> {
     throw new Error('CONTROL_DATABASE_URL ist nicht gesetzt');
   };
 
+  const control = new HttpControlClient(cfg.controlUrl, cfg.reportKey);
   const app = await createApp({
     secret: cfg.secret,
     version: cfg.version,
@@ -32,13 +33,13 @@ async function main(): Promise<void> {
     invoiceRetentionYears: cfg.invoiceRetentionYears,
     extraOwnProjects: cfg.extraOwnProjects,
     docker: new DockerodeClient(dockerFromEnv(cfg.dockerHost)),
-    control: new HttpControlClient(cfg.controlUrl, cfg.reportKey),
+    control,
     store: new StateStore(cfg.stateDir, cfg.stateKey),
     storageFactory: defaultStorageFactory,
     redactor,
     log,
     controlDump: () => (dbUrl ? localPgDump(dbUrl) : noDb()),
-    invoices: () => (dbUrl ? pgInvoiceSource(dbUrl) : noDb()),
+    invoices: () => controlInvoiceSource(control),
   });
   app.scheduler.start();
   app.server.listen(cfg.port, '0.0.0.0', () => log.info('backup-agent gestartet', { port: cfg.port, version: cfg.version }));

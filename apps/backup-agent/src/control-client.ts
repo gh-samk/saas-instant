@@ -1,4 +1,5 @@
 import type { BackupKind, InstanceSpec } from './types.js';
+import { ControlLockedError } from './errors.js';
 import { isRecord, parseInstanceSpec } from './validate.js';
 
 export interface BackupReport {
@@ -16,8 +17,30 @@ export interface BackupPlan {
   instances: InstanceSpec[];
 }
 
+export type ArchiveDocKind = 'pdf' | 'xml' | 'xrechnung';
+
+export interface ArchiveDocument {
+  kind: ArchiveDocKind;
+  base64: string;
+  sha256: string;
+}
+
+export interface ArchiveItem {
+  invoiceId: string;
+  number: string;
+  finalizedAt: string;
+  documents: ArchiveDocument[];
+}
+
+export interface InvoiceArchivePage {
+  items: ArchiveItem[];
+  next: string | null;
+}
+
 export interface ControlClient {
   getPlan(): Promise<BackupPlan>;
+  /** Eine Seite des Rechnungsarchivs (entschluesselt, nur bei entsperrter Verwaltung). Wirft ControlLockedError bei HTTP 423. */
+  getInvoiceArchivePage(after?: string): Promise<InvoiceArchivePage>;
   report(entry: BackupReport): Promise<void>;
 }
 
@@ -59,6 +82,17 @@ export class HttpControlClient implements ControlClient {
     return { ...(retentionYears !== undefined ? { retentionYears } : {}), instances };
   }
 
+  async getInvoiceArchivePage(after?: string): Promise<InvoiceArchivePage> {
+    const q = after ? `?after=${encodeURIComponent(after)}` : '';
+    const r = await this.fetchFn(`${this.baseUrl}/api/internal/invoice-archive${q}`, {
+      headers: { 'x-backup-key': this.key },
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (r.status === 423) throw new ControlLockedError();
+    if (!r.ok) throw new Error(`Rechnungsarchiv nicht abrufbar (HTTP ${r.status})`);
+    return parseArchivePage(await r.json());
+  }
+
   async report(entry: BackupReport): Promise<void> {
     const r = await this.fetchFn(`${this.baseUrl}/api/backups`, {
       method: 'POST',
@@ -68,4 +102,27 @@ export class HttpControlClient implements ControlClient {
     });
     if (!r.ok) throw new Error(`Meldung an die Verwaltung fehlgeschlagen (HTTP ${r.status})`);
   }
+}
+
+const DOC_KINDS: readonly string[] = ['pdf', 'xml', 'xrechnung'];
+
+function parseArchivePage(data: unknown): InvoiceArchivePage {
+  if (!isRecord(data) || !Array.isArray(data['items'])) throw new Error('Rechnungsarchiv hat ein unerwartetes Format');
+  const next = data['next'];
+  if (next !== null && next !== undefined && typeof next !== 'string') throw new Error('Rechnungsarchiv hat ein unerwartetes Format');
+  const items: ArchiveItem[] = [];
+  for (const raw of data['items'] as unknown[]) {
+    if (!isRecord(raw) || typeof raw['invoiceId'] !== 'string' || typeof raw['number'] !== 'string' || typeof raw['finalizedAt'] !== 'string' || !Array.isArray(raw['documents'])) {
+      throw new Error('Rechnungsarchiv enthaelt einen ungueltigen Eintrag');
+    }
+    const documents: ArchiveDocument[] = [];
+    for (const d of raw['documents'] as unknown[]) {
+      if (!isRecord(d) || typeof d['kind'] !== 'string' || !DOC_KINDS.includes(d['kind']) || typeof d['base64'] !== 'string' || typeof d['sha256'] !== 'string') {
+        throw new Error('Rechnungsarchiv enthaelt ein ungueltiges Dokument');
+      }
+      documents.push({ kind: d['kind'] as ArchiveDocKind, base64: d['base64'], sha256: d['sha256'] });
+    }
+    items.push({ invoiceId: raw['invoiceId'], number: raw['number'], finalizedAt: raw['finalizedAt'], documents });
+  }
+  return { items, next: typeof next === 'string' && next !== '' ? next : null };
 }

@@ -61,6 +61,15 @@ export interface Actor {
 }
 
 const PER_PAGE_DEFAULT = 25;
+const SEARCH_CACHE_TTL_MS = 60_000;
+
+interface CompanySearchEntry {
+  id: string;
+  name: string;
+  status: CompanyStatus;
+  /** Name, Kontakt, E-Mail, Ort in Kleinschreibung. */
+  haystack: string[];
+}
 
 /**
  * Rechnungszustaende, die kein Geld fordern: ein Entwurf noch nicht, eine
@@ -180,6 +189,63 @@ export class CompanyService {
     }
   }
 
+  private searchCache: {
+    fingerprint: string;
+    builtAt: number;
+    entries: CompanySearchEntry[];
+  } | null = null;
+
+  /**
+   * Organisations-Cache fuer Suche und Sortierung. Die Felder sind
+   * verschluesselt, die Datenbank kann weder filtern noch sortieren; deshalb
+   * liegt die entschluesselte, nach Name sortierte Kurzliste im Speicher.
+   *
+   * Ungueltig wird er ueber einen unverschluesselten Fingerabdruck aus
+   * Zeilenzahl und juengster Aenderung (`updatedAt`) — das deckt jeden
+   * Schreibweg ab, auch fremde Dienste. Zusaetzlich verfaellt er nach einer
+   * Minute. Gedacht fuer Hunderte bis wenige Tausend Organisationen.
+   */
+  private async searchIndex(): Promise<CompanySearchEntry[]> {
+    const agg = await this.prisma.company.aggregate({
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    });
+    const fingerprint = `${agg._count._all}:${agg._max.updatedAt?.getTime() ?? 0}`;
+    const cached = this.searchCache;
+    if (
+      cached &&
+      cached.fingerprint === fingerprint &&
+      Date.now() - cached.builtAt < SEARCH_CACHE_TTL_MS
+    ) {
+      return cached.entries;
+    }
+    const rows = await this.prisma.company.findMany({
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        city: true,
+        contactName: true,
+        contactEmail: true,
+      },
+    });
+    const entries = rows
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        status: r.status,
+        haystack: [r.name, r.contactName, r.contactEmail, r.city].map((v) =>
+          (v ?? '').toLowerCase(),
+        ),
+      }))
+      .sort(
+        (x, y) =>
+          x.name.localeCompare(y.name, 'de') || (x.id < y.id ? -1 : 1),
+      );
+    this.searchCache = { fingerprint, builtAt: Date.now(), entries };
+    return entries;
+  }
+
   /**
    * Liste mit Statusfilter und Freitextsuche über Name, Ansprechpartnerin,
    * deren E-Mail und Ort — ohne Beachtung der Groß-/Kleinschreibung.
@@ -199,48 +265,44 @@ export class CompanyService {
     const perPage = filter.perPage ?? PER_PAGE_DEFAULT;
     const search = filter.search?.trim();
 
-    // ZWEI Bedingungen, und der Unterschied ist wesentlich: `where` filtert
-    // die Liste, `searchCondition` zaehlt die Chips. Zaehlte man die Chips mit
-    // dem Statusfilter, zeigte jeder Chip ausser dem gewaehlten eine Null —
-    // die Leiste waere genau dann nutzlos, wenn man sie braucht.
-    const searchCondition: Prisma.CompanyWhereInput = search
-      ? {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { contactName: { contains: search, mode: 'insensitive' } },
-            { contactEmail: { contains: search, mode: 'insensitive' } },
-            { city: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      : {};
-
-    const where: Prisma.CompanyWhereInput = {
-      ...searchCondition,
-      ...(filter.status && filter.status.length > 0
-        ? { status: { in: filter.status } }
-        : {}),
-    };
+    // ZWEI Mengen, und der Unterschied ist wesentlich: `matches` ist die Liste
+    // nach Suche UND Statusfilter, `searched` zaehlt die Chips. Zaehlte man die
+    // Chips mit dem Statusfilter, zeigte jeder Chip ausser dem gewaehlten eine
+    // Null — die Leiste waere genau dann nutzlos, wenn man sie braucht.
+    //
+    // Name, Kontakt und Ort sind verschluesselt: Suche und Sortierung laufen im
+    // Speicher ueber den Organisations-Cache, erst die Seite wird nachgeladen.
+    const index = await this.searchIndex();
+    const needle = search ? search.toLowerCase() : null;
+    const searched = needle
+      ? index.filter((e) => e.haystack.some((h) => h.includes(needle)))
+      : index;
+    const countPerStatus: Partial<Record<CompanyStatus, number>> = {};
+    for (const e of searched) {
+      countPerStatus[e.status] = (countPerStatus[e.status] ?? 0) + 1;
+    }
+    const statuses = filter.status && filter.status.length > 0 ? filter.status : null;
+    const matches = statuses
+      ? searched.filter((e) => statuses.includes(e.status))
+      : searched;
+    const total = matches.length;
+    const pageIds = matches
+      .slice((page - 1) * perPage, page * perPage)
+      .map((e) => e.id);
 
     // EINMAL je Abfrage, nicht je Zeile: Sonst koennte eine Liste, die ueber
     // Mitternacht gerendert wird, zwei verschiedene „heute" benutzen.
     const todayDay = today();
 
-    const [rows, total, perStatus] = await this.prisma.$transaction([
-      this.prisma.company.findMany({
-        where,
-        select: SHORT_SELECT,
-        orderBy: [{ name: 'asc' }, { id: 'asc' }],
-        skip: (page - 1) * perPage,
-        take: perPage,
-      }),
-      this.prisma.company.count({ where }),
-      this.prisma.company.groupBy({
-        by: ['status'],
-        where: searchCondition,
-        _count: true,
-        orderBy: { status: 'asc' },
-      }),
-    ]);
+    const fetched = await this.prisma.company.findMany({
+      where: { id: { in: pageIds } },
+      select: SHORT_SELECT,
+    });
+    const byId = new Map(fetched.map((r) => [r.id, r]));
+    const rows = pageIds.flatMap((rowId) => {
+      const row = byId.get(rowId);
+      return row ? [row] : [];
+    });
 
     return {
       companies: rows.map((row) => ({
@@ -259,9 +321,7 @@ export class CompanyService {
       total,
       page,
       perPage,
-      countPerStatus: Object.fromEntries(
-        perStatus.map((z) => [z.status, z._count]),
-      ) as Record<CompanyStatus, number>,
+      countPerStatus: countPerStatus as Record<CompanyStatus, number>,
     };
   }
 
@@ -713,7 +773,9 @@ export class CompanyService {
 
       // Zuerst die Versandzeilen: Solange eine auf eine Einwilligung zeigt,
       // laesst sich diese nicht loeschen (`onDelete: Restrict`).
-      const { count: cleanedUpSendRows } = await tx.mailDelivery.updateMany({
+      // Einzeln je Zeile: die Verschluesselung braucht die Zeilen-id (AAD),
+      // ein updateMany ohne id waere dort nicht moeglich.
+      const sendRows = await tx.mailDelivery.findMany({
         where:
           consentIds.length > 0
             ? {
@@ -723,12 +785,19 @@ export class CompanyService {
                 ],
               }
             : { companyId: id },
-        data: {
-          recipientAddress: ADDRESS_AFTER_DELETION,
-          contentSnapshot: `Wortlaut bei der Kontaktdatenlöschung entfernt, ${dayReadable(day)}`,
-          consentId: null,
-        },
+        select: { id: true },
       });
+      for (const sendRow of sendRows) {
+        await tx.mailDelivery.update({
+          where: { id: sendRow.id },
+          data: {
+            recipientAddress: ADDRESS_AFTER_DELETION,
+            contentSnapshot: `Wortlaut bei der Kontaktdatenlöschung entfernt, ${dayReadable(day)}`,
+            consentId: null,
+          },
+        });
+      }
+      const cleanedUpSendRows = sendRows.length;
 
       let deletedConsents = 0;
       let remainingBlockEntries = 0;

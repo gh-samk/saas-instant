@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { PRICE_PRESETS } from '../../invoices/pricing.config';
 import type { TasksContext } from '../tasks.types';
@@ -11,19 +12,52 @@ import {
  * SQL-Berechnung der Pruefsummen prueft `gobd.integration.spec.ts`.
  */
 
+
+/** Dokumentzeile, die der Pruefung den gewuenschten Status liefert (Inhalt und Pruefsumme). */
+function documentRow(
+  row: { id: string; invoiceNumber: string | null; pdf: string; xml: string; xrechnung: string },
+) {
+  const content = Buffer.from('inhalt');
+  const good = createHash('sha256').update(content).digest('hex');
+  const part = (status: string) =>
+    status === 'absent'
+      ? { content: null, hash: null }
+      : status === 'mismatch'
+        ? { content, hash: 'f'.repeat(64) }
+        : { content, hash: good };
+  const [pdf, xml, xr] = [part(row.pdf), part(row.xml), part(row.xrechnung)];
+  return {
+    id: row.id,
+    invoiceNumber: row.invoiceNumber,
+    pdfContent: pdf.content,
+    pdfSha256: pdf.hash,
+    xmlContent: xml.content,
+    xmlSha256: xml.hash,
+    xrechnungContent: xr.content,
+    xrechnungSha256: xr.hash,
+  };
+}
+
 const COMPANY = { id: 'c1', name: 'Muster GmbH', status: 'customer' };
 
 function setup(findingRows: unknown[], numbers: string[]) {
-  const queryRaw = jest.fn(async () => findingRows);
-  const prisma = {
-    $queryRaw: queryRaw,
-    invoice: {
-      findMany: jest.fn(async (args: { where: Record<string, unknown>; select: Record<string, unknown> }) =>
-        'invoiceNumber' in args.where
-          ? numbers.map((invoiceNumber) => ({ invoiceNumber }))
-          : [{ id: 'inv-1', company: COMPANY }],
-      ),
+  // Zaehlt nur die Abrufe der Dokumentpruefung (Befundabfrage), nicht die Nummernabfrage.
+  const queryRaw = jest.fn();
+  const invoiceFindMany = jest.fn(
+    async (args: { where: Record<string, unknown>; select: Record<string, unknown>; cursor?: unknown }) => {
+      if ('finalizedAt' in args.where) {
+        if (!args.cursor) queryRaw();
+        return args.cursor
+          ? []
+          : (findingRows as Parameters<typeof documentRow>[0][]).map(documentRow);
+      }
+      return 'invoiceNumber' in args.where
+        ? numbers.map((invoiceNumber) => ({ invoiceNumber }))
+        : [{ id: 'inv-1', company: COMPANY }];
     },
+  );
+  const prisma = {
+    invoice: { findMany: invoiceFindMany },
   } as unknown as PrismaService;
   const context: TasksContext = {
     prisma,

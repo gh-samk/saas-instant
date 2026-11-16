@@ -56,7 +56,8 @@ export interface JobResult {
   sha256?: string;
 }
 
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+/** `deferred`: bewusst verschoben (z. B. Verwaltung gesperrt), kein Fehler; wird beim naechsten Lauf erneut versucht. */
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'deferred';
 
 export interface JobRecord {
   id: string;

@@ -14,6 +14,9 @@ export interface SchedulerDeps {
   schedule: () => TargetConfig['schedule'] | null;
   enqueueInstance: (spec: InstanceSpec) => void;
   enqueueControl: () => void;
+  /** Rechnungsarchiv wurde verschoben (Verwaltung gesperrt) und wartet auf einen neuen Versuch. */
+  invoicesDeferred?: () => boolean;
+  enqueueInvoices?: () => void;
   log: Logger;
   redactor: Redactor;
 }
@@ -21,6 +24,7 @@ export interface SchedulerDeps {
 /** Eigener Minutentakt-Planer (Serverzeit). `tick` ist von aussen aufrufbar, damit Tests ohne Timer laufen. */
 export class Scheduler {
   private lastSlot = '';
+  private lastRetry = 0;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(private readonly deps: SchedulerDeps) {}
@@ -37,6 +41,7 @@ export class Scheduler {
   async tick(now: Date): Promise<boolean> {
     const schedule = this.deps.schedule();
     if (!schedule) return false;
+    this.retryDeferred(now);
     const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     if (!SLOTS[schedule].includes(hhmm)) return false;
     const slotId = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}T${hhmm}`;
@@ -44,6 +49,14 @@ export class Scheduler {
     this.lastSlot = slotId;
     await this.runAll();
     return true;
+  }
+
+  /** Hoechstens alle 10 Minuten: verschobenes Rechnungsarchiv erneut versuchen (nach dem Entsperren der Verwaltung). */
+  private retryDeferred(now: Date): void {
+    if (!this.deps.invoicesDeferred?.() || !this.deps.enqueueInvoices) return;
+    if (now.getTime() - this.lastRetry < 10 * 60_000) return;
+    this.lastRetry = now.getTime();
+    this.deps.enqueueInvoices();
   }
 
   async runAll(): Promise<void> {

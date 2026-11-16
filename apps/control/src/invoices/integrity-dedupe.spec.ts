@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AUDIT_ACTION } from '../audit/audit.service';
 import {
   INTEGRITY_ACTOR,
@@ -8,14 +9,45 @@ import {
 const NOW = new Date('2026-09-20T02:40:00Z');
 const DAY = 86_400_000;
 
+
+/** Dokumentzeile, die der Pruefung den gewuenschten Status liefert (Inhalt und Pruefsumme). */
+function documentRow(
+  row: { id: string; invoiceNumber: string | null; pdf: string; xml: string; xrechnung: string },
+) {
+  const content = Buffer.from('inhalt');
+  const good = createHash('sha256').update(content).digest('hex');
+  const part = (status: string) =>
+    status === 'absent'
+      ? { content: null, hash: null }
+      : status === 'mismatch'
+        ? { content, hash: 'f'.repeat(64) }
+        : { content, hash: good };
+  const [pdf, xml, xr] = [part(row.pdf), part(row.xml), part(row.xrechnung)];
+  return {
+    id: row.id,
+    invoiceNumber: row.invoiceNumber,
+    pdfContent: pdf.content,
+    pdfSha256: pdf.hash,
+    xmlContent: xml.content,
+    xmlSha256: xml.hash,
+    xrechnungContent: xr.content,
+    xrechnungSha256: xr.hash,
+  };
+}
+
 /** Attrappe: ein Befund (Rechnung inv-1) und ein Audit-Log, das Zeitfilter versteht. */
 function setup(numbers: string[] = []) {
   const entries: { objectType: string; objectId: string; timestamp: Date }[] = [];
   const prisma = {
-    $queryRaw: jest.fn(async () => [
-      { id: 'inv-1', invoiceNumber: '2026-001', pdf: 'mismatch', xml: 'ok', xrechnung: 'ok', total: 1 },
-    ]),
-    invoice: { findMany: jest.fn(async () => numbers.map((invoiceNumber) => ({ invoiceNumber }))) },
+    invoice: {
+      findMany: jest.fn(async (args: { where: Record<string, unknown>; cursor?: unknown }) =>
+        'finalizedAt' in args.where
+          ? args.cursor
+            ? []
+            : [documentRow({ id: 'inv-1', invoiceNumber: '2026-001', pdf: 'mismatch', xml: 'ok', xrechnung: 'ok' })]
+          : numbers.map((invoiceNumber) => ({ invoiceNumber })),
+      ),
+    },
     auditLog: {
       findFirst: jest.fn(
         async (args: {

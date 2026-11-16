@@ -18,6 +18,7 @@ import { InvoiceHistoryService } from './invoice-history.service';
 import { IntegrityService, INTEGRITY_ACTOR, findDocumentFindings } from './integrity.service';
 import { checkDocument } from './integrity';
 import { InvoiceService } from './invoice.service';
+import { ARCHIVE_PAGE_SIZE, InvoiceArchiveService, type ArchiveItem } from './invoice-archive.service';
 import { PaymentService } from './payment.service';
 import { PricingConfigService } from './pricing.config';
 import {
@@ -417,6 +418,44 @@ describe('Verlauf', () => {
     }
     const times = entries.map((e) => e.at);
     expect([...times].sort()).toEqual(times);
+  });
+});
+
+describe('Verschluesselung der Dokumente und Archiv-Endpunkt', () => {
+  it('legt die Dokumentspalten verschluesselt ab, die Pruefsumme gilt dem Klartext', async () => {
+    const created = await finalizedWithDocuments('verschluesselt');
+    const raw = await prisma.$queryRaw<{ head: string; pdfSha256: string }[]>`
+      SELECT encode(substring("pdfContent" from 1 for 4), 'escape') AS head, "pdfSha256"
+      FROM "Invoice" WHERE "id" = ${created.invoiceId}`;
+    expect(raw[0].head).toBe('ENC1');
+    const row = await prisma.invoice.findUniqueOrThrow({ where: { id: created.invoiceId } });
+    expect(Buffer.from(row.pdfContent as Uint8Array).toString('utf8')).toContain('%PDF-1.7');
+    expect(sha(row.pdfContent as Uint8Array)).toBe(raw[0].pdfSha256);
+    expect((await integrity.check(created.invoiceId, actor, SOURCE)).ok).toBe(true);
+    expect((await findDocumentFindings(prisma, 500)).findings.map((f) => f.id)).not.toContain(created.invoiceId);
+  });
+
+  it('liefert das Archiv entschluesselt, seitenweise und mit gueltiger Pruefsumme', async () => {
+    const created = await finalizedWithDocuments('archiv');
+    const archive = new InvoiceArchiveService(prisma);
+    const seen: ArchiveItem[] = [];
+    let after: string | undefined;
+    for (let guard = 0; guard < 1000; guard++) {
+      const page = await archive.page(after);
+      expect(page.items.length).toBeLessThanOrEqual(ARCHIVE_PAGE_SIZE);
+      seen.push(...page.items);
+      if (page.next === null) break;
+      after = page.next;
+    }
+    const item = seen.find((i) => i.invoiceId === created.invoiceId);
+    expect(item).toBeDefined();
+    expect(item!.documents.map((d) => d.kind).sort()).toEqual(['pdf', 'xml', 'xrechnung']);
+    for (const d of item!.documents) {
+      expect(sha(Buffer.from(d.base64, 'base64'))).toBe(d.sha256);
+    }
+    const pdf = item!.documents.find((d) => d.kind === 'pdf')!;
+    expect(Buffer.from(pdf.base64, 'base64').toString('utf8')).toContain('%PDF-1.7');
+    expect(new Set(seen.map((i) => i.invoiceId)).size).toBe(seen.length);
   });
 });
 

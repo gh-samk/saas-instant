@@ -57,8 +57,9 @@ export const tierCheck: TaskSource = {
         priceTier: true,
         instance: { select: { id: true } },
       },
-      orderBy: { name: 'asc' },
     });
+    // Der Name ist verschluesselt: im Speicher sortieren.
+    candidates.sort((a, b) => a.name.localeCompare(b.name, 'de'));
     if (candidates.length === 0) return { total: 0, tasks: [] };
 
     // Derselbe Zeitraum wie beim Preisvorschlag: er endet HEUTE und umfasst

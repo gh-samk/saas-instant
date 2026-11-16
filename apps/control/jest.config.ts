@@ -13,6 +13,8 @@ const config: Config = {
   collectCoverageFrom: ['src/**/*.(t|j)s'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
+  // Fester Test-Datenschlüssel (Feldverschlüsselung ohne Datenbank).
+  setupFilesAfterEnv: ['<rootDir>/src/test-support/unit-setup.ts'],
 };
 
 export default config;

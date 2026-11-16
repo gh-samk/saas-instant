@@ -74,8 +74,8 @@ keine Geheimnisse. Quelle: `apps/backup-agent/src/hmac.ts`, `app.ts`,
 |---|---|---|
 | Datenbank je Kundeninstanz | `pg_dump -Fc`, per `docker exec` im Datenbank-Container der Instanz, verschlüsselt | `<Präfix>/instances/<subdomain>/<JJJJ-MM-TT>T<HHMMSS>Z.dump.age` |
 | Uploads je Instanz | `tar czf` im Container, der das Volume einhängt, verschlüsselt (nur, wenn das Manifest `uploadsService` und `uploadsPath` nennt) | `….uploads.tar.age` |
-| Datenbank der Verwaltung | `pg_dump -Fc` über `CONTROL_DATABASE_URL`, verschlüsselt | `<Präfix>/control/<Zeitstempel>.dump.age` |
-| Rechnungsarchiv | je Jahr alle PDFs und XMLs plus `hashes.sha256`, verschlüsselt | `<Präfix>/invoices/<JJJJ>/<Zeitstempel>.tar.age` |
+| Datenbank der Verwaltung | `pg_dump -Fc` über `CONTROL_DATABASE_URL`, verschlüsselt (age). **Der Dump enthält Chiffretext**, siehe unten | `<Präfix>/control/<Zeitstempel>.dump.age` |
+| Rechnungsarchiv | je Jahr alle PDFs und XMLs plus `hashes.sha256`, verschlüsselt (age). Der Agent holt sie **über die Verwaltung**, nicht per SQL | `<Präfix>/invoices/<JJJJ>/<Zeitstempel>.tar.age` |
 
 Zu jeder Datei gehört eine `.meta.json` mit Größe und SHA-256. Die
 Instanz-Container findet der Agent über Compose-Labels
@@ -83,6 +83,31 @@ Instanz-Container findet der Agent über Compose-Labels
 welcher Dienst, steht im Manifest unter `provisioning.backup`
 ([manifest.md](../manifest.md)); **ohne diesen Abschnitt gibt es keinen
 Sicherungsplan** und die Verwaltung lehnt Sicherung und Wiederherstellung ab.
+
+**Der Dump der Verwaltung enthält Chiffretext.** Personenbezogene Felder und
+Rechnungsinhalte liegen in der Datenbank verschlüsselt (`enc:v1:…`); ein
+zurückgespielter Dump ist ohne den Tresorschlüssel in diesen Feldern unlesbar. Zur
+Wiederherstellung braucht es die **Passphrase** (oder eine weitere Passphrase) oder
+den **Wiederherstellungsschlüssel** aus der Einrichtung des Tresors. Ohne beides gibt
+es keinen Weg zurück, auch nicht für den Betreiber. Zusätzlich zum age-Schlüssel der
+Sicherungen (Abschnitt 4) gehören sie in Ihre eigene, getrennte Ablage.
+
+**Das Rechnungsarchiv holt der Agent über die Verwaltung.** Er liest die Datenbank
+dafür nicht mehr selbst; `CONTROL_DATABASE_URL` dient nur noch dem `pg_dump`. Er ruft
+`GET /api/internal/invoice-archive` ab (Header `x-backup-key`, derselbe Schlüssel wie
+beim Sicherungsplan), seitenweise. Die Verwaltung liefert dort **entschlüsselte**
+Dokumente mit SHA-256, aber nur im entsperrten Zustand. Der Agent prüft jede Prüfsumme
+vor dem Hochladen (bei Abweichung bricht der Lauf ab, nichts Beschädigtes kommt ins
+Archiv), verschlüsselt mit age und legt wie bisher mit Object Lock ab. So bleibt das
+GoBD-Archiv **auch ohne die Verwaltung lesbar**: mit dem age-Schlüssel, ohne
+Tresor-Passphrase. Die Jahreszuordnung folgt dem Jahr der Festschreibung (UTC).
+
+Ist die Verwaltung gesperrt (HTTP 423, etwa nach einem Neustart bis zum Entsperren),
+meldet der Agent den Lauf als **`deferred`**. Das ist kein Fehler: Der Dump der
+Verwaltung ist trotzdem gesichert, nur das Rechnungsarchiv steht noch aus. Der Agent
+versucht es danach alle 10 Minuten erneut (ohne neuen Dump), spätestens beim nächsten
+Planlauf. Wer eine Verwaltung nach einem Neustart nicht entsperrt, bekommt also kein
+neues Rechnungsarchiv.
 
 Das Rechnungsarchiv wird nur neu abgelegt, wenn sich sein Inhalt geändert hat.
 Zusammenhang mit der GoBD: [gobd.md](gobd.md), Abschnitt 9.
@@ -329,8 +354,11 @@ auf dem der private Schlüssel liegt.
 8. `docker compose start control-api control-web backup-agent`. Die Migrationen laufen
    beim Start. Dann Anmeldung, Rechnungsliste und Audit-Log ansehen.
 
-Die Verwaltungs-Datenbank enthält die festgeschriebenen Rechnungen samt PDF und XML.
-Zusätzlich liegen sie im Rechnungsarchiv; der Wiederherstellungsweg dafür ist:
+Die Verwaltungs-Datenbank enthält die festgeschriebenen Rechnungen samt PDF und XML,
+**als Chiffretext**: Nach dem Zurückspielen muss die Verwaltung mit Passphrase oder
+Wiederherstellungsschlüssel entsperrt werden. Zusätzlich liegen die Rechnungen im
+Klartext-Format (PDF/XML) im Rechnungsarchiv, lesbar nur mit dem age-Schlüssel; der
+Wiederherstellungsweg dafür ist:
 `invoices/<Jahr>/…tar.age` entschlüsseln, entpacken, `sha256sum -c hashes.sha256`.
 Im Modus `portal` hat jede Verwaltung eine eigene Datenbank; die Wiederherstellung
 einer betrifft nie eine andere.

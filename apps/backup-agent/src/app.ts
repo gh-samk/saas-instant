@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { type ControlClient } from './control-client.js';
+import { DeferredError } from './errors.js';
 import type { DockerClient, ExecHandle } from './docker/types.js';
 import { MAX_BODY_BYTES, NonceStore, verifyRequest } from './hmac.js';
 import { type Logger, type Redactor, safeMessage } from './log.js';
@@ -16,7 +17,7 @@ import { Scheduler } from './scheduler.js';
 import type { StorageFactory } from './storage/index.js';
 import type { StateStore } from './state.js';
 import { TargetService } from './target.js';
-import type { BackupKind, BackupListEntry, InstanceSpec, JobKind } from './types.js';
+import type { BackupKind, BackupListEntry, InstanceSpec, JobKind, JobResult } from './types.js';
 import {
   ValidationError,
   isRecord,
@@ -102,17 +103,29 @@ export async function createApp(deps: AppDeps): Promise<App> {
 
   const enqueueBackup = (spec: InstanceSpec) =>
     queue.submit('backup', () => runBackup(buildCtx(), spec));
-  const enqueueControl = () =>
-    queue.submit('backup-control', async () => {
-      await refreshRetention();
-      return runBackupControl(buildCtx());
-    });
+  // Rechnungsarchiv verschoben (Verwaltung gesperrt)? Der Planer versucht es erneut, ohne neuen DB-Dump.
+  let invoicesDeferred = false;
+  const runControlJob = async (invoicesOnly: boolean): Promise<JobResult | void> => {
+    await refreshRetention();
+    try {
+      const r = await runBackupControl(buildCtx(), { invoicesOnly });
+      invoicesDeferred = false;
+      return r;
+    } catch (e) {
+      if (e instanceof DeferredError) invoicesDeferred = true;
+      throw e;
+    }
+  };
+  const enqueueControl = () => queue.submit('backup-control', () => runControlJob(false));
+  const enqueueInvoices = () => queue.submit('backup-control', () => runControlJob(true));
 
   const scheduler = new Scheduler({
     control: deps.control,
     schedule: () => targets.current()?.target.schedule ?? null,
     enqueueInstance: (s) => void enqueueBackup(s),
     enqueueControl: () => void enqueueControl(),
+    invoicesDeferred: () => invoicesDeferred && !queue.hasActive(),
+    enqueueInvoices: () => void enqueueInvoices(),
     log: deps.log,
     redactor: deps.redactor,
   });

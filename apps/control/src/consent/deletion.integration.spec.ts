@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { consentEmailIndex, mailRecipientIndex } from '../crypto/field-crypto';
 import type { ConfigService } from '@nestjs/config';
 import { AuditService } from '../audit/audit.service';
 import type { MailService } from '../mail/mail.service';
@@ -70,7 +71,7 @@ async function provisioning(label: string) {
     },
     SOURCE,
   );
-  const row = await prisma.consent.findUniqueOrThrow({ where: { email } });
+  const row = await prisma.consent.findUniqueOrThrow({ where: { emailIdx: consentEmailIndex(email) } });
   await consents.confirm(row.confirmationToken!, SOURCE);
 
   const send = await prisma.mailDelivery.create({
@@ -95,7 +96,7 @@ afterAll(async () => {
   await cleanUpConsents(ADDRESS_PREFIX);
   await cleanUp(PREFIX);
   await prisma.mailDelivery.deleteMany({
-    where: { recipientAddress: ADDRESS_AFTER_DELETION },
+    where: { recipientIdx: mailRecipientIndex(ADDRESS_AFTER_DELETION) },
   });
   await disconnect();
 });

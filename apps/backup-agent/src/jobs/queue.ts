@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type Redactor, safeMessage } from '../log.js';
+import { DeferredError } from '../errors.js';
 import type { JobKind, JobRecord, JobResult } from '../types.js';
 
 const MAX_KEEP = 200;
@@ -21,7 +22,7 @@ export class JobQueue {
     this.jobs.set(id, { id, kind, status: 'queued', startedAt: this.now().toISOString() });
     this.pending.push({ id, run: async () => (await run()) ?? {} });
     while (this.jobs.size > MAX_KEEP) {
-      const oldest = [...this.jobs.values()].find((j) => j.status === 'succeeded' || j.status === 'failed');
+      const oldest = [...this.jobs.values()].find((j) => j.status !== 'queued' && j.status !== 'running');
       if (!oldest) break;
       this.jobs.delete(oldest.id);
     }
@@ -53,7 +54,7 @@ export class JobQueue {
           rec.result = await next.run();
           rec.status = 'succeeded';
         } catch (e) {
-          rec.status = 'failed';
+          rec.status = e instanceof DeferredError ? 'deferred' : 'failed';
           rec.message = safeMessage(this.redactor, e);
         }
         rec.finishedAt = this.now().toISOString();

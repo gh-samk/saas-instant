@@ -1,0 +1,104 @@
+/** Namespace `vault`: Datenverschlüsselung — Einrichtung, Entsperren, Einstellungen → Sicherheit. */
+export default {
+  // --- Gemeinsam -------------------------------------------------------------
+  passphraseLabel: 'Passphrase',
+  passphraseNewLabel: 'Neue Passphrase',
+  passphraseRepeatLabel: 'Passphrase wiederholen',
+  passphraseHint: 'Mindestens 12 Zeichen. Am besten ein ganzer Satz, den nur du kennst.',
+  passphraseMismatch: 'Die beiden Eingaben sind nicht gleich.',
+  recoveryKeyLabel: 'Wiederherstellungsschlüssel',
+  statusChecking: 'Verschlüsselung wird geprüft …',
+
+  // --- Entsperren ------------------------------------------------------------
+  unlockTitle: 'Verwaltung entsperren',
+  unlockSubtitle: 'Die Daten sind nach dem Neustart gesperrt. Gib deine Passphrase ein.',
+  unlockSubtitleKey: 'Gib den Wiederherstellungsschlüssel ein, den du bei der Einrichtung gesichert hast.',
+  unlockButton: 'Entsperren',
+  unlockWithKey: 'Mit Wiederherstellungsschlüssel entsperren',
+  unlockWithPassphrase: 'Mit Passphrase entsperren',
+  unlockSignOut: 'Abmelden',
+  unlockKeyHint: 'Bindestriche und Groß-/Kleinschreibung spielen keine Rolle.',
+  unlockWrongPassphrase: 'Die Passphrase stimmt nicht. Bitte prüfe die Eingabe.',
+  unlockWrongKey: 'Der Wiederherstellungsschlüssel stimmt nicht. Bitte prüfe die Eingabe.',
+  unlockRateLimited: 'Zu viele Fehlversuche. Bitte in {time} erneut versuchen.',
+  unlockFailed: 'Das Entsperren hat nicht geklappt. Bitte versuche es erneut.',
+
+  // --- Einrichtung -----------------------------------------------------------
+  setupTitle: 'Daten verschlüsseln',
+  setupStepPassphrase: 'Passphrase',
+  setupStepKey: 'Schlüssel sichern',
+  setupIntro:
+    'Alle Kundendaten werden verschlüsselt gespeichert. Nach jedem Neustart entsperrst du die Verwaltung mit deiner Passphrase.',
+  setupWarning:
+    'Ohne Passphrase und Wiederherstellungsschlüssel sind die Daten unwiederbringlich verloren. Niemand kann sie zurückholen.',
+  setupSubmit: 'Verschlüsselung einrichten',
+  setupFailed: 'Die Einrichtung hat nicht geklappt. Es wurde nichts verändert.',
+  setupAlready: 'Die Verschlüsselung ist bereits eingerichtet.',
+  setupEvidenceTitle: 'Verschlüsselung einrichten',
+  setupEvidenceReason: 'Bestätige kurz, dass du es bist, bevor die Verschlüsselung eingerichtet wird.',
+  setupKeyIntro: 'Das ist dein Wiederherstellungsschlüssel. Er wird nur jetzt angezeigt.',
+  setupDone: 'Fertig, weiter zur Verwaltung',
+
+  // --- Wiederherstellungsschlüssel anzeigen ----------------------------------
+  keyWarning:
+    'Bewahre ihn getrennt von der Passphrase auf, zum Beispiel im Passwortmanager oder ausgedruckt im Safe. Mit ihm kommst du an die Daten, falls die Passphrase verloren geht.',
+  keyCopy: 'Kopieren',
+  keyCopied: 'Schlüssel kopiert.',
+  keyCopyFailed: 'Kopieren nicht möglich. Markiere den Schlüssel und kopiere ihn von Hand.',
+  keyDownload: 'Als TXT speichern',
+  keyPrint: 'Drucken',
+  keyConfirm: 'Ich habe den Schlüssel sicher verwahrt.',
+  keyFileName: 'wiederherstellungsschluessel.txt',
+  keyFileHeading: '{product}: Wiederherstellungsschlüssel',
+  keyFileDate: 'Erstellt am {date}',
+  keyFileNote:
+    'Zusammen mit der Passphrase der einzige Zugang zu den verschlüsselten Daten. Sicher und getrennt von der Passphrase aufbewahren.',
+  keyPrintHeading: '{product}: Wiederherstellungsschlüssel',
+  keyPrintDate: 'Erstellt am {date}. Sicher aufbewahren, nicht weitergeben.',
+
+  // --- Einstellungen → Sicherheit --------------------------------------------
+  cardTitle: 'Datenverschlüsselung',
+  cardStatusUnlocked: 'Entsperrt',
+  cardIntro: 'Wer eine dieser Passphrasen oder den Wiederherstellungsschlüssel kennt, kann die Verwaltung entsperren.',
+  cardLoadError: 'Der Stand der Verschlüsselung ließ sich nicht laden.',
+  cardRetry: 'Erneut versuchen',
+  entryPassphrase: 'Passphrase von {label}',
+  entryPassphraseDefault: 'Passphrase',
+  entryPassphraseCreated: 'seit {date}',
+  entryRecovery: 'Wiederherstellungsschlüssel',
+  entryRecoveryCreated: 'erzeugt am {date}',
+  entryOwn: 'du',
+  changeButton: 'Ändern',
+  changeAria: 'Passphrase von {label} ändern',
+  changeAriaDefault: 'Passphrase ändern',
+  addButton: 'Weitere Passphrase hinzufügen',
+  regenerateButton: 'Schlüssel neu erzeugen',
+  regenerateAria: 'Wiederherstellungsschlüssel neu erzeugen',
+
+  changeTitle: 'Passphrase ändern',
+  changeCurrentLabel: 'Bisherige Passphrase',
+  changeSubmit: 'Passphrase ändern',
+  changeDone: 'Passphrase geändert.',
+  changeFailed: 'Die Passphrase ließ sich nicht ändern.',
+  changeWrongCurrent: 'Die bisherige Passphrase stimmt nicht.',
+  changeNote: 'Die Daten bleiben unverändert, nur die Passphrase wird ersetzt.',
+
+  addTitle: 'Weitere Passphrase hinzufügen',
+  addNote: 'Für eine zweite Person. Jede Passphrase entsperrt dieselben Daten und lässt sich einzeln ändern.',
+  addLabelLabel: 'Bezeichnung (optional)',
+  addLabelHint: 'Zum Beispiel der Name der Person.',
+  addSubmit: 'Hinzufügen',
+  addDone: 'Passphrase hinzugefügt.',
+  addFailed: 'Die Passphrase ließ sich nicht hinzufügen.',
+
+  regenerateTitle: 'Wiederherstellungsschlüssel neu erzeugen',
+  regenerateNote: 'Der bisherige Schlüssel verliert sofort seine Gültigkeit. Den neuen siehst du nur einmal.',
+  regenerateSubmit: 'Neu erzeugen',
+  regenerateFailed: 'Der Schlüssel ließ sich nicht neu erzeugen.',
+  regenerateDone: 'Neuen Schlüssel gesichert',
+
+  evidenceTitle: 'Zur Sicherheit bestätigen',
+  evidenceReason: 'Diese Änderung betrifft den Zugang zu allen Daten. Bestätige kurz, dass du es bist.',
+  cancel: 'Abbrechen',
+  close: 'Schließen',
+} satisfies Record<string, string>;

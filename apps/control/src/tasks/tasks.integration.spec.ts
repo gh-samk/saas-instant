@@ -372,8 +372,12 @@ describe('[W7] Obergrenze der Liste', () => {
 
     // Gleich wieder weg: Sonst verdrängt dieser Berg in den folgenden Prüfungen
     // genau die Aufgaben, um die es dort geht.
+    // Der Name ist verschlüsselt: im Speicher auswählen.
+    const mine = (
+      await prisma.company.findMany({ select: { id: true, name: true } })
+    ).filter((c) => c.name.startsWith(identifier));
     await prisma.company.deleteMany({
-      where: { name: { startsWith: identifier } },
+      where: { id: { in: mine.map((c) => c.id) } },
     });
   });
 

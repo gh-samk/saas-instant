@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { consentEmailIndex } from '../crypto/field-crypto';
 import type { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
@@ -170,7 +171,7 @@ async function confirmedAddress(
     { email, formText: FORM_TEXT, companyId },
     SOURCE,
   );
-  const row = await prisma.consent.findUniqueOrThrow({ where: { email } });
+  const row = await prisma.consent.findUniqueOrThrow({ where: { emailIdx: consentEmailIndex(email) } });
   await consents.confirm(row.confirmationToken!, SOURCE);
   return { id: row.id, email };
 }
@@ -183,7 +184,7 @@ async function unconfirmedAddress(
     { email, formText: FORM_TEXT },
     SOURCE,
   );
-  const row = await prisma.consent.findUniqueOrThrow({ where: { email } });
+  const row = await prisma.consent.findUniqueOrThrow({ where: { emailIdx: consentEmailIndex(email) } });
   return { id: row.id, email };
 }
 

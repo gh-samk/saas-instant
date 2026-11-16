@@ -71,7 +71,7 @@ function freePort() {
  * Startet die Control-API. Liefert { url, port, dbName, env, stop, login }.
  * env überschreibt die Standardumgebung (zufällige Geheimnisse je Lauf, nichts davon im Repo).
  */
-export async function startControl({ port, dbName = 'e2e_control', env = {}, suite = 'control', build } = {}) {
+export async function startControl({ port, dbName = 'e2e_control', env = {}, suite = 'control', build, vault = true } = {}) {
   port = port ?? (await freePort());
   await createDatabase(dbName);
   const logDir = suiteDir(suite);
@@ -100,40 +100,86 @@ export async function startControl({ port, dbName = 'e2e_control', env = {}, sui
   await run('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { cwd: CONTROL_DIR, env: childEnv, timeoutMs: 300_000 });
   await run('pnpm', ['run', 'seed'], { cwd: CONTROL_DIR, env: childEnv, timeoutMs: 300_000 });
 
-  const log = createWriteStream(join(logDir, `control-${port}.log`));
-  const child = spawn('node', ['dist/main'], {
-    cwd: CONTROL_DIR, env: childEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  child.stdout.pipe(log, { end: false });
-  child.stderr.pipe(log, { end: false });
+  const logPath = join(logDir, `control-${port}.log`);
+  let log = null;
+  let child = null;
   let exited = null;
-  child.on('exit', (c, s) => { exited = `Code ${c ?? s}`; });
-  updateState((s) => s.pids.push(child.pid));
+  const launch = () => {
+    exited = null;
+    log = createWriteStream(logPath, { flags: 'a' });
+    const c = spawn('node', ['dist/main'], {
+      cwd: CONTROL_DIR, env: childEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    c.stdout.pipe(log, { end: false });
+    c.stderr.pipe(log, { end: false });
+    c.on('exit', (code, sig) => { if (child === c) exited = `Code ${code ?? sig}`; });
+    child = c;
+    updateState((s) => s.pids.push(c.pid));
+  };
+  const kill = async () => {
+    if (!child) return;
+    const c = child;
+    if (exited === null) {
+      try { process.kill(-c.pid, 'SIGTERM'); } catch { /* schon weg */ }
+      for (let i = 0; i < 40 && exited === null; i++) await sleep(250);
+      if (exited === null) { try { process.kill(-c.pid, 'SIGKILL'); } catch { /* weg */ } }
+    }
+    log?.end();
+    updateState((s) => { s.pids = s.pids.filter((p) => p !== c.pid); });
+  };
+  launch();
 
   const url = `http://127.0.0.1:${port}`;
   const stop = async () => {
-    if (exited === null) {
-      try { process.kill(-child.pid, 'SIGTERM'); } catch { /* schon weg */ }
-      for (let i = 0; i < 40 && exited === null; i++) await sleep(250);
-      if (exited === null) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* weg */ } }
-    }
-    log.end();
-    updateState((s) => { s.pids = s.pids.filter((p) => p !== child.pid); });
+    await kill();
     await dropDatabase(dbName).catch(() => {});
     updateState((s) => { s.dbs = s.dbs.filter((d) => d !== dbName); });
   };
+  const waitUp = () => waitFor(async () => {
+    if (exited) throw new Error(`Control-API vorzeitig beendet (${exited}); siehe ${logDir}/control-${port}.log`);
+    const r = await fetch(`${url}/api/health`).catch(() => null);
+    return r?.ok;
+  }, { timeoutMs: Number(process.env.E2E_HEALTH_TIMEOUT_MS) || 90_000, label: '/api/health', intervalMs: 500 });
+  /** Prozess beenden und mit DERSELBEN Datenbank neu starten (Tresor danach gesperrt). */
+  const restart = async () => {
+    await kill();
+    launch();
+    await waitUp();
+  };
 
   try {
-    await waitFor(async () => {
-      if (exited) throw new Error(`Control-API vorzeitig beendet (${exited}); siehe ${logDir}/control-${port}.log`);
-      const r = await fetch(`${url}/api/health`).catch(() => null);
-      return r?.ok;
-    }, { timeoutMs: Number(process.env.E2E_HEALTH_TIMEOUT_MS) || 90_000, label: '/api/health', intervalMs: 500 });
+    await waitUp();
   } catch (e) {
     await stop();
     throw e;
   }
-  return { url, port, dbName, env: childEnv, stop, login: (opts) => login(url, opts) };
+
+  // Nach jedem Start ist die Verwaltung gesperrt (Tresor). Einrichten und entsperren, mit einer
+  // Passphrase, die es nur für diesen Lauf gibt (nie im Repo). Die dafür nötige Anmeldung wird
+  // dem ERSTEN ctl.login() ohne Optionen überlassen, damit kein TOTP-Zeitfenster verbraucht wird.
+  let vaultInfo = null;
+  let firstLogin = null;
+  if (vault) {
+    try {
+      const passphrase = env.E2E_VAULT_PASSPHRASE ?? `e2e-${randomBytes(18).toString('base64url')}`;
+      firstLogin = await login(url);
+      const setup = await firstLogin.api('POST', '/api/vault/setup', { passphrase });
+      if (!setup.ok) throw new Error(`Tresor einrichten fehlgeschlagen: HTTP ${setup.status} ${JSON.stringify(setup.body).slice(0, 200)}`);
+      vaultInfo = { passphrase, recoveryKey: setup.body.recoveryKey };
+    } catch (e) {
+      await stop();
+      throw e;
+    }
+  }
+  const loginOnce = (opts) => {
+    if (!opts && firstLogin) {
+      const l = firstLogin;
+      firstLogin = null;
+      return Promise.resolve(l);
+    }
+    return login(url, opts);
+  };
+  return { url, port, dbName, env: childEnv, stop, restart, vault: vaultInfo, login: loginOnce };
 }
 
 export const stopControl = (ctl) => ctl.stop();

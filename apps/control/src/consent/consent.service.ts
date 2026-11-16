@@ -7,6 +7,7 @@ import type { InquirySource } from '../common/inquiry-source';
 import { baseUrl } from '../common/base-url';
 import { MailService } from '../mail/mail.service';
 import type { DbClient } from '../prisma/db-client';
+import { consentEmailIndex } from '../crypto/field-crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   newToken,
@@ -283,7 +284,7 @@ export class ConsentService {
       // `$executeRaw` und nicht `$queryRaw`: die Sperrfunktion liefert `void`.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKeyForAddress(email)})`;
       const present = await tx.consent.findUnique({
-        where: { email },
+        where: { emailIdx: consentEmailIndex(email) },
         select: {
           id: true,
           status: true,
@@ -756,7 +757,7 @@ export class ConsentService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKeyForAddress(address)})`;
       const present = await tx.consent.findUnique({
-        where: { email: address },
+        where: { emailIdx: consentEmailIndex(address) },
         select: { id: true, status: true, companyId: true },
       });
 
@@ -902,8 +903,9 @@ export class ConsentService {
         companyId: true,
         company: { select: { name: true } },
       },
-      orderBy: { email: 'asc' },
     });
+    // E-Mail ist verschluesselt: im Speicher sortieren.
+    rows.sort((a, b) => a.email.localeCompare(b.email, 'de'));
     return rows.map((row) => ({
       consentId: row.id,
       email: row.email,
@@ -984,7 +986,7 @@ export class ConsentService {
   /** Der vollständige Nachweis zu einer Adresse — ohne die Token selbst. */
   async evidence(email: string): Promise<EvidenceRow | null> {
     const row = await this.prisma.consent.findUnique({
-      where: { email: normalizeAddress(email) },
+      where: { emailIdx: consentEmailIndex(normalizeAddress(email)) },
     });
     if (!row) return null;
     return {
@@ -1012,7 +1014,7 @@ export class ConsentService {
     email: string,
   ): Promise<{ id: string; status: ConsentStatus } | null> {
     return this.prisma.consent.findUnique({
-      where: { email: normalizeAddress(email) },
+      where: { emailIdx: consentEmailIndex(normalizeAddress(email)) },
       select: { id: true, status: true },
     });
   }

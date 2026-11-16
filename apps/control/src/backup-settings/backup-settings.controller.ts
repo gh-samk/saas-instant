@@ -6,6 +6,8 @@ import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { WithoutSecondFactor } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
 import { SessionGuard } from '../common/guards/session.guard';
+import { RequireAdmin } from '../common/decorators/require-role.decorator';
+import { RoleGuard } from '../common/guards/role.guard';
 import { sourceFrom } from '../common/inquiry-source';
 import {
   BackupSettingsUpdateDto,
@@ -24,7 +26,7 @@ import {
  * Geheimnisse sind write-only (siehe `BackupSettingsService`).
  */
 @Controller('settings/backup')
-@UseGuards(SessionGuard, SecondFactorGuard)
+@UseGuards(SessionGuard, RoleGuard, SecondFactorGuard)
 export class BackupSettingsController {
   constructor(private readonly settings: BackupSettingsService) {}
 
@@ -38,6 +40,7 @@ export class BackupSettingsController {
   }
 
   // Die Antwort kann EINMALIG den privaten age-Schlüssel tragen: nie zwischenspeichern.
+  @RequireAdmin()
   @Put()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -50,6 +53,7 @@ export class BackupSettingsController {
     return this.settings.update(dto, user, sourceFrom(req));
   }
 
+  @RequireAdmin()
   @Post('test')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

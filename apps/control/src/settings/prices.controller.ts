@@ -6,6 +6,8 @@ import { LoggedInUser } from '../common/decorators/logged-in-user.decorator';
 import { WithoutSecondFactor } from '../common/decorators/without-second-factor.decorator';
 import { SecondFactorGuard } from '../common/guards/second-factor.guard';
 import { SessionGuard } from '../common/guards/session.guard';
+import { RequireAdmin } from '../common/decorators/require-role.decorator';
+import { RoleGuard } from '../common/guards/role.guard';
 import { sourceFrom } from '../common/inquiry-source';
 import { PricesUpdateDto } from './dto/prices.dto';
 import { PriceSettingsService } from './price-settings.service';
@@ -19,7 +21,7 @@ import type { PricesResponse } from './price-settings.service';
  * eine Geldfolge. Alte, festgeschriebene Rechnungen bleiben unberührt (R2).
  */
 @Controller('settings/prices')
-@UseGuards(SessionGuard, SecondFactorGuard)
+@UseGuards(SessionGuard, RoleGuard, SecondFactorGuard)
 export class PricesController {
   constructor(private readonly prices: PriceSettingsService) {}
 
@@ -31,6 +33,7 @@ export class PricesController {
     return this.prices.get();
   }
 
+  @RequireAdmin()
   @Put()
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

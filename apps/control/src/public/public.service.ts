@@ -3,6 +3,7 @@ import type { InquiryOutcome } from '.prisma/control-client';
 import { quotaParts, type QuotaParts } from './quota-key';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
+import { companyContactEmailIndex } from '../crypto/field-crypto';
 import { today, mailBrand, toDate } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
@@ -188,7 +189,7 @@ export class PublicService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${block})`;
 
       const present = await tx.company.findFirst({
-        where: { contactEmail: { equals: email, mode: 'insensitive' } },
+        where: { contactEmailIdx: companyContactEmailIndex(email) },
         orderBy: { createdAt: 'asc' },
         select: { id: true },
       });
@@ -470,33 +471,28 @@ export class PublicService {
     parts: QuotaParts,
     since: Date,
   ): Promise<number> {
-    const rows = await this.prisma.$queryRaw<{ count: number }[]>`
-      WITH addresses AS (
-        SELECT lower(btrim("recipientAddress")) AS address
-        FROM "MailDelivery"
-        WHERE "subject" = ${subject}
-          AND "createdAt" >= ${since}
-      ),
-      parts AS (
-        SELECT
-          split_part(address, '@', 2) AS domain,
-          CASE
-            WHEN position('+' in split_part(address, '@', 1)) > 1
-              THEN split_part(split_part(address, '@', 1), '+', 1)
-            ELSE split_part(address, '@', 1)
-          END AS local
-        FROM addresses
-      )
-      SELECT count(*)::int AS count
-      FROM parts
-      WHERE domain = ANY(${parts.domainsSpellings}::text[])
-        AND (
-          CASE WHEN ${parts.pointsIrrelevant}::boolean
-            THEN replace(local, '.', '')
-            ELSE local
-          END
-        ) = ${parts.local}`;
-    return rows[0]?.count ?? 0;
+    // Betreff und Adresse sind verschluesselt; die Datenbank kann sie weder
+    // vergleichen noch zerlegen. Deshalb werden ALLE Zeilen des Zeitfensters
+    // (ohne Obergrenze, [Review A1]) geladen, entschluesselt und hier nach
+    // demselben Schluessel gezaehlt. Nur die beiden noetigen Spalten werden
+    // gelesen.
+    const rows = await this.prisma.mailDelivery.findMany({
+      where: { createdAt: { gte: since } },
+      select: { subject: true, recipientAddress: true },
+    });
+    let count = 0;
+    for (const row of rows) {
+      if (row.subject !== subject) continue;
+      const other = quotaParts(row.recipientAddress);
+      if (other === null) continue;
+      if (
+        other.domain === parts.domain &&
+        other.local === parts.local
+      ) {
+        count += 1;
+      }
+    }
+    return count;
   }
 
   private async demoAccess(

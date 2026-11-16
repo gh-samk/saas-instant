@@ -9,7 +9,11 @@ import { sha256hex } from '../hmac.js';
 import { pruneOldBackups } from './retention.js';
 
 /** Verwaltungs-DB und Rechnungsarchiv. Das Rechnungsarchiv wird nie geloescht und (S3) mit Object Lock versehen. */
-export async function runBackupControl(ctx: JobContext): Promise<JobResult> {
+export async function runBackupControl(ctx: JobContext, opts: { invoicesOnly?: boolean } = {}): Promise<JobResult> {
+  if (opts.invoicesOnly) {
+    await archiveInvoices(ctx);
+    return {};
+  }
   const ts = stamp(ctx.now());
   const dumpKey = `${ctx.keyPrefix}control/${ts}.dump.age`;
   const spool: string[] = [];
@@ -40,8 +44,8 @@ export async function runBackupControl(ctx: JobContext): Promise<JobResult> {
     for (const f of spool) await rmQuiet(f);
   }
 
-  // Rechnungsarchiv je Jahr. Fehler hier lassen den Lauf scheitern (Meldung),
-  // die Datenbanksicherung oben bleibt trotzdem erhalten.
+  // Rechnungsarchiv je Jahr. Fehler hier lassen den Lauf scheitern (Meldung), die Datenbanksicherung
+  // oben bleibt trotzdem erhalten. Ist die Verwaltung gesperrt (423), wird der Lauf als "deferred" gemeldet.
   await archiveInvoices(ctx);
   return result;
 }
@@ -60,11 +64,12 @@ async function archiveInvoices(ctx: JobContext): Promise<void> {
     ? new Date(ctx.now().getTime() + ctx.invoiceRetentionYears * 365.25 * 86_400_000)
     : undefined;
 
-  for (const year of await src.years()) {
+  const all = await src.fetchAll();
+  for (const year of [...all.keys()].sort()) {
     // Eintraege einsammeln; Hashliste bestimmt den Inhalt (und damit, ob sich etwas geaendert hat).
     const entries: { name: string; data: Buffer }[] = [];
     const hashLines: string[] = [];
-    for await (const inv of src.ofYear(year)) {
+    for (const inv of all.get(year) ?? []) {
       const safe = inv.number.replace(/[^A-Za-z0-9._-]/g, '_');
       const add = (suffix: string, data?: Buffer | null) => {
         if (!data || data.length === 0) return;

@@ -6,15 +6,18 @@ import { controlBackupMissing } from './control-backup-missing.source';
 const NOW = new Date('2026-09-10T08:00:00Z');
 
 function setup(opts: { target: boolean; last: Partial<Record<'control' | 'invoices', string>> }) {
-  const findFirst = jest.fn(
-    async (args: { where: { afterValue: { equals: 'control' | 'invoices' } } }) => {
-      const at = opts.last[args.where.afterValue.equals];
-      return at === undefined ? null : { timestamp: new Date(at) };
-    },
+  // `afterValue` ist verschluesselt: die Quelle liest die Meldungen (neueste
+  // zuerst) und wertet `kind` im Speicher aus.
+  const findFirst = jest.fn(async (args: { skip?: number }) =>
+    (args.skip ?? 0) > 0
+      ? []
+      : (Object.entries(opts.last) as [string, string][])
+          .map(([kind, at]) => ({ timestamp: new Date(at), afterValue: { kind } }))
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
   );
   const prisma = {
     backupTarget: { findUnique: jest.fn(async () => (opts.target ? { id: 'singleton' } : null)) },
-    auditLog: { findFirst },
+    auditLog: { findMany: findFirst },
   } as unknown as PrismaService;
   const context: TasksContext = {
     prisma,

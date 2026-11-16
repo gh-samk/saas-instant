@@ -12,6 +12,7 @@ import { createSuite, assert, waitFor, sleep, suiteDir } from '../lib/util.mjs';
 import { startControl, ROOT, CONTROL_DIR, SEED } from '../lib/control.mjs';
 import { docker, compose, composeDown, run, logs } from '../lib/docker.mjs';
 import { startMockCoolify } from './mock-coolify.mjs';
+import { FORMS } from '../invoice/fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = join(ROOT, 'apps', 'backup-agent');
@@ -98,7 +99,7 @@ async function agentCall(method, pathWithQuery, payload, { secret = SECRETS.agen
 async function agentJob(jobId, timeoutMs = 180_000) {
   return waitFor(async () => {
     const r = await agentCall('GET', `/v1/jobs/${jobId}`);
-    return r.status === 200 && ['succeeded', 'failed'].includes(r.body.status) ? r.body : null;
+    return r.status === 200 && ['succeeded', 'failed', 'deferred'].includes(r.body.status) ? r.body : null;
   }, { timeoutMs, intervalMs: 700, label: `Agent-Job ${jobId}` });
 }
 
@@ -387,6 +388,9 @@ try {
 
   // ---------------------------------------------------------------- (5)
   await s.step('5 backup-control + Rechnungsarchiv invoices/<Jahr>/: Object-Lock-Retention, Löschversuch scheitert', async () => {
+    // Firmendaten (Einstellungen -> Firmendaten) müssen vollständig sein, sonst verweigert das Festschreiben (422 issuer_incomplete).
+    const issuer = await c.api('PUT', '/api/settings/issuer', { profile: FORMS.find((f) => f.key === 'gmbh').profile, accentColor: null });
+    assert(issuer.status === 200, `Firmendaten: HTTP ${issuer.status} ${JSON.stringify(issuer.body).slice(0, 300)}`);
     const day = isoDay(BACKUP_YEAR_DATE);
     const draft = await c.api('POST', `/api/companies/${ctx.companyId}/invoices`, {
       invoiceDate: day, servicePeriodFrom: day, servicePeriodUntil: day,
@@ -400,6 +404,18 @@ try {
     const xml = await c.api('GET', `/api/invoices/${draft.body.id}/xml`, undefined, { raw: true });
     assert(xml.status === 200 && xml.body.length > 200, `XML: HTTP ${xml.status}`);
     ctx.invoiceXmlSha = sha256(xml.body);
+
+    // Archivweg: der Agent liest das Archiv nur noch über den Endpunkt der Verwaltung (entsperrt durch
+    // startControl). Ohne Schlüssel gibt es ihn nicht; mit Schlüssel liefert er Dokumente samt SHA-256.
+    const noKey = await fetch(`${ctl.url}/api/internal/invoice-archive`);
+    assert([401, 403, 404].includes(noKey.status), `invoice-archive ohne Schlüssel: HTTP ${noKey.status}`);
+    const arch = await fetch(`${ctl.url}/api/internal/invoice-archive`, { headers: { 'x-backup-key': SECRETS.reportKey } });
+    assert(arch.status === 200, `invoice-archive: HTTP ${arch.status}`);
+    const archBody = await arch.json();
+    const archItem = archBody.items?.find((i) => i.number === ctx.invoiceNumber);
+    assert(archItem, `Rechnung ${ctx.invoiceNumber} fehlt im Archiv-Endpunkt`);
+    const archXml = archItem.documents.find((d) => d.kind === 'xml');
+    assert(archXml && archXml.sha256 === ctx.invoiceXmlSha && sha256(Buffer.from(archXml.base64, 'base64')) === archXml.sha256, 'XML im Archiv-Endpunkt: Prüfsumme weicht ab');
 
     const sub = await agentCall('POST', '/v1/jobs', { kind: 'backup-control' });
     assert(sub.status === 202, `backup-control: HTTP ${sub.status} ${JSON.stringify(sub.body)}`);
