@@ -132,50 +132,85 @@ describe('Anfrage ohne Reaktion', () => {
   });
 });
 
-describe('Überprüfungstermin', () => {
-  it('meldet einen Termin innerhalb der nächsten 30 Tage', async () => {
-    const company = await createCompany(Prefix, {
-      status: 'paying',
-      pilotDecisionDate: day('2026-01-01'),
-      reviewDueDate: day(datePlusDays(today(), 10)),
+describe('Beendet, aber Instanz noch da', () => {
+  it('meldet eine beendete Organisation mit nicht archivierter Instanz', async () => {
+    const company = await createCompany(Prefix, { status: 'ended' });
+    await prisma.instance.create({
+      data: {
+        companyId: company.id,
+        subdomain: `${Prefix}-akt`.toLowerCase().slice(0, 30),
+        status: 'active',
+      },
     });
 
     const hit = (await tasksTo(company.id)).filter(
-      (a) => a.kind === 'review_date',
+      (a) => a.kind === 'instance_still_active',
     );
     expect(hit).toHaveLength(1);
-    expect(hit[0].urgency).toBe('low');
+    expect(hit[0].title).toContain('Instanz');
+    expect(hit[0].action.kind).toBe('company_open');
   });
 
-  it('meldet einen überfälligen Termin als „hoch"', async () => {
-    const company = await createCompany(Prefix, {
-      status: 'review_pending',
-      reviewDueDate: day(datePlusDays(today(), -3)),
+  it('meldet nichts, wenn die Instanz archiviert ist oder es keine gibt', async () => {
+    const archived = await createCompany(Prefix, { status: 'ended' });
+    await prisma.instance.create({
+      data: {
+        companyId: archived.id,
+        subdomain: `${Prefix}-arc`.toLowerCase().slice(0, 30),
+        status: 'archived',
+      },
+    });
+    const without = await createCompany(Prefix, { status: 'ended' });
+
+    expect(await tasksTo(archived.id)).toHaveLength(0);
+    expect(await tasksTo(without.id)).toHaveLength(0);
+  });
+
+  it('meldet nichts bei einer laufenden Organisation mit Instanz', async () => {
+    const company = await createCompany(Prefix, { status: 'paying' });
+    await prisma.instance.create({
+      data: {
+        companyId: company.id,
+        subdomain: `${Prefix}-run`.toLowerCase().slice(0, 30),
+        status: 'active',
+      },
     });
 
     const hit = (await tasksTo(company.id)).filter(
-      (a) => a.kind === 'review_date',
+      (a) => a.kind === 'instance_still_active',
     );
-    expect(hit).toHaveLength(1);
-    expect(hit[0].urgency).toBe('high');
+    expect(hit).toHaveLength(0);
   });
+});
 
-  it('meldet einen Termin in ferner Zukunft nicht', async () => {
+describe('Beitragsbefreit erzeugt keine Rechnungs- oder Stufenaufgabe', () => {
+  it('lässt invoice-due, tier-check und price-missing aus', async () => {
     const company = await createCompany(Prefix, {
-      status: 'paying',
-      reviewDueDate: day(datePlusDays(today(), 45)),
+      status: 'exempt',
+      instanceStartDate: day(datePlusDays(today(), -400)),
+      paymentInterval: 'monthly',
+      priceTier: 'klein',
+    });
+    await prisma.instance.create({
+      data: {
+        companyId: company.id,
+        subdomain: `${Prefix}-exe`.toLowerCase().slice(0, 30),
+        status: 'active',
+      },
+    });
+    const noPrice = await createCompany(Prefix, {
+      status: 'exempt',
+      instanceStartDate: day(datePlusDays(today(), -400)),
     });
 
-    expect(await tasksTo(company.id)).toHaveLength(0);
-  });
-
-  it('lässt beendete Organisationen aus', async () => {
-    const company = await createCompany(Prefix, {
-      status: 'ended',
-      reviewDueDate: day(datePlusDays(today(), -3)),
-    });
-
-    expect(await tasksTo(company.id)).toHaveLength(0);
+    // Gesichert und gemessen wird weiter (Sicherungs- und Kennzahlenaufgaben
+    // bleiben möglich); nur Rechnung, Stufe und Preis entfallen.
+    const billing = ['invoice_due', 'tier_check', 'price_info_missing'];
+    for (const id of [company.id, noPrice.id]) {
+      expect(
+        (await tasksTo(id)).filter((a) => billing.includes(a.kind)),
+      ).toHaveLength(0);
+    }
   });
 });
 
@@ -197,8 +232,30 @@ describe('Automatischer Statuswechsel', () => {
       (a) => a.kind === 'status_change_automatic',
     );
     expect(hit).toHaveLength(1);
+    // Der Audit-Eintrag trägt den Altwert; gelesen wird er mit seinem
+    // damaligen Namen.
     expect(hit[0].reason).toContain('Pilot läuft');
     expect(hit[0].reason).toContain('Zahlend');
+  });
+
+  it('liest auch einen aktuellen Wert aus dem Audit-Eintrag', async () => {
+    const company = await createCompany(Prefix, { status: 'paying' });
+    await prisma.auditLog.create({
+      data: {
+        actor: 'schedule',
+        action: AUDIT_ACTION.companyStatusAutomatic,
+        objectType: 'Company',
+        objectId: company.id,
+        beforeValue: { status: 'trial' },
+        afterValue: { status: 'paying' },
+      },
+    });
+
+    const hit = (await tasksTo(company.id)).filter(
+      (a) => a.kind === 'status_change_automatic',
+    );
+    expect(hit).toHaveLength(1);
+    expect(hit[0].reason).toContain('Testphase');
   });
 
   it('meldet nichts, was vor dem letzten Blick lag', async () => {
@@ -222,7 +279,7 @@ describe('Automatischer Statuswechsel', () => {
   });
 
   it('meldet einen Wechsel VON HAND nicht als automatisch', async () => {
-    const company = await createCompany(Prefix, { status: 'demo' });
+    const company = await createCompany(Prefix, { status: 'trial' });
     await prisma.auditLog.create({
       data: {
         actor: 'sam',
@@ -230,7 +287,7 @@ describe('Automatischer Statuswechsel', () => {
         objectType: 'Company',
         objectId: company.id,
         beforeValue: { status: 'inquiry' },
-        afterValue: { status: 'demo' },
+        afterValue: { status: 'trial' },
       },
     });
 
@@ -293,9 +350,9 @@ describe('Löschung vorschlagen (R4)', () => {
 });
 
 describe('[H1] Preisangabe fehlt', () => {
-  it('meldet einen reifen Piloten ohne Preis als Aufgabe', async () => {
+  it('meldet eine reife Testphase ohne Preis als Aufgabe', async () => {
     const company = await createCompany(Prefix, {
-      status: 'pilot_running',
+      status: 'trial',
       instanceStartDate: day(datePlusDays(today(), -100)),
     });
 
@@ -306,9 +363,22 @@ describe('[H1] Preisangabe fehlt', () => {
     expect(hit[0].action.kind).toBe('price_agree');
   });
 
+  it('zählt eine leere Preisstufe nicht als Preis', async () => {
+    const company = await createCompany(Prefix, {
+      status: 'trial',
+      instanceStartDate: day(datePlusDays(today(), -100)),
+      priceTier: '',
+    });
+
+    const hit = (await tasksTo(company.id)).filter(
+      (a) => a.kind === 'price_info_missing',
+    );
+    expect(hit).toHaveLength(1);
+  });
+
   it('meldet nichts, sobald eine Preisstufe hinterlegt ist', async () => {
     const company = await createCompany(Prefix, {
-      status: 'pilot_running',
+      status: 'trial',
       instanceStartDate: day(datePlusDays(today(), -100)),
       priceTier: 'klein',
     });

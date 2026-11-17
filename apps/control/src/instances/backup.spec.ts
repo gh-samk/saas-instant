@@ -224,3 +224,17 @@ describe('BackupService — kind/objectKey/sha256', () => {
     );
   });
 });
+
+describe('BackupReportDto — Bestätigung der Löschung (`purged`)', () => {
+  it('nimmt `purged` mit Subdomain an', async () => {
+    expect(await errorFields({ ...VALID, kind: 'purged', sizeBytes: 0 })).toEqual([]);
+  });
+
+  it('verlangt auch bei `purged` die Subdomain', async () => {
+    expect(await errorFields({ kind: 'purged', date: today(), sizeBytes: 0 })).toEqual(['subdomain']);
+  });
+
+  it('weist eine unbekannte Art ab', async () => {
+    expect(await errorFields({ ...VALID, kind: 'geloescht' })).toEqual(['kind']);
+  });
+});

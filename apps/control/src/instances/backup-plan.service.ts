@@ -4,10 +4,14 @@ import { ManifestService } from '../manifest/manifest.service';
 import { DEFAULT_RETENTION_YEARS } from '../manifest/sections/billing';
 import { PrismaService } from '../prisma/prisma.service';
 import { agentInstanceFor } from './backup-plan';
+import { expiredArchiveCoolifyGone } from './expired-archive';
+import { PurgeService } from './purge.service';
 
 export interface BackupPlanResponse {
   retentionYears: number;
   instances: AgentInstance[];
+  /** Subdomains, deren `instances/<subdomain>/` der Agent im Ziel löschen soll (ältere Agenten ignorieren das Feld). */
+  purge: string[];
 }
 
 /**
@@ -19,6 +23,7 @@ export class BackupPlanService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly manifest: ManifestService,
+    private readonly purgeService: PurgeService,
   ) {}
 
   /**
@@ -34,7 +39,22 @@ export class BackupPlanService {
 
   /** Die Antwort von `GET /api/internal/backup-plan`. */
   async response(): Promise<BackupPlanResponse> {
-    return { retentionYears: this.retentionYears(), instances: await this.plan() };
+    return {
+      retentionYears: this.retentionYears(),
+      instances: await this.plan(),
+      // Läuft die Löschung nicht (abgeschaltet oder Tresor gesperrt), bleibt die Liste leer.
+      purge: this.purgeService.isActive() ? await this.subdomainsDue() : [],
+    };
+  }
+
+  /** Archivierte Instanzen beendeter Organisationen nach Ablauf der Löschfrist, deren Coolify-Anwendung schon weg ist. */
+  async subdomainsDue(): Promise<string[]> {
+    const rows = await this.prisma.instance.findMany({
+      where: expiredArchiveCoolifyGone(),
+      orderBy: { subdomain: 'asc' },
+      select: { subdomain: true },
+    });
+    return rows.map((row) => row.subdomain);
   }
 
   async plan(): Promise<AgentInstance[]> {

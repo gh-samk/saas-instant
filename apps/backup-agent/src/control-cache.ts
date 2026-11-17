@@ -58,7 +58,8 @@ export class ResilientControlClient implements ControlClient {
         'Sicherungsplan nicht abrufbar; es gilt der zuletzt gueltige Plan (Instanzen, die seitdem neu hinzukamen, fehlen bis zur naechsten erfolgreichen Abfrage)',
         { error: safeMessage(this.redactor, e), planVom: cached.fetchedAt, instanzen: cached.plan.instances.length },
       );
-      return cached.plan;
+      // Eine alte Löschliste darf nie gelten: sie könnte seither widerrufen sein (Neustart der Organisation).
+      return { ...cached.plan, purge: [] };
     }
   }
 

@@ -38,7 +38,6 @@ const COMPANY = (id: string, name: string, city: string | null = null) => ({
   city,
   contactName: null,
   contactEmail: null,
-  reviewDueDate: null,
   lastStatusChangeAt: null,
   createdAt: '2026-01-01T00:00:00Z',
   instanceStatus: null,

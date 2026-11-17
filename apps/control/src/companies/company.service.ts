@@ -92,7 +92,6 @@ const SHORT_SELECT = {
   city: true,
   contactName: true,
   contactEmail: true,
-  reviewDueDate: true,
   lastStatusChangeAt: true,
   createdAt: true,
   // Fuer die Spalte „Instanz". 1:1-Beziehung, also hoechstens eine Zeile.
@@ -326,7 +325,6 @@ export class CompanyService {
         city: row.city,
         contactName: row.contactName,
         contactEmail: row.contactEmail,
-        reviewDueDate: dayOrNull(row.reviewDueDate),
         lastStatusChangeAt: dayOrNull(row.lastStatusChangeAt),
         createdAt: row.createdAt.toISOString(),
         instanceStatus: row.instance?.status ?? null,
@@ -480,10 +478,10 @@ export class CompanyService {
      * DER AUFNAHMELINK GEHT GENAU EINMAL HINAUS [A.35]
      * =====================================================================
      *
-     * Ausloeser ist der Wechsel auf `pilot_approved`. Der Riegel ist
+     * Ausloeser ist der Wechsel auf `trial`. Der Riegel ist
      * `intakeLinkSentAt` und ausdruecklich NICHT der Status: Es gibt
      * keine Vorwaerts-Regel, jeder Status laesst sich auf jeden anderen
-     * setzen (`StatuswechselDialog.tsx` begruendet, warum bewusst keine
+     * setzen (`StatusChangeDialog.tsx` begruendet, warum bewusst keine
      * Zustandsmaschine erfunden wurde). Ein Hin und Her zwischen Status
      * loeste die Mail sonst erneut aus.
      *
@@ -497,7 +495,7 @@ export class CompanyService {
      * der Verwaltung bietet ihn an, sobald eine Adresse eingetragen ist.
      */
     const linkDue =
-      targetStatus === 'pilot_approved' &&
+      targetStatus === 'trial' &&
       before.intakeLinkSentAt === null &&
       (before.contactEmail ?? '').trim() !== '';
 
@@ -509,18 +507,7 @@ export class CompanyService {
       actor: actor.name,
       userId: actor.userId,
       introduction: 'Status gewechselt',
-      // DAS VERLASSEN von `review_pending` IST die Quittung ([K2]).
-      // Es gibt bewusst keinen eigenen Knopf „Überprüfung erledigt": die
-      // Betreiberin erledigt sie, indem sie den Status weiterstellt, und
-      // genau das ist der Augenblick, den der Zeitplan künftig respektieren
-      // muss. Ein zweiter Knopf wäre ein zweiter Weg, denselben Sachverhalt
-      // zu behaupten — und einer davon bliebe irgendwann liegen.
-      extraData: {
-        ...(before.status === 'review_pending'
-          ? { reviewDoneAt: toDate(today()) }
-          : {}),
-        ...(linkDue ? { intakeLinkSentAt: new Date() } : {}),
-      },
+      extraData: linkDue ? { intakeLinkSentAt: new Date() } : {},
       source,
     });
     if (result === 'unchanged') {
@@ -683,6 +670,7 @@ export class CompanyService {
     confirmation: string,
     actor: Actor,
     source: InquirySource,
+    outer?: Prisma.TransactionClient,
   ): Promise<{
     cleanedUpFields: string[];
     deletedNotes: number;
@@ -695,7 +683,8 @@ export class CompanyService {
     remainingBlockEntries: number;
   }> {
     const day = today();
-    return this.prisma.$transaction(async (tx) => {
+    // `outer`: die Löschung archivierter Instanzen führt den Schritt in ihrer eigenen Transaktion aus.
+    const work = async (tx: Prisma.TransactionClient) => {
       await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${id} FOR UPDATE`;
       const before = await tx.company.findUnique({ where: { id } });
       if (!before) throw new CompanyNotFoundError();
@@ -883,7 +872,8 @@ export class CompanyService {
         deletedConsents,
         remainingBlockEntries,
       };
-    });
+    };
+    return outer ? work(outer) : this.prisma.$transaction(work);
   }
 
   // --- Organisation vollständig löschen (R4: von Hand, nie automatisch) ----
@@ -952,6 +942,7 @@ export class CompanyService {
     confirmation: string,
     actor: Actor,
     source: InquirySource,
+    outer?: Prisma.TransactionClient,
   ): Promise<{
     name: string;
     deletedNotes: number;
@@ -960,7 +951,7 @@ export class CompanyService {
     deletedConsents: number;
     detachedBlockEntries: number;
   }> {
-    return this.prisma.$transaction(async (tx) => {
+    const work = async (tx: Prisma.TransactionClient) => {
       await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${id} FOR UPDATE`;
       const before = await tx.company.findUnique({ where: { id } });
       if (!before) throw new CompanyNotFoundError();
@@ -1069,7 +1060,8 @@ export class CompanyService {
         deletedConsents,
         detachedBlockEntries,
       };
-    });
+    };
+    return outer ? work(outer) : this.prisma.$transaction(work);
   }
 
   /**

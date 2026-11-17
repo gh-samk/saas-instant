@@ -35,12 +35,9 @@ import { IsCalendarDate } from '../../common/validators/is-calendar-date';
  */
 export const COMPANY_STATUS: readonly CompanyStatus[] = [
   'inquiry',
-  'demo',
-  'pilot_approved',
-  'pilot_running',
+  'trial',
   'paying',
-  'review_pending',
-  'dormant',
+  'exempt',
   'ended',
 ];
 
@@ -95,8 +92,6 @@ export const CONSENT_STATUS: readonly ConsentStatus[] = [
  *   `POST …/ansprechpartnerin`, weil der Datensatz ERSETZT wird und dabei die
  *   Notiz „Ansprechpartnerin gewechselt: … → …" entsteht. Beim Anlegen ist er
  *   erlaubt, dort wird niemand abgelöst.
- * - `reviewDueDate` — ein ABGELEITETER Wert (Beschlussdatum plus
- *   sieben Monate). Er wird gerechnet, nie entgegengenommen.
  * - `lastStatusChangeAt` — setzt der Statuswechsel selbst.
  */
 export class CompanyMasterDataDto {
@@ -170,7 +165,6 @@ export class CompanyMasterDataDto {
   // eine Bankverbindung nicht: Mit einem 25 Stunden alten Cookie war sie
   // lesbar UND änderbar.
 
-  @IsOptional() @IsCalendarDate() pilotDecisionDate?: string;
   @IsOptional() @IsCalendarDate() instanceStartDate?: string;
 
   @IsOptional()
@@ -247,13 +241,8 @@ export class CompanyListDto {
   /**
    * Einer oder mehrere Status, kommagetrennt.
    *
-   * WARUM MEHRERE. Die Filterleiste fasst `pilot_approved` und
-   * `pilot_running` zu einem Chip „Pilot" zusammen: Wer die Liste durchsieht,
-   * sucht „die Piloten" und nicht die eine oder andere Haelfte davon. Ein
-   * einzelner Wert reichte dafuer nicht.
-   *
-   * ABWAERTSKOMPATIBEL: Ein einzelner Status ohne Komma bleibt gueltig — die
-   * Zerlegung liefert dann eine Liste mit einem Eintrag.
+   * Ein einzelner Status ohne Komma bleibt gueltig — die Zerlegung liefert
+   * dann eine Liste mit einem Eintrag.
    */
   @IsOptional()
   @Transform(({ value }) =>

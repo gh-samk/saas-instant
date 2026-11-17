@@ -52,43 +52,6 @@ afterAll(async () => {
 });
 
 describe('Anlegen und Bearbeiten', () => {
-  it('rechnet den Überprüfungstermin aus dem Beschlussdatum', async () => {
-    const created = await service.create(
-      { name: `${Prefix} Termin`, pilotDecisionDate: '2026-03-12' },
-      actor,
-      Source,
-    );
-
-    expect(created.pilotDecisionDate).toBe('2026-03-12');
-    expect(created.reviewDueDate).toBe('2026-10-12');
-  });
-
-  it('rechnet ihn beim Ändern neu und entfernt ihn beim Leeren', async () => {
-    const created = await service.create(
-      { name: `${Prefix} Neuberechnung`, pilotDecisionDate: '2026-03-12' },
-      actor,
-      Source,
-    );
-
-    const moved = await service.update(
-      created.id,
-      { pilotDecisionDate: '2026-07-31' },
-      actor,
-      Source,
-    );
-    // Der 31.09. existiert nicht — gemeint ist der letzte Tag des Monats.
-    expect(moved.reviewDueDate).toBe('2027-02-28');
-
-    const emptied = await service.update(
-      created.id,
-      { pilotDecisionDate: null } as never,
-      actor,
-      Source,
-    );
-    expect(emptied.pilotDecisionDate).toBeNull();
-    expect(emptied.reviewDueDate).toBeNull();
-  });
-
   it('schreibt beim Bearbeiten nur die geänderten Felder ins Audit-Log', async () => {
     const created = await service.create(
       { name: `${Prefix} Audit`, city: 'Kassel' },
@@ -183,7 +146,7 @@ describe('Liste', () => {
         city: 'Marburg',
         contactName: 'Anna Berg',
         contactEmail: `anna.${identifier}@example.com`,
-        status: 'demo',
+        status: 'trial',
       },
       actor,
       Source,
@@ -249,18 +212,15 @@ describe('Liste', () => {
     expect(rows[0].name).not.toContain('Geheim');
   });
 
-  it('filtert auf MEHRERE Status zugleich — der Chip „Pilot" ist zwei Werte', async () => {
-    // `pilot_approved` und `pilot_running` sind derselbe Lebensabschnitt.
-    // Wer die Liste durchsieht, sucht „die Piloten" und nicht die eine oder
-    // andere Haelfte davon.
+  it('filtert auf MEHRERE Status zugleich', async () => {
     const identifier = newPrefix('mehrstatus');
-    const approved = await service.create(
-      { name: `${identifier} Beschlossen`, status: 'pilot_approved' },
+    const trial = await service.create(
+      { name: `${identifier} Test`, status: 'trial' },
       actor,
       Source,
     );
-    const running = await service.create(
-      { name: `${identifier} Laufend`, status: 'pilot_running' },
+    const exempt = await service.create(
+      { name: `${identifier} Befreit`, status: 'exempt' },
       actor,
       Source,
     );
@@ -270,14 +230,14 @@ describe('Liste', () => {
       Source,
     );
 
-    const pilots = await service.list({
-      status: ['pilot_approved', 'pilot_running'],
+    const both = await service.list({
+      status: ['trial', 'exempt'],
       search: identifier,
     });
 
-    expect(pilots.total).toBe(2);
-    expect(pilots.companies.map((o) => o.id).sort()).toEqual(
-      [approved.id, running.id].sort(),
+    expect(both.total).toBe(2);
+    expect(both.companies.map((o) => o.id).sort()).toEqual(
+      [trial.id, exempt.id].sort(),
     );
   });
 
@@ -301,13 +261,13 @@ describe('Statuswechsel', () => {
   it('schreibt Notiz und Audit-Eintrag mit Vorher/Nachher', async () => {
     const company = await createCompany(Prefix, { status: 'inquiry' });
 
-    await service.statusChange(company.id, 'demo', actor, Source);
+    await service.statusChange(company.id, 'trial', actor, Source);
 
-    expect(await statusFrom(company.id)).toBe('demo');
+    expect(await statusFrom(company.id)).toBe('trial');
     const notes = await notesFrom(company.id);
     expect(notes).toHaveLength(1);
     expect(notes[0].bySystem).toBe(true);
-    expect(notes[0].text).toMatch(/^Status gewechselt: Anfrage → Demo, \d{2}\.\d{2}\.\d{4}$/);
+    expect(notes[0].text).toMatch(/^Status gewechselt: Anfrage → Testphase, \d{2}\.\d{2}\.\d{4}$/);
 
     const entries = await auditFrom(
       company.id,
@@ -317,21 +277,21 @@ describe('Statuswechsel', () => {
     expect(entries[0].beforeValue).toEqual({ status: 'inquiry' });
     expect(
       (entries[0].afterValue as { status: string }).status,
-    ).toBe('demo');
+    ).toBe('trial');
   });
 
   it('weist den Wechsel auf denselben Status ab', async () => {
-    const company = await createCompany(Prefix, { status: 'demo' });
+    const company = await createCompany(Prefix, { status: 'trial' });
 
     await expect(
-      service.statusChange(company.id, 'demo', actor, Source),
+      service.statusChange(company.id, 'trial', actor, Source),
     ).rejects.toBeInstanceOf(StatusUnchangedError);
     expect(await notesFrom(company.id)).toHaveLength(0);
   });
 
   it('setzt letzterStatuswechselAm auf heute', async () => {
     const company = await createCompany(Prefix, { status: 'inquiry' });
-    await service.statusChange(company.id, 'demo', actor, Source);
+    await service.statusChange(company.id, 'trial', actor, Source);
 
     const row = await prisma.company.findUniqueOrThrow({
       where: { id: company.id },
@@ -354,8 +314,8 @@ describe('Statuswechsel', () => {
       });
 
       const results = await Promise.allSettled([
-        service.statusChange(company.id, 'demo', actor, Source),
-        service.statusChange(company.id, 'demo', actor, Source),
+        service.statusChange(company.id, 'trial', actor, Source),
+        service.statusChange(company.id, 'trial', actor, Source),
       ]);
 
       expect(results.filter((e) => e.status === 'fulfilled')).toHaveLength(1);
@@ -376,13 +336,48 @@ describe('Statuswechsel', () => {
       });
 
       const results = await Promise.allSettled([
-        service.statusChange(company.id, 'demo', actor, Source),
+        service.statusChange(company.id, 'trial', actor, Source),
         service.statusChange(company.id, 'ended', actor, Source),
       ]);
 
       expect(results.filter((e) => e.status === 'fulfilled')).toHaveLength(1);
       expect(await notesFrom(company.id)).toHaveLength(1);
     }
+  });
+});
+
+describe('Aufnahmelink beim Wechsel auf Testphase', () => {
+  it('geht genau einmal hinaus — auch bei Hin und Her', async () => {
+    const send = sendDouble();
+    const withSend = new CompanyService(prisma, audit, send);
+    const company = await createCompany(Prefix, {
+      status: 'inquiry',
+      contactEmail: 'link@example.com',
+    });
+
+    await withSend.statusChange(company.id, 'trial', actor, Source);
+    await withSend.statusChange(company.id, 'paying', actor, Source);
+    await withSend.statusChange(company.id, 'trial', actor, Source);
+
+    expect(send.sent).toEqual([{ companyId: company.id, automatic: true }]);
+    const row = await prisma.company.findUniqueOrThrow({
+      where: { id: company.id },
+      select: { intakeLinkSentAt: true },
+    });
+    expect(row.intakeLinkSentAt).not.toBeNull();
+  });
+
+  it('geht bei anderen Zielstatus nicht hinaus', async () => {
+    const send = sendDouble();
+    const withSend = new CompanyService(prisma, audit, send);
+    const company = await createCompany(Prefix, {
+      status: 'inquiry',
+      contactEmail: 'link2@example.com',
+    });
+
+    await withSend.statusChange(company.id, 'exempt', actor, Source);
+
+    expect(send.sent).toHaveLength(0);
   });
 });
 
@@ -466,7 +461,7 @@ describe('Gemeinsamer Verlauf am selben Tag', () => {
         contactName: 'Anna Berg',
       });
 
-      await service.statusChange(company.id, 'demo', actor, Source);
+      await service.statusChange(company.id, 'trial', actor, Source);
       await service.contactPersonChange(
         company.id,
         { name: 'Tim Roth' },

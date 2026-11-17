@@ -18,6 +18,8 @@
  *   SCHREIBEND 1 — legeAnwendungAn, setzeUmgebungsvariable, setzeDomaene,
  *                  starteDeploy  (zusammen: „Instanz anlegen")
  *   SCHREIBEND 2 — stoppeAnwendung  („Instanz stoppen/archivieren")
+ *   SCHREIBEND 3 — deleteApplication (nur durch die automatische Löschung
+ *                  90 Tage nach der Archivierung, siehe unten)
  *
  * NICHT GEGEN DIE ECHTE API BELEGT: Die Coolify-API ist ausschliesslich über
  * einen SSH-Tunnel erreichbar, und ein eigenes CRM-Token existiert noch nicht.
@@ -109,6 +111,15 @@ export interface CoolifyClient {
    * mehr — kein Aufräumen, kein Entfernen, kein Zurückspielen.
    */
   stopApplication(uuid: string): Promise<void>;
+
+  /**
+   * SCHREIBVORGANG 3 — DER EINZIGE LÖSCHAUFRUF, und er hat genau einen Aufrufer:
+   * `PurgeService`, 90 Tage nach der Archivierung (`PURGE_DAYS`).
+   *
+   * Entfernt die Anwendung samt Volumes (`deleteVolumes`). Unwiderruflich.
+   * 404 gilt als „schon erledigt" — der Löschlauf ist idempotent.
+   */
+  deleteApplication(uuid: string, deleteVolumes: boolean): Promise<void>;
 }
 
 /** Injektionsmarke für den Client. */

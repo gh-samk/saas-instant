@@ -1,7 +1,6 @@
 import { dateStringFromDate, toDate } from '@saas-instant/shared';
 import { AUDIT_ACTION } from '../../audit/audit.service';
-import { STATUS_LABEL } from '../../companies/status-label';
-import type { CompanyStatus } from '.prisma/control-client';
+import { statusLabelOf } from '../../companies/status-label';
 import { urgencyFrom } from '../urgency';
 import type {
   Task,
@@ -104,5 +103,5 @@ function statusFrom(value: unknown): string | null {
   if (typeof value !== 'object' || value === null) return null;
   const status = (value as Record<string, unknown>)['status'];
   if (typeof status !== 'string') return null;
-  return STATUS_LABEL[status as CompanyStatus] ?? status;
+  return statusLabelOf(status);
 }

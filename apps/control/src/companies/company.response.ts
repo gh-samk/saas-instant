@@ -75,10 +75,6 @@ export interface CompanyResponse {
    */
   paymentDetailsStored: boolean;
 
-  pilotDecisionDate: string | null;
-  reviewDueDate: string | null;
-  /** Quittung der Überprüfung; `null` heißt „steht noch offen" ([K2]). */
-  reviewDoneAt: string | null;
   instanceStartDate: string | null;
 
   newsletterConsentStatus: ConsentStatus | null;
@@ -97,7 +93,6 @@ export interface CompanyShort {
   city: string | null;
   contactName: string | null;
   contactEmail: string | null;
-  reviewDueDate: string | null;
   lastStatusChangeAt: string | null;
   createdAt: string;
   /**
@@ -163,9 +158,6 @@ export interface CompanyRow {
   sepaMandateReference: string | null;
   sepaMandateDate: Date | null;
   iban: string | null;
-  pilotDecisionDate: Date | null;
-  reviewDueDate: Date | null;
-  reviewDoneAt: Date | null;
   instanceStartDate: Date | null;
   newsletterConsentStatus: ConsentStatus | null;
   source: Source | null;
@@ -219,9 +211,6 @@ export function asResponse(row: CompanyRow): CompanyResponse {
       row.iban !== null ||
       row.sepaMandateReference !== null ||
       row.customAmount !== null,
-    pilotDecisionDate: dayOrNull(row.pilotDecisionDate),
-    reviewDueDate: dayOrNull(row.reviewDueDate),
-    reviewDoneAt: dayOrNull(row.reviewDoneAt),
     instanceStartDate: dayOrNull(row.instanceStartDate),
     newsletterConsentStatus: row.newsletterConsentStatus,
     source: row.source,

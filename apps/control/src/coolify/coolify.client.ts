@@ -14,9 +14,9 @@ export const COOLIFY_TIMEOUT_MS = 30_000;
  * HTTP-Client gegen die Coolify-API.
  *
  * SCHMAL UND VOLLSTÄNDIG AUFGEZÄHLT: Diese Klasse setzt genau die Methoden aus
- * `CoolifyClient` um und keine weitere. Es gibt hier kein `DELETE`, in keiner
- * Methode und in keinem Zweig — `no-delete-path.spec.ts` prüft das über den
- * Quelltext nach.
+ * `CoolifyClient` um und keine weitere. Ein `DELETE` gibt es genau einmal, in
+ * `deleteApplication` (Löschung 90 Tage nach der Archivierung) —
+ * `no-delete-path.spec.ts` prüft das über den Quelltext nach.
  *
  * NICHT GEGEN DIE ECHTE API BELEGT (Stand 31.08.2026): Die API ist nur über
  * `ssh -fN -L 8000:localhost:8000 <server>` erreichbar, der Tunnel lief bei der
@@ -149,6 +149,15 @@ export class CoolifyHttpClient implements CoolifyClient {
     await this.call('POST', `/applications/${uuid}/stop`, {});
   }
 
+  async deleteApplication(uuid: string, deleteVolumes: boolean): Promise<void> {
+    // 404 = gibt es nicht (mehr): schon erledigt, kein Fehler. Das Token braucht dafür das Löschrecht.
+    await this.call(
+      'DELETE',
+      `/applications/${encodeURIComponent(uuid)}?delete_volumes=${deleteVolumes}&delete_configurations=true&docker_cleanup=true`,
+      undefined,
+      [404],
+    );
+  }
 
   /**
    * Ein Aufruf gegen die API — mit endlicher Zeitgrenze.
@@ -157,7 +166,7 @@ export class CoolifyHttpClient implements CoolifyClient {
    * bedeuten (z. B. 404 bei „Anwendung gibt es nicht mehr").
    */
   private async call(
-    method: 'GET' | 'POST' | 'PATCH',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
     stillStatus: number[] = [],

@@ -14,6 +14,8 @@ export interface SchedulerDeps {
   schedule: () => TargetConfig['schedule'] | null;
   enqueueInstance: (spec: InstanceSpec) => void;
   enqueueControl: () => void;
+  /** Loescht `instances/<subdomain>/` im Ziel (Loeschung archivierter Instanzen nach 90 Tagen). */
+  enqueuePurge?: (subdomain: string) => void;
   /** Rechnungsarchiv wurde verschoben (Verwaltung gesperrt) und wartet auf einen neuen Versuch. */
   invoicesDeferred?: () => boolean;
   enqueueInvoices?: () => void;
@@ -87,7 +89,9 @@ export class Scheduler {
 
   async runAll(): Promise<void> {
     try {
-      for (const spec of (await this.deps.control.getPlan()).instances) this.deps.enqueueInstance(spec);
+      const plan = await this.deps.control.getPlan();
+      for (const spec of plan.instances) this.deps.enqueueInstance(spec);
+      for (const subdomain of plan.purge ?? []) this.deps.enqueuePurge?.(subdomain);
     } catch (e) {
       this.deps.log.error('Sicherungsplan konnte nicht geholt werden und es gibt keinen gemerkten Plan; Instanzen werden diesmal NICHT gesichert', {
         error: safeMessage(this.deps.redactor, e),

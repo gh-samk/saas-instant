@@ -10,6 +10,7 @@ import type { JobContext, InvoiceSource } from './jobs/context.js';
 import { runBackup } from './jobs/backup.js';
 import { runBackupControl } from './jobs/backupControl.js';
 import { readMeta } from './jobs/common.js';
+import { runPurge } from './jobs/purge.js';
 import { JobQueue } from './jobs/queue.js';
 import { DEFAULT_DENIED_PROJECTS, runRestore } from './jobs/restore.js';
 import { runVerify } from './jobs/verify.js';
@@ -110,6 +111,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
 
   const enqueueBackup = (spec: InstanceSpec) =>
     queue.submit('backup', (signal) => runBackup(buildCtx(signal), spec));
+  const enqueuePurge = (subdomain: string) => queue.submit('purge', (signal) => runPurge(buildCtx(signal), subdomain));
   // Rechnungsarchiv verschoben (Verwaltung gesperrt)? Der Planer versucht es erneut, ohne neuen DB-Dump.
   let invoicesDeferred = false;
   const runControlJob = async (invoicesOnly: boolean, signal?: AbortSignal): Promise<JobResult | void> => {
@@ -131,6 +133,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
     schedule: () => targets.current()?.target.schedule ?? null,
     enqueueInstance: (s) => void enqueueBackup(s),
     enqueueControl: () => void enqueueControl(),
+    enqueuePurge: (s) => void enqueuePurge(s),
     invoicesDeferred: () => invoicesDeferred && !queue.hasActive(),
     enqueueInvoices: () => void enqueueInvoices(),
     log: deps.log,

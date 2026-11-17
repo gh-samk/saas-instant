@@ -2,14 +2,15 @@
  * DIE SCHNITTSTELLE ZUR BEREITSTELLUNG VON INSTANZEN (Provisioner).
  *
  * Die Verwaltung weiss nicht, WIE eine Instanz entsteht — nur, dass es einen
- * Anbieter gibt, der drei Dinge kann: anlegen, Auskunft geben, stoppen. In v1
+ * Anbieter gibt, der vier Dinge kann: anlegen, Auskunft geben, stoppen, löschen. In v1
  * gibt es genau einen Anbieter (`CoolifyProvisioner`); ein zweiter hinge an
  * derselben Schnittstelle.
  *
- * REGEL R1 ALS EIGENSCHAFT DER SCHNITTSTELLE: Es gibt "Instanz anlegen" und
- * "Instanz stoppen" — und KEINE Methode zum Entfernen, Zerstören oder
- * Zurücksetzen. Was hier nicht steht, lässt sich nirgends aufrufen; das
- * Datenvolumen einer Instanz überlebt jedes `stop`. `no-delete-path.spec.ts`
+ * REGEL R1 ALS EIGENSCHAFT DER SCHNITTSTELLE: Es gibt "Instanz anlegen",
+ * "Instanz stoppen" und, seit 1.2.0, das Löschen 90 Tage nach der Archivierung
+ * (`deleteApplication`, nur vom `PurgeService` gerufen) — sonst KEINE Methode
+ * zum Entfernen, Zerstören oder Zurücksetzen. Was hier nicht steht, lässt sich
+ * nirgends aufrufen; das Datenvolumen einer Instanz überlebt jedes `stop`. `no-delete-path.spec.ts`
  * prüft die abschliessende Methodenliste über den Quellbaum nach.
  */
 
@@ -64,6 +65,13 @@ export interface Provisioner {
 
   /** Instanz stoppen. Die Daten bleiben bestehen (R1). */
   stop(ref: string): Promise<void>;
+
+  /**
+   * Instanz samt Volumes löschen — unwiderruflich. Einziger Aufrufer ist
+   * `PurgeService` (90 Tage nach der Archivierung). Gibt es die Anwendung nicht
+   * mehr, gilt das als erledigt.
+   */
+  deleteApplication(ref: string, deleteVolumes: boolean): Promise<void>;
 }
 
 /** Injektionsmarke der Schnittstelle. */

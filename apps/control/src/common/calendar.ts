@@ -5,8 +5,8 @@ import { dateFromString } from '@saas-instant/shared';
  * sind durchgehend `YYYY-MM-DD`, niemals ein ISO-Zeitstempel.
  *
  * `@saas-instant/shared` kennt `datumPlusTage`, aber keine Monatsrechnung — und
- * genau die braucht die Verwaltung: der Überprüfungstermin ist
- * „Beschlussdatum + 7 Monate", nicht „+ 213 Tage". Bewusst hier und nicht in
+ * genau die braucht die Verwaltung: Fristen in Monaten
+ * sind nicht „+ 30 Tage" je Monat. Bewusst hier und nicht in
  * `shared`: `apps/api` hat keine Monatsfrist, und ein gemeinsames Paket wächst
  * sonst um Dinge, die nur eine Anwendung braucht.
  */

@@ -44,8 +44,8 @@ import { t, useT } from '../i18n';
  *             archivierte war angelegt, die Aufgabe ist also nicht mehr
  *             „anlegen").
  * - Rechnung: mindestens eine Rechnung, auch ein Entwurf.
- *   (Instanz und Rechnung entfallen bei Anfrage und Demo — sie folgen dem
- *   Pilotbeschluss.)
+ *   (Instanz und Rechnung entfallen bei Anfrage — sie folgen dem Start der
+ *   Testphase.)
  * - Stellvertretung: Name oder E-Mail der Stellvertretung stehen im Datensatz.
  *
  * `hasInstance`/`hasInvoice` sind `null`, wenn das Laden scheiterte: Dann ist
@@ -68,19 +68,23 @@ export function setupSteps(
   hasInstance: boolean | null,
   hasInvoice: boolean | null,
 ): SetupStep[] {
-  const steps: SetupStep[] = [
-    {
-      id: 'contract',
-      done:
-        (company.priceTier ?? '').trim() !== '' &&
-        company.paymentInterval !== null,
-    },
-  ];
-  // Vor dem Pilotbeschluss gibt es weder Instanz noch Rechnung anzulegen
+  // Befreite Organisationen zahlen nichts: Vertrag und Rechnung sind kein offener Schritt.
+  const exempt = company.status === 'exempt';
+  const steps: SetupStep[] = exempt
+    ? []
+    : [
+        {
+          id: 'contract',
+          done:
+            (company.priceTier ?? '').trim() !== '' &&
+            company.paymentInterval !== null,
+        },
+      ];
+  // Vor der Testphase gibt es weder Instanz noch Rechnung anzulegen
   // (der Reiter „Instanz" sagt es genauso): Die Schritte kämen zu früh.
-  const early = company.status === 'inquiry' || company.status === 'demo';
+  const early = company.status === 'inquiry';
   if (!early && hasInstance !== null) steps.push({ id: 'instance', done: hasInstance });
-  if (!early && hasInvoice !== null) steps.push({ id: 'invoice', done: hasInvoice });
+  if (!early && !exempt && hasInvoice !== null) steps.push({ id: 'invoice', done: hasInvoice });
   steps.push({
     id: 'deputy',
     done:
@@ -263,14 +267,6 @@ export function CompanyOverview({
       value: o.paymentInterval ? (PAYMENT_INTERVAL_LABEL[o.paymentInterval] ?? '') : '',
     },
     {
-      label: t('components.companyOverview.label3'),
-      value: o.pilotDecisionDate ? formatDate(o.pilotDecisionDate) : '',
-    },
-    {
-      label: t('components.companyOverview.label4'),
-      value: o.reviewDueDate ? formatDate(o.reviewDueDate) : '',
-    },
-    {
       label: t('components.companyOverview.label5'),
       value: o.instanceStartDate ? formatDate(o.instanceStartDate) : '',
     },
@@ -279,8 +275,8 @@ export function CompanyOverview({
   const hasInquiries = inquiries !== null && inquiries.length > 0;
 
   // Die Schrittliste gibt es nur für lebende Organisationen: Bei einer
-  // beendeten oder ruhenden wäre „Instanz anlegen" eine Aufforderung ins Leere.
-  const guided = o.status !== 'ended' && o.status !== 'dormant';
+  // beendeten wäre „Instanz anlegen" eine Aufforderung ins Leere.
+  const guided = o.status !== 'ended';
   const loadingStepData = hasInstance === undefined || hasInvoice === undefined;
   const steps = guided
     ? setupSteps(o, hasInstance ?? null, hasInvoice ?? null)

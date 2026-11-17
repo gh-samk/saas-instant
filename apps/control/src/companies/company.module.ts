@@ -14,7 +14,7 @@ import { CompanyService } from './company.service';
  */
 @Module({
   // `IntakeModule` fuer den automatischen Versand des Aufnahmelinks beim
-  // Statuswechsel auf `pilot_approved`. Die Richtung ist bewusst so herum:
+  // Statuswechsel auf `trial`. Die Richtung ist bewusst so herum:
   // Die Aufnahme kennt die Organisation nicht, die Organisation loest den
   // Versand aus.
   imports: [AuthModule, IntakeModule, InvoiceModule],

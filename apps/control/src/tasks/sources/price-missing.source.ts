@@ -1,5 +1,5 @@
 import { datePlusDays, dateStringFromDate, toDate } from '@saas-instant/shared';
-import { PILOT_TO_PAYING_AFTER_DAYS } from '../../companies/deadlines';
+import { TRIAL_DAYS } from '../../companies/deadlines';
 import { urgencyFrom } from '../urgency';
 import type {
   TasksContext,
@@ -8,11 +8,11 @@ import type {
 } from '../tasks.types';
 
 /**
- * Piloten, die auf „zahlend" wechseln müssten — bei denen aber keine
+ * Testphasen, die auf „zahlend" wechseln müssten — bei denen aber keine
  * Preisvereinbarung hinterlegt ist ([H1]).
  *
  * WARUM DAS EINE AUFGABE IST UND KEIN AUTOMATISCHER WECHSEL:
- * Der Zeitplan darf `pilot_running → zahlend` nur vollziehen, weil dieser
+ * Der Zeitplan darf `trial → zahlend` nur vollziehen, weil dieser
  * Wechsel OHNE GELDFOLGE ist — das ist die Bedingung, unter der R5 ihn
  * überhaupt erlaubt. Ohne Preisstufe und ohne abweichenden Betrag wäre
  * `paying` aber genau die Behauptung, für die es keine Grundlage gibt: In
@@ -28,12 +28,12 @@ export const priceInfoMissing: TaskSource = {
   async collect(context: TasksContext): Promise<SourceResult> {
     const startLimit = datePlusDays(
       context.todayDay,
-      -PILOT_TO_PAYING_AFTER_DAYS,
+      -TRIAL_DAYS,
     );
     const where = {
-      status: 'pilot_running' as const,
+      status: 'trial' as const,
       instanceStartDate: { not: null, lte: toDate(startLimit) },
-      priceTier: null,
+      OR: [{ priceTier: null }, { priceTier: '' }],
       customAmount: null,
     };
 
@@ -53,7 +53,7 @@ export const priceInfoMissing: TaskSource = {
         if (row.instanceStartDate === null) return [];
         const dueAt = datePlusDays(
           dateStringFromDate(row.instanceStartDate),
-          PILOT_TO_PAYING_AFTER_DAYS,
+          TRIAL_DAYS,
         );
         return [
           {
@@ -62,8 +62,8 @@ export const priceInfoMissing: TaskSource = {
             urgency: urgencyFrom(dueAt, context.todayDay),
             title: `Preis mit ${row.name} vereinbaren`,
             reason:
-              `Die Pilotphase läuft seit mehr als ` +
-              `${PILOT_TO_PAYING_AFTER_DAYS} Tagen, aber es ist weder eine ` +
+              `Die Testphase läuft seit mehr als ` +
+              `${TRIAL_DAYS} Tagen, aber es ist weder eine ` +
               'Preisstufe noch ein abweichender Betrag hinterlegt. Der ' +
               'Wechsel auf „Zahlend" findet deshalb NICHT von allein statt — ' +
               'er wird vorgeschlagen, nicht vollzogen (R5).',

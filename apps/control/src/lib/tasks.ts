@@ -1,7 +1,6 @@
 import {
   Archive,
   Building2,
-  CalendarClock,
   Clock,
   DatabaseBackup,
   FileSearch,
@@ -14,7 +13,9 @@ import {
   ReceiptText,
   RefreshCw,
   Scale,
+  Server,
   Tag,
+  Trash2,
   UserMinus,
   WifiOff,
   type LucideIcon,
@@ -33,7 +34,7 @@ import { t } from '../i18n';
  */
 export const TASK_ICON: Record<TaskKind, LucideIcon> = {
   inquiry_unanswered: MailWarning,
-  review_date: CalendarClock,
+  instance_still_active: Server,
   status_change_automatic: RefreshCw,
   deletion_suggestion: UserMinus,
   price_info_missing: Tag,
@@ -62,6 +63,8 @@ export const TASK_ICON: Record<TaskKind, LucideIcon> = {
   document_tampered: ShieldAlert,
   // Sicherung der Verwaltung (Datenbank, Rechnungsarchiv) überfällig.
   control_backup_missing: DatabaseBackup,
+  // Löschung nach 90 Tagen hängt.
+  purge_failed: Trash2,
 };
 
 /**
@@ -74,7 +77,7 @@ export const TASK_ICON: Record<TaskKind, LucideIcon> = {
  */
 export const TASK_LABEL: Record<TaskKind, string> = {
   inquiry_unanswered: t('common.tasks.inquiryUnanswered'),
-  review_date: t('common.tasks.reviewDate'),
+  instance_still_active: t('common.tasks.instanceStillActive'),
   status_change_automatic: t('common.tasks.statusChangeAutomatic'),
   deletion_suggestion: t('common.tasks.deletionSuggestion'),
   price_info_missing: t('common.tasks.priceInfoMissing'),
@@ -92,6 +95,7 @@ export const TASK_LABEL: Record<TaskKind, string> = {
   outbox_disrupted: t('common.tasks.outboxDisrupted'),
   document_tampered: t('common.tasks.documentTampered'),
   control_backup_missing: t('common.tasks.controlBackupMissing'),
+  purge_failed: t('common.tasks.purgeFailed'),
 };
 
 /**

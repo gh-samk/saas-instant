@@ -4,6 +4,7 @@ import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BackupDateInFutureError } from './instance.errors';
 import { FUTURE_TOLERANCE_DAYS } from '../common/validators/is-past-day';
+import { expiredArchiveCoolifyGone } from './expired-archive';
 import type { BackupReportDto } from './dto/instance.dto';
 
 /**
@@ -41,6 +42,29 @@ export class BackupService {
     }
 
     const kind = dto.kind ?? 'instance';
+
+    if (kind === 'purged') {
+      // Vertrauensgrenze: `purged` kommt vom Agenten und gilt hier als Freigabe zur Löschung der Zeilen.
+      // Nur für eine Instanz, die laut Plan wirklich zu löschen ist — sonst
+      // ließe sich mit dem Schlüssel des Agenten die Löschung vorwegnehmen.
+      // Alles andere beantwortet sich wie eine unbekannte Subdomain ([H1]).
+      const due = await this.prisma.instance.findFirst({
+        where: { subdomain: dto.subdomain ?? '', ...expiredArchiveCoolifyGone() },
+        select: { id: true },
+      });
+      if (due !== null) {
+        await this.audit.log({
+          userId: null,
+          actor: 'sicherungswerkzeug',
+          action: AUDIT_ACTION.instanceStoragePurged,
+          objectType: 'Instance',
+          objectId: due.id,
+          afterValue: { subdomain: dto.subdomain, date: dto.date },
+          ip,
+        });
+      }
+      return { ok: true };
+    }
     const extra = {
       ...(dto.objectKey != null ? { objectKey: dto.objectKey } : {}),
       ...(dto.sha256 != null ? { sha256: dto.sha256.toLowerCase() } : {}),

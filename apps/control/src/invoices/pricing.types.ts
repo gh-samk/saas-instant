@@ -40,7 +40,7 @@ export interface PriceTable {
   /**
    * Tage, über die der Durchschnitt der aktiven Personen gebildet wird.
    *
-   * Der Auftrag nennt 90 Tage und die Begründung gleich mit: „damit niemand
+   * Der Auftrag nennt 90 Tage Messzeitraum und die Begründung gleich mit: „damit niemand
    * wegen einer einzelnen Woche über die Schwelle kippt".
    */
   averageDays: number;
@@ -101,7 +101,7 @@ export interface PriceSuggestion {
    * Er STICHT die Stufe: liegt er vor, ist der Vorschlag nur noch Information.
    */
   customAmount: string | null;
-  /** Ab wann das Abo berechenbar ist (Instanz-Start plus 90 Tage). */
+  /** Ab wann das Abo berechenbar ist (Instanz-Start plus 14 Tage). */
   subscriptionCalculableFrom: string | null;
   /** Ist das Abo heute schon berechenbar? */
   subscriptionCalculable: boolean;

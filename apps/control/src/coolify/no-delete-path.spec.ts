@@ -11,6 +11,11 @@ import { CoolifyNotConfiguredClient } from './coolify-not-configured.client';
  * Harte Regel R1, wörtlich: „Kein Löschen von Deployments oder Datenbanken aus
  * dem CRM heraus — weder im UI noch in der API noch in einem Skript."
  *
+ * EINE AUSNAHME seit 1.2.0, eng und benannt (`DELETE_PATH` unten): die
+ * automatische Löschung 90 Tage nach der Archivierung. Jede andere Stelle
+ * bleibt verboten; der Test prüft, dass die Ausnahme nur dort steht, wo sie
+ * eingetragen ist.
+ *
  * Eine solche Zusage ist nur so viel wert wie ihre Prüfbarkeit. Dieser Test
  * geht deshalb über den QUELLBAUM und nicht über eine Erinnerung:
  *
@@ -121,7 +126,31 @@ const ALLOWED_METHODS = [
   'startDeploy',
   'getDeployment',
   'stopApplication',
+  'deleteApplication',
 ].sort();
+
+/**
+ * DER EINE ERLAUBTE LÖSCHPFAD GEGEN COOLIFY (Löschung 90 Tage nach der
+ * Archivierung): Deklaration, Durchreichen und genau ein Aufrufer. Jede Zeile
+ * steht mit Datei und Wortlaut da; alles andere, was nach Löschen aussieht,
+ * lässt den Test fallen.
+ */
+const DELETE_PATH: { path: string; row: RegExp }[] = [
+  { path: 'coolify/coolify.types.ts', row: /^deleteApplication\(uuid: string, deleteVolumes: boolean\): Promise<void>;$/ },
+  { path: 'coolify/coolify.client.ts', row: /^async deleteApplication\(uuid: string, deleteVolumes: boolean\): Promise<void> \{$/ },
+  { path: 'coolify/coolify-not-configured.client.ts', row: /^deleteApplication\(\): Promise<void> \{$/ },
+  { path: 'coolify/coolify.provisioner.ts', row: /^async deleteApplication\(ref: string, deleteVolumes: boolean\): Promise<void> \{$/ },
+  { path: 'coolify/coolify.provisioner.ts', row: /^await this\.client\.deleteApplication\(ref, deleteVolumes\);$/ },
+  { path: 'provisioning/provisioner.ts', row: /^deleteApplication\(ref: string, deleteVolumes: boolean\): Promise<void>;$/ },
+  // Der einzige Aufrufer — und die Zeilen, die er danach in der EIGENEN Datenbank löscht (R4/R6, siehe unten).
+  { path: 'instances/purge.service.ts', row: /^await this\.provisioner\.deleteApplication\(instance\.coolifyApplicationId, true\);$/ },
+  { path: 'instances/purge.service.ts', row: /^const (restores|backups|metrics) = await tx\.(instanceRestore|backup|metric)\.deleteMany\(\{ where: \{ instanceId: instance\.id \} \}\);$/ },
+  { path: 'instances/purge.service.ts', row: /^const gone = await tx\.instance\.deleteMany\(\{ where: \{ id: instance\.id, \.\.\.expiredArchiveCoolifyGone\(\) \} \}\);$/ },
+];
+
+function isAllowedDeleteRow(t: Location): boolean {
+  return DELETE_PATH.some((e) => e.path === t.path && e.row.test(t.row.trim()));
+}
 
 function methodsFrom(klass: new (...args: never[]) => unknown): string[] {
   return Object.getOwnPropertyNames(klass.prototype)
@@ -142,7 +171,7 @@ describe('R1 — kein Löschpfad gegen Coolify', () => {
     expect(paths).toContain('test-support/coolify-mock.ts');
   });
 
-  it('lässt die Schnittstelle nur die neun aufgezählten Methoden zu', () => {
+  it('lässt die Schnittstelle nur die zehn aufgezählten Methoden zu', () => {
     const mock: CoolifyClient = new CoolifyNotConfiguredClient();
     // Der Typ erzwingt Vollständigkeit, die Liste erzwingt Sparsamkeit.
     expect(Object.keys(mock).length).toBe(0);
@@ -150,10 +179,10 @@ describe('R1 — kein Löschpfad gegen Coolify', () => {
     expect(methodsFrom(CoolifyHttpClient)).toEqual(ALLOWED_METHODS);
   });
 
-  it('lässt die Schnittstelle Provisioner nur create, status und stop zu', () => {
+  it('lässt die Schnittstelle Provisioner nur create, status, stop und deleteApplication zu', () => {
     // Die abschliessende Liste der Bereitstellungs-Schnittstelle (R1 als
-    // Eigenschaft): anlegen, Auskunft, stoppen — nichts, was entfernt.
-    expect(methodsFrom(CoolifyProvisioner)).toEqual(['create', 'status', 'stop']);
+    // Eigenschaft): anlegen, Auskunft, stoppen und das eine Löschen.
+    expect(methodsFrom(CoolifyProvisioner)).toEqual(['create', 'deleteApplication', 'status', 'stop']);
     const source = sourceFiles().find((d) => d.path === 'provisioning/provisioner.ts');
     expect(source).toBeDefined();
     const code = (source as { content: string }).content
@@ -163,16 +192,30 @@ describe('R1 — kein Löschpfad gegen Coolify', () => {
       .join('\n');
     const body = code.slice(code.indexOf('export interface Provisioner'), code.indexOf('export const PROVISIONER'));
     const declared = [...body.matchAll(/^\s{2}([a-z][A-Za-z]*)(?:\(|<)/gm)].map((m) => m[1]);
-    expect([...new Set(declared)].sort()).toEqual(['create', 'status', 'stop']);
+    expect([...new Set(declared)].sort()).toEqual(['create', 'deleteApplication', 'status', 'stop']);
   });
 
-  it('schickt an keiner Stelle ein HTTP-DELETE hinaus', () => {
+  it('schickt ein HTTP-DELETE nur in deleteApplication hinaus, gegen /applications/', () => {
     // Geprüft wird der CODE, nicht die Prosa: Kommentare dürfen das Wort
     // benutzen — sie sollen es sogar, weil dort die Begründung steht.
     const hits = codeLines().filter(({ row }) =>
       /(['"`])DELETE\1|method:\s*['"`]delete['"`]/i.test(row),
     );
-    expect(hits.map(asLocation)).toEqual([]);
+    // Zwei Zeilen, beide im Client: der Methodentyp von `call` und der Aufruf.
+    expect(hits.map((h) => h.path)).toEqual(['coolify/coolify.client.ts', 'coolify/coolify.client.ts']);
+    const client = sourceFiles().find((d) => d.path === 'coolify/coolify.client.ts');
+    const body = (client as { content: string }).content;
+    expect(body).toMatch(
+      /async deleteApplication\([^)]*\)[^{]*\{[\s\S]*?'DELETE',\s*`\/applications\/\$\{encodeURIComponent\(uuid\)\}\?[^`]*`,/,
+    );
+  });
+
+  it('ruft deleteApplication nur im PurgeService auf', () => {
+    const callers = codeLines()
+      .filter(({ row }) => /\.deleteApplication\(/.test(row))
+      .filter(({ path }) => path !== 'coolify/coolify.provisioner.ts')
+      .map((l) => l.path);
+    expect(callers).toEqual(['instances/purge.service.ts']);
   });
 
   it('kennt keinen Aufruf NACH AUSSEN, dessen Name nach Löschen klingt', () => {
@@ -188,8 +231,18 @@ describe('R1 — kein Löschpfad gegen Coolify', () => {
     const hits = codeLines()
       .filter(({ row }) => !row.includes('this.prisma.'))
       .filter(({ row }) => !row.includes('kontext.prisma.'))
-      .filter(({ row }) => suspicion.test(row));
+      .filter(({ row }) => suspicion.test(row))
+      .filter((t) => !isAllowedDeleteRow(t));
     expect(hits.map(asLocation)).toEqual([]);
+  });
+
+  it('gibt der Ausnahme nur die eingetragenen Zeilen an den eingetragenen Orten', () => {
+    const at = (path: string, row: string): Location => ({ path, number: 1, row });
+    expect(isAllowedDeleteRow(at('instances/purge.service.ts', '  await this.provisioner.deleteApplication(instance.coolifyApplicationId, true);'))).toBe(true);
+    // Derselbe Aufruf an anderer Stelle oder mit anderen Argumenten fällt.
+    expect(isAllowedDeleteRow(at('instances/instance.service.ts', 'await this.provisioner.deleteApplication(instance.coolifyApplicationId, true);'))).toBe(false);
+    expect(isAllowedDeleteRow(at('instances/purge.service.ts', 'await this.provisioner.deleteApplication(other, true);'))).toBe(false);
+    expect(isAllowedDeleteRow(at('instances/purge.service.ts', 'await tx.auditLog.deleteMany({});'))).toBe(false);
   });
 
   it('fällt um, sobald ein Löschaufruf gegen Coolify eingebaut würde', () => {
@@ -245,6 +298,12 @@ describe('R4/R6 — nichts wird automatisch gelöscht', () => {
       'entfernt (Coolify antwortet 404) — ein Ausfall zählt nicht. Coolify ' +
       'wird dabei nur GELESEN. Der Nachweis steht vorher im Audit-Log und in ' +
       'einer Systemnotiz ([W4]).',
+    'instances/purge.service.ts':
+      'PurgeService — die automatische Löschung 90 Tage nach der Archivierung ' +
+      '(seit 1.2.0). Löscht nur Zeilen einer ARCHIVIERTEN Instanz nach Ablauf der ' +
+      'Frist, erst nachdem Coolify gelöscht und der Sicherungs-Agent die ' +
+      'Löschung im Ziel bestätigt hat; Rechnungen und das Audit-Log bleiben. ' +
+      'Die Bedingungen prüft der Test „lässt die Löschung nur mit ihren Bedingungen zu".',
     'test-support/company-provisioning.ts':
       'PRÜFHILFE. `cleanUp(praefix)` räumt die Zeilen einer Integrationssuite ' +
       'weg und ist damit der einzige Massenlöschpfad im Baum. Sie ist in ' +
@@ -252,6 +311,19 @@ describe('R4/R6 — nichts wird automatisch gelöscht', () => {
       'prüft das an der Quelle nach — sie liegt NICHT im Auslieferungsartefakt ' +
       '([K3]). Sie steht hier trotzdem namentlich, damit die Absicherung nicht ' +
       'an einer stillschweigenden Ausnahme dieses Tests hängt ([W5]).',
+  };
+
+  /**
+   * Für diese beiden Dateien gilt die Ausnahme NICHT dateiweit, sondern nur für
+   * die genannten Zeilen: jeder weitere Löschaufruf gegen ein Nachweis-Modell
+   * fällt auch dort.
+   */
+  const DELETE_ROWS: Record<string, RegExp[]> = {
+    'instances/instance.service.ts': [/^const result = await this\.prisma\.instance\.deleteMany\(\{$/],
+    'instances/purge.service.ts': [
+      /^const (restores|backups|metrics) = await tx\.(instanceRestore|backup|metric)\.deleteMany\(\{ where: \{ instanceId: instance\.id \} \}\);$/,
+      /^const gone = await tx\.instance\.deleteMany\(\{ where: \{ id: instance\.id, \.\.\.expiredArchiveCoolifyGone\(\) \} \}\);$/,
+    ],
   };
 
   it('hat im Backend keinen unbegründeten Löschaufruf gegen die Nachweis-Modelle', () => {
@@ -264,6 +336,18 @@ describe('R4/R6 — nichts wird automatisch gelöscht', () => {
       .map((d) => d.path)
       .filter((path) => DELETE_EXCEPTIONS[path] === undefined);
     expect(hits).toEqual([]);
+
+    const rowHits = codeLines()
+      .filter(({ path }) => DELETE_ROWS[path] !== undefined)
+      .filter(({ row }) => pattern.test(row))
+      .filter(({ path, row }) => !DELETE_ROWS[path].some((allowed) => allowed.test(row.trim())));
+    expect(rowHits.map(asLocation)).toEqual([]);
+  });
+
+  it('lässt in den beiden Dateien nur die eingetragenen Zeilen zu (Gegenprobe)', () => {
+    const allowed = DELETE_ROWS['instances/purge.service.ts'];
+    expect(allowed.some((r) => r.test('await tx.backup.deleteMany({ where: {} });'))).toBe(false);
+    expect(allowed.some((r) => r.test('const backups = await tx.backup.deleteMany({ where: { instanceId: instance.id } });'))).toBe(true);
   });
 
   it('verlangt für jede Ausnahme eine Begründung UND die Datei dazu', () => {
@@ -310,6 +394,36 @@ describe('R4/R6 — nichts wird automatisch gelöscht', () => {
     expect(text).toMatch(
       /status\(instance\.coolifyApplicationId\)[\s\S]{0,120}\}\s*catch\s*\{\s*throw new DiscardNotPossibleError/,
     );
+  });
+
+  it('lässt die Löschung nur mit ihren Bedingungen zu', () => {
+    const source = sourceFiles().find((d) => d.path === 'instances/purge.service.ts');
+    expect(source).toBeDefined();
+    const text = (source as { content: string }).content;
+    // Nur fällige, archivierte Instanzen.
+    expect(text).toContain('where: expiredArchive()');
+    const due = sourceFiles().find((d) => d.path === 'instances/expired-archive.ts');
+    expect((due as { content: string }).content).toContain("status: 'archived'");
+    // Nur beendete Organisationen; die Zeilen werden bedingt und gezählt gelöscht.
+    expect((due as { content: string }).content).toContain("status: 'ended', endedAt:");
+    expect(text).toContain('...expiredArchiveCoolifyGone()');
+    expect(text).toContain('gone.count !== 1');
+    // Reihenfolge: Coolify, dann Bestätigung des Agenten, dann die Zeilen, dann die Organisation.
+    const order = [
+      'this.provisioner.deleteApplication(',
+      'AUDIT_ACTION.instanceStoragePurged',
+      "if (confirmed === 0) return 'waiting'",
+      'tx.instanceRestore.deleteMany',
+      'tx.backup.deleteMany',
+      'tx.metric.deleteMany',
+      'tx.instance.deleteMany(',
+      'await this.dispose(',
+    ].map((marker) => text.indexOf(marker));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // Keine Rechnung wird je angefasst.
+    expect(text).not.toMatch(/\binvoice(Line)?\s*\.\s*(delete|deleteMany|update|updateMany)\s*\(/);
+    expect(text).not.toMatch(/\bauditLog\s*\.\s*(delete|deleteMany)\s*\(/);
   });
 
   it('fällt um, sobald ein solcher Aufruf eingebaut würde (Gegenprobe)', () => {

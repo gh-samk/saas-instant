@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { datePlusDays, dateStringFromDate, today, toDate } from '@saas-instant/shared';
-import { PILOT_TO_PAYING_AFTER_DAYS } from '../companies/deadlines';
+import { TRIAL_DAYS } from '../companies/deadlines';
 import { CompanyNotFoundError } from '../companies/company.errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingConfigService } from './pricing.config';
@@ -114,10 +114,10 @@ export class PricingService {
         ? null
         : datePlusDays(
             dateStringFromDate(company.instanceStartDate),
-            PILOT_TO_PAYING_AFTER_DAYS,
+            TRIAL_DAYS,
           );
-    // PILOTLOGIK: Die Einrichtung ist mit dem Aufsetzen der Instanz erbracht
-    // und sofort berechenbar. Das Abo beginnt erst nach der Pilotphase.
+    // Die Einrichtung ist mit dem Aufsetzen der Instanz erbracht und sofort
+    // berechenbar. Das Abo beginnt erst nach der Testphase.
     const subscriptionCalculable =
       subscriptionCalculableFrom !== null && cutoffDate >= subscriptionCalculableFrom;
     if (subscriptionCalculableFrom !== null && !subscriptionCalculable) {

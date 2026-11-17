@@ -21,7 +21,7 @@ export interface IntakeLinkSend {
  * ===========================================================================
  *
  * Zwei Aufrufer brauchen genau dasselbe: der automatische Versand beim
- * Statuswechsel auf `pilot_approved` und der Knopf „Erneut senden" in der
+ * Statuswechsel auf `trial` und der Knopf „Erneut senden" in der
  * Verwaltung. Beide erzeugen einen Zugang, verschicken die Mail, vermerken
  * den Versand und schreiben einen Audit-Eintrag.
  *
@@ -143,8 +143,7 @@ export class IntakeSendService {
         'Aufnahmeangaben eingegangen',
         [
           `${companyName} hat das Aufnahmeformular ausgefüllt. Die ` +
-            'Angaben stehen am Datensatz, der Status ist auf „Pilot läuft" ' +
-            'gewechselt.',
+            'Angaben stehen am Datensatz.',
           '',
           `Organisation: ${companyName}`,
           mandateReference

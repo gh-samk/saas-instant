@@ -1,6 +1,6 @@
 import { datePlusDays, dateStringFromDate } from '@saas-instant/shared';
 import { datePlusMonths, dayReadable } from '../../common/calendar';
-import { PILOT_TO_PAYING_AFTER_DAYS } from '../../companies/deadlines';
+import { TRIAL_DAYS } from '../../companies/deadlines';
 import { urgencyFrom } from '../urgency';
 import type {
   Task,
@@ -75,7 +75,7 @@ export const invoiceDue: TaskSource = {
       // Instanz erbracht und wird nicht über diese Aufgabe erinnert.
       const aboFrom = datePlusDays(
         dateStringFromDate(row.instanceStartDate),
-        PILOT_TO_PAYING_AFTER_DAYS,
+        TRIAL_DAYS,
       );
 
       // WAS ALS ABGEDECKT ZÄHLT: nur festgeschriebene Belege, die selbst keine

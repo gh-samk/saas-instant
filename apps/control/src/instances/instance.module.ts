@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { CoolifyModule } from '../coolify/coolify.module';
+import { CompanyModule } from '../companies/company.module';
 import { MailModule } from '../mail/mail.module';
+import { PurgeService } from './purge.service';
 import { ReconciliationService } from './reconciliation.service';
 import { InvitationSendService } from './invitation-send.service';
 import { SetupStatusService } from './setup-status.service';
@@ -42,7 +44,7 @@ import { SETUP_STATUS_FETCH, getSetupStatusViaHttp } from './setup-status';
 @Module({
   // `MailModule` für den Versand des Einrichtungslinks. Es ist nicht global,
   // also steht es hier — an der Stelle, an der die Abhängigkeit besteht.
-  imports: [AuthModule, CoolifyModule, MailModule, BackupSettingsModule],
+  imports: [AuthModule, CoolifyModule, MailModule, BackupSettingsModule, CompanyModule],
   controllers: [
     InstanceController,
     InstancesController,
@@ -56,6 +58,7 @@ import { SETUP_STATUS_FETCH, getSetupStatusViaHttp } from './setup-status';
     InstanceProvisioningService,
     MetricsFetchService,
     ReconciliationService,
+    PurgeService,
     BackupService,
     BackupPlanService,
     InstanceBackupService,

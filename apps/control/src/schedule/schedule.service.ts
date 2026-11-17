@@ -2,15 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { CompanyStatus } from '.prisma/control-client';
-import { datePlusDays, dateStringFromDate, today, toDate } from '@saas-instant/shared';
+import { datePlusDays, today, toDate } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
-import { datePlusMonths } from '../common/calendar';
-import {
-  PILOT_TO_PAYING_AFTER_DAYS,
-  REVIEW_AFTER_MONTHS,
-  reviewDateFrom,
-} from '../companies/deadlines';
+import { TRIAL_DAYS } from '../companies/deadlines';
 import { performStatusChange } from '../companies/status-change';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -35,14 +30,12 @@ export interface ScheduleResult {
 /**
  * DER ERSTE AUTOMATISCHE SCHREIBVORGANG IM CRM.
  *
- * Zwei Wechsel, beide OHNE GELDFOLGE — und das ist die Bedingung, unter der R5
- * sie überhaupt erlaubt:
+ * Ein Wechsel, OHNE GELDFOLGE — und das ist die Bedingung, unter der R5 ihn
+ * überhaupt erlaubt:
  *
- * - `pilot_running` → `paying`, 90 Tage nach `instanceStartDate`. Der Status
- *   sagt, dass die Pilotphase vorbei ist. Er stellt nichts in Rechnung: eine
- *   Rechnung entsteht in Etappe 4 ausschließlich durch eine Handlung.
- * - → `review_pending`, ab `pilotDecisionDate` plus sieben Monate. Das
- *   ist eine Erinnerung, kein Beschluss.
+ * - `trial` → `paying`, 14 Tage nach `instanceStartDate`. Der Status sagt,
+ *   dass die Testphase vorbei ist. Er stellt nichts in Rechnung: eine
+ *   Rechnung entsteht ausschließlich durch eine Handlung.
  *
  * Alles mit Geldfolge wird VORGESCHLAGEN, nicht vollzogen — dafür ist das
  * Modul `tasks` da (R5).
@@ -178,102 +171,36 @@ export class ScheduleService {
   /**
    * Sammelt die fälligen Wechsel — HÖCHSTENS EINER JE ORGANISATION UND LAUF.
    *
-   * Die Überprüfung hat Vorrang vor „zahlend": Sie liegt zeitlich später
-   * (sieben Monate gegen 90 Tage). Wer beides zugleich erfüllt, war lange
-   * unbeobachtet; ihn erst nach `paying` und morgen nach `review_pending`
-   * zu schieben, erzeugte einen Zwischenstand, den es nie gab, samt zweier
-   * Notizen.
+   * OHNE PREISVEREINBARUNG KEIN WECHSEL AUF `paying` ([H1]).
+   *
+   * Der Wechsel ist heute folgenlos — das ist die Bedingung, unter der R5 ihn
+   * erlaubt. Aber `paying` ist der Status, auf dem die Rechnungen aufsetzen.
+   * Ohne Preisstufe und ohne abweichenden Betrag wäre er eine Behauptung ohne
+   * Grundlage. Solche Organisationen übergeht der Zeitplan;
+   * `tasks/sources/price-missing` meldet sie stattdessen — vorgeschlagen
+   * statt vollzogen, genau wie R5 es verlangt.
    */
   private async due(day: string): Promise<Due[]> {
-    const decisionLimit = datePlusMonths(day, -REVIEW_AFTER_MONTHS);
-    const startLimit = datePlusDays(day, -PILOT_TO_PAYING_AFTER_DAYS);
+    const startLimit = datePlusDays(day, -TRIAL_DAYS);
 
-    // Die Quittung wird ZEILENWEISE verglichen und nicht in der Abfrage:
-    // „erledigt nach dem eigenen Termin" setzt zwei Spalten derselben Zeile
-    // gegeneinander, und das kann Prisma in `where` nicht ausdrücken. Die
-    // Kandidatenmenge ist klein (nur Überfällige), deshalb ist das billig.
-    const reviewCandidates = await this.prisma.company.findMany({
-      where: {
-        status: { in: ['pilot_running', 'paying'] },
-        pilotDecisionDate: { not: null, lte: toDate(decisionLimit) },
-      },
-      select: {
-        id: true,
-        name: true,
-        status: true,
-        pilotDecisionDate: true,
-        reviewDoneAt: true,
-      },
-    });
-    const toReview = reviewCandidates.filter((row) =>
-      isOpen(row.pilotDecisionDate, row.reviewDoneAt),
-    );
-
-    // OHNE PREISVEREINBARUNG KEIN WECHSEL AUF `paying` ([H1]).
-    //
-    // Der Wechsel ist heute folgenlos — das ist die Bedingung, unter der R5 ihn
-    // erlaubt. Aber `paying` ist der Status, auf dem in Etappe 4 die
-    // Rechnungen aufsetzen. Ohne Preisstufe und ohne abweichenden Betrag wäre
-    // er eine Behauptung ohne Grundlage, und die Zusicherung „ohne Geldfolge"
-    // verfiele still, sobald die Rechnungen dazukommen. Solche Organisationen
-    // übergeht der Zeitplan; `tasks/quellen/preisangabe-fehlt` meldet sie
-    // stattdessen — vorgeschlagen statt vollzogen, genau wie R5 es verlangt.
     const toPaying = await this.prisma.company.findMany({
       where: {
-        status: 'pilot_running',
+        status: 'trial',
         instanceStartDate: { not: null, lte: toDate(startLimit) },
         OR: [
-          { priceTier: { not: null } },
+          { priceTier: { not: null }, NOT: { priceTier: '' } },
           { customAmount: { not: null } },
         ],
       },
       select: { id: true, name: true, status: true },
     });
 
-    const due = new Map<string, Due>();
-    for (const row of toReview) {
-      due.set(row.id, {
-        companyId: row.id,
-        name: row.name,
-        fromStatus: row.status,
-        afterStatus: 'review_pending',
-        reason: `${REVIEW_AFTER_MONTHS} Monate nach dem Pilotbeschluss`,
-      });
-    }
-    for (const row of toPaying) {
-      if (due.has(row.id)) continue;
-      due.set(row.id, {
-        companyId: row.id,
-        name: row.name,
-        fromStatus: row.status,
-        afterStatus: 'paying',
-        reason: `${PILOT_TO_PAYING_AFTER_DAYS} Tage nach dem Instanzstart`,
-      });
-    }
-    return [...due.values()];
+    return toPaying.map((row) => ({
+      companyId: row.id,
+      name: row.name,
+      fromStatus: row.status,
+      afterStatus: 'paying' as const,
+      reason: `${TRIAL_DAYS} Tage nach dem Instanzstart`,
+    }));
   }
-}
-
-/**
- * Steht die Überprüfung noch offen? ([K2])
- *
- * Offen ist sie, solange es keine Quittung gibt — oder die vorhandene VOR dem
- * jetzt fälligen Termin liegt. Der zweite Fall ist der, der nach einer
- * Berichtigung des Beschlussdatums greift: Der Termin wandert nach hinten, und
- * eine Quittung von davor gehört zu einer anderen Überprüfung.
- *
- * Verglichen werden Tagesdaten als Zeichenketten `YYYY-MM-DD` — die Ordnung
- * ist dort dieselbe wie auf dem Kalender.
- */
-export function isOpen(
-  pilotDecisionDate: Date | null,
-  reviewDoneAt: Date | null,
-): boolean {
-  if (pilotDecisionDate === null) return false;
-  if (reviewDoneAt === null) return true;
-  const date = reviewDateFrom(
-    dateStringFromDate(pilotDecisionDate),
-  );
-  if (date === null) return true;
-  return dateStringFromDate(reviewDoneAt) < date;
 }

@@ -25,11 +25,9 @@ vi.mock('../lib/api', async (importOriginal) => ({
 const NEW_COMPANY = {
   id: 'c1',
   name: 'Neue Organisation',
-  status: 'pilot_approved',
+  status: 'trial',
   priceTier: null,
   paymentInterval: null,
-  pilotDecisionDate: null,
-  reviewDueDate: null,
   instanceStartDate: null,
   contactName: null,
   contactEmail: null,
@@ -71,6 +69,11 @@ describe('setupSteps: woran „erledigt" erkannt wird', () => {
     expect(setupSteps({ ...base, priceTier: 'stufe1', paymentInterval: 'monthly' }, false, false)[0]?.done).toBe(true);
   });
 
+  it('Befreite Organisationen haben weder Vertrag noch Rechnung offen', () => {
+    const steps = setupSteps({ ...base, status: 'exempt' }, true, false);
+    expect(steps.map((s) => s.id)).toEqual(['instance', 'deputy']);
+  });
+
   it('leitet Instanz, Rechnung und Stellvertretung aus den Daten ab', () => {
     const steps = setupSteps({ ...base, deputyEmail: 'v@example.com' }, true, false);
     expect(steps.map((s) => [s.id, s.done])).toEqual([
@@ -81,11 +84,9 @@ describe('setupSteps: woran „erledigt" erkannt wird', () => {
     ]);
   });
 
-  it('lässt Instanz und Rechnung bei Anfrage und Demo aus', () => {
-    for (const status of ['inquiry', 'demo'] as const) {
-      expect(setupSteps({ ...base, status }, false, false).map((s) => s.id)).toEqual(['contract', 'deputy']);
-    }
-    expect(setupSteps({ ...base, status: 'pilot_approved' }, false, false).map((s) => s.id)).toEqual([
+  it('lässt Instanz und Rechnung bei Anfrage aus', () => {
+    expect(setupSteps({ ...base, status: 'inquiry' }, false, false).map((s) => s.id)).toEqual(['contract', 'deputy']);
+    expect(setupSteps({ ...base, status: 'trial' }, false, false).map((s) => s.id)).toEqual([
       'contract', 'instance', 'invoice', 'deputy',
     ]);
   });

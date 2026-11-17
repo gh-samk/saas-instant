@@ -23,7 +23,7 @@ export const FUTURE_TOLERANCE_DAYS = 1;
  * Datumsformat oder eine falsch gestellte Uhr im Wrapper-Skript genügt.
  *
  * Die Regel gilt für jedes Feld, dessen Wert eine BEREITS GESCHEHENE Tatsache
- * beschreibt. Für geplante Termine (Überprüfungstermin) gilt sie ausdrücklich
+ * beschreibt. Für geplante Termine gilt sie ausdrücklich
  * NICHT — die liegen zu Recht in der Zukunft.
  */
 export function IsPastDay(options?: ValidationOptions) {

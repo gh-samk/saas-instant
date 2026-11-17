@@ -166,7 +166,7 @@ SMTP_FROM=Mein Produkt <noreply@example.com>
 
 Ohne `CONTROL_COOLIFY_TOKEN` bleibt die Instanzverwaltung sichtbar aus (HTTP 503); alle anderen Bereiche laufen unverändert. Nötig sind:
 
-1. In Coolify ein **eigenes API-Token** für die Verwaltung. Es braucht lesende Rechte auf Anwendungen und Server sowie das Recht, Anwendungen anzulegen, aber **kein Löschrecht**: Die Verwaltung hat keinen Löschpfad (Regel R1), und ein Token, das mehr darf als der Code, ist unnötiges Risiko.
+1. In Coolify ein **eigenes API-Token** für die Verwaltung. Es braucht lesende Rechte auf Anwendungen und Server sowie das Recht, Anwendungen anzulegen, **und Anwendungen zu löschen**: Seit 1.2.0 löscht die Verwaltung eine archivierte Instanz 90 Tage nach der Archivierung samt Volumes (Regel R1/R4, siehe [operations/security-model.md](operations/security-model.md)). **Bestandsinstallationen:** Das bisherige Token (ohne Löschrecht) um das Löschrecht erweitern, sonst schlägt die Löschung sichtbar fehl (Aufgabe „Löschung fehlgeschlagen“); es geht nichts verloren, die Instanz bleibt stehen.
 2. Die UUIDs von Projekt, Server und Deploy-Key aus Ihrer Coolify-Installation.
 3. Ein Git-Repository mit der Compose-Definition Ihrer Software (Vorlage: `docker-compose.coolify.yml`, die den [Instanz-Vertrag](instance-contract.md) zeigt) und der Deploy-Key mit Lesezugriff darauf.
 4. SMTP-Daten, die jede neue Instanz mitbekommt. Ohne Host und Absender wird **keine** Instanz angelegt.
@@ -189,7 +189,7 @@ Umgebungsvariablen, die der Code liest (`apps/control/src/coolify/coolify.config
 | `CONTROL_BACKUP_KEY` | Schlüssel, mit dem sich der Backup-Agent bei `GET /api/internal/backup-plan` und `POST /api/backups` ausweist; derselbe Wert wie `BACKUP_REPORT_KEY` des Agents ([operations/backup-and-recovery.md](operations/backup-and-recovery.md)) |
 | `RECHNUNGSDIENST_URL` | Adresse des Rechnungsdienstes für PDF/A-3. Das Compose startet den Dienst `invoice-renderer` (Quelle `tools/invoice-renderer`, nur im Compose-Netz, ohne Port nach außen) und setzt `http://invoice-renderer:8080`; Vorgabe im Code ohne Compose `http://rechnungsdienst:8080`; ausdrücklich leer = PDF-Erzeugung aus |
 
-**Ehrlicher Stand:** Diese Anbindung ist nur gegen eine Attrappe getestet. Machen Sie die erste Inbetriebnahme mit einer Test-Instanz und beobachten Sie Coolify dabei. Die Verwaltung legt nur an und stoppt; wenn etwas scheitert, steht die Anwendung unter Umständen in Coolify und muss dort von Hand aufgeräumt werden (die Verwaltung löscht sie nie).
+**Ehrlicher Stand:** Diese Anbindung ist nur gegen eine Attrappe getestet. Machen Sie die erste Inbetriebnahme mit einer Test-Instanz und beobachten Sie Coolify dabei. Die Verwaltung legt an, stoppt und löscht archivierte Instanzen nach 90 Tagen; wenn das Anlegen scheitert, steht die Anwendung unter Umständen in Coolify und muss dort von Hand aufgeräumt werden (die Verwaltung löscht nur archivierte Instanzen nach Ablauf der Frist).
 
 ## 8. Weitere Betriebsvariablen
 
@@ -199,6 +199,7 @@ Auswahl der im Code gelesenen Variablen, die nicht Teil der Pflichtwerte sind:
 |---|---|
 | `APP_TIMEZONE` | Zeitzone des Containers (Vorgabe `Europe/Berlin`); bestimmt, welcher Kalendertag „heute“ ist |
 | `CONTROL_SCHEDULE_ENABLED` | `nein` schaltet den täglichen Zeitplan (03:00) ab |
+| `CONTROL_PURGE_ENABLED` | `nein` schaltet die automatische Löschung archivierter Instanzen (03:15, 90 Tage nach der Archivierung) ab; Vorgabe `ja` |
 | `CONTROL_INQUIRY_KEY`, `CONTROL_INQUIRY_RECIPIENT` | Schlüssel des öffentlichen Anfrageweges und Empfängeradresse (alternativ `mail.inquiryTo`) |
 | `CONTROL_MAIL_BASE_URL` | Basis-URL in Mails, falls abweichend von `CONTROL_APP_URL` |
 | `MAIL_DOMAIN`, `MAIL_SENDER_INVOICE`, `MAIL_SENDER_BROADCAST`, `MAIL_REPLY_TO`, `MAIL_RETURN_PATH` | Absender-Feinsteuerung |

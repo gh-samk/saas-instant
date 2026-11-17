@@ -91,12 +91,18 @@ export class FakeControl implements ControlClient {
   reports: BackupReport[] = [];
   plan: InstanceSpec[] = [];
   retentionYears: number | undefined = undefined;
+  /** Subdomains, die laut Plan im Ziel geloescht werden sollen. */
+  purge: string[] = [];
   /** Setzt einen Fehler, den getPlan bzw. report wirft (z. B. ControlLockedError). */
   planError: Error | null = null;
   reportError: Error | null = null;
   async getPlan() {
     if (this.planError) throw this.planError;
-    return { ...(this.retentionYears !== undefined ? { retentionYears: this.retentionYears } : {}), instances: this.plan };
+    return {
+      ...(this.retentionYears !== undefined ? { retentionYears: this.retentionYears } : {}),
+      instances: this.plan,
+      ...(this.purge.length > 0 ? { purge: this.purge } : {}),
+    };
   }
   async getInvoiceArchivePage(): Promise<InvoiceArchivePage> {
     return { items: [], next: null };

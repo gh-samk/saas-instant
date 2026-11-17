@@ -220,6 +220,20 @@ export const AUDIT_ACTION = {
   instanceRestoreAdopted: 'instance.restore_adopted',
   /** Taeglicher Abgleich Coolify <-> CRM. Er meldet, er korrigiert nicht. */
   coolifyReconciliation: 'coolify.reconciliation',
+  /**
+   * Löschung 90 Tage nach der Archivierung (`PurgeService`). Die Einträge nennen
+   * nur Kennungen und Subdomain, nie Namen oder Kontaktdaten.
+   */
+  instancePurgeWarned14: 'instance.purge.warned_14',
+  instancePurgeWarned3: 'instance.purge.warned_3',
+  /** Coolify hat die Anwendung samt Volumes gelöscht (oder sie gab es nicht mehr). */
+  instanceCoolifyDeleted: 'instance.purge.coolify_deleted',
+  /** Der Sicherungs-Agent hat `instances/<subdomain>/` im Ziel gelöscht und es gemeldet. */
+  instanceStoragePurged: 'instance.purge.storage_deleted',
+  /** Ein Schritt der Löschung ist gescheitert; der Rest bleibt stehen. */
+  instancePurgeFailed: 'instance.purge.failure',
+  /** Instanzzeilen gelöscht — der letzte Schritt vor der Organisation. */
+  instancePurged: 'instance.purged',
 
   // --- Etappe 4: Rechnungen -----------------------------------------------
   //

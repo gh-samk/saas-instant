@@ -1,6 +1,6 @@
 {
   "name": "@saas-instant/backup-agent",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "description": "Backup-Agent: verschluesselte Sicherungen der Instanzen und der Verwaltung (HMAC-geschuetzte interne API, kein NestJS).",
   "type": "module",

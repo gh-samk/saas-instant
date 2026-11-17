@@ -46,7 +46,7 @@ Regel R1 (kein Loeschpfad gegen Coolify/Instanzen, keine zweite DB-Verbindung) b
 |---|---|---|
 | `BenutzerRolle` | `UserRole` | `inhaber` -> `owner`, `administrator` -> `administrator`, `mitarbeitend` -> `staff` (UNBENUTZT, bleibt erhalten) |
 | `NotfallArt` | `EmergencyKind` | `passkey` -> `passkey`, `passwort` -> `password` |
-| `OrganisationStatus` | `CompanyStatus` | `anfrage` -> `inquiry`, `demo` -> `demo`, `pilot_beschlossen` -> `pilot_approved`, `pilot_laufend` -> `pilot_running`, `zahlend` -> `paying`, `ueberpruefung_offen` -> `review_pending`, `ruhend` -> `dormant`, `beendet` -> `ended` |
+| `OrganisationStatus` | `CompanyStatus` | `anfrage` -> `inquiry`, `demo` -> `demo`, `pilot_beschlossen` -> `pilot_approved`, `pilot_laufend` -> `pilot_running`, `zahlend` -> `paying`, `ueberpruefung_offen` -> `review_pending`, `ruhend` -> `dormant`, `beendet` -> `ended`. Seit Version 1.2.0 nur noch fünf Werte: `inquiry`, `trial` (Testphase), `paying`, `exempt` (Beitragsbefreit), `ended`; Abbildung der Altwerte: `demo`, `pilot_approved`, `pilot_running` -> `trial`; `review_pending` -> `paying`; `dormant` -> `ended` |
 | `Zahlungsweise` | `PaymentInterval` | `jaehrlich` -> `yearly`, `halbjaehrlich` -> `half_yearly`, `monatlich` -> `monthly` |
 | `Zahlungsart` | `PaymentMethod` | `lastschrift` -> `direct_debit`, `ueberweisung` -> `bank_transfer` |
 | `Herkunft` | `Source` | `formular` -> `form`, `telefon` -> `phone`, `empfehlung` -> `referral`, `veranstaltung` -> `event` |
@@ -131,7 +131,7 @@ Relationsfelder: Pluralnamen englisch (`rechnungen` -> `invoices`, `notizeintrae
 `sepaMandatsreferenz` -> `sepaMandateReference`, `sepaMandatsdatum` -> `sepaMandateDate`, `iban`/`bic` bleiben,
 `kontoinhaberin` -> `accountHolder`, `sepaMandatTextImWortlaut` -> `sepaMandateText`, `sepaMandatErteiltAm` -> `sepaMandateGrantedAt`,
 `sepaMandatIp` -> `sepaMandateIp`, `aufnahmeAbgeschlossenAm` -> `intakeCompletedAt`, `aufnahmelinkVersendetAm` -> `intakeLinkSentAt`,
-`beschlussdatumPilot` -> `pilotDecisionDate`, `ueberpruefungsterminAm` -> `reviewDueDate`, `ueberpruefungErledigtAm` -> `reviewDoneAt`,
+`beschlussdatumPilot` -> `pilotDecisionDate`, `ueberpruefungsterminAm` -> `reviewDueDate`, `ueberpruefungErledigtAm` -> `reviewDoneAt` (diese drei Spalten sind seit 1.2.0 ungenutzt),
 `instanzStartAm` -> `instanceStartDate`, `newsletterEinwilligungStatus` -> `newsletterConsentStatus`, `herkunft` -> `source`, `notizen` -> `notes`.
 Relationen: `instanz` -> `instance`, `instanzVorschauen` -> `instancePreviews`, `aufnahmeZugaenge` -> `intakeAccesses`, `notizeintraege` -> `noteEntries`.
 
@@ -409,7 +409,7 @@ andere Literale nach Wortliste. Aufgaben-Quellen-Dateien: `kein-eintrag-lange` -
 `organisationsname-abweichung` -> `company-name-mismatch`, `rechnung-faellig` -> `invoice-due`, `rechnung-ueberfaellig` -> `invoice-overdue`,
 `audit-aufbewahrung` -> `audit-retention`, `backup-ausgeblieben` -> `backup-missing`, `stufe-pruefen` -> `tier-check`,
 `kennzahlen-fehlgeschlagen` -> `metrics-failed`, `anfrage-ohne-reaktion` -> `inquiry-unanswered`, `loeschung-vorschlagen` -> `deletion-suggestion`,
-`abgleich-abweichung` -> `reconciliation-deviation`, `ueberpruefungstermin` -> `review-date`, `statuswechsel-automatisch` -> `status-change-automatic`,
+`abgleich-abweichung` -> `reconciliation-deviation`, `statuswechsel-automatisch` -> `status-change-automatic`,
 `preisangabe-fehlt` -> `price-missing`; `etappe3-quellen.spec.ts` -> `stage3-sources.spec.ts`.
 
 ---------------------------------------------------------------------------------------------------

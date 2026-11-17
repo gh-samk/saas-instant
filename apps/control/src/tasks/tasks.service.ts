@@ -24,9 +24,10 @@ import { invoiceDue } from './sources/invoice-due.source';
 import { invoiceOverdue } from './sources/invoice-overdue.source';
 import { statusChangeAutomatic } from './sources/status-change-automatic.source';
 import { tierCheck } from './sources/tier-check.source';
-import { reviewDate } from './sources/review-date.source';
+import { instanceStillActive } from './sources/instance-still-active.source';
 import { documentTampered } from './sources/document-tampered.source';
 import { controlBackupMissing } from './sources/control-backup-missing.source';
+import { purgeFailed } from './sources/purge-failed.source';
 
 /**
  * Alle Quellen. Eine neue Aufgabenart wird HIER eingetragen — und sonst
@@ -34,7 +35,7 @@ import { controlBackupMissing } from './sources/control-backup-missing.source';
  */
 export const Sources: readonly TaskSource[] = [
   inquiryUnanswered,
-  reviewDate,
+  instanceStillActive,
   statusChangeAutomatic,
   deletionSuggestion,
   priceInfoMissing,
@@ -74,6 +75,8 @@ export const Sources: readonly TaskSource[] = [
   documentTampered,
   // Sicherung der Verwaltung (Datenbank/Rechnungsarchiv) ueberfaellig.
   controlBackupMissing,
+  // Archivierte Instanz über die Löschfrist hinaus noch da.
+  purgeFailed,
 ];
 
 /** Voreinstellung für „seit dem letzten Blick", wenn niemand etwas sagt. */

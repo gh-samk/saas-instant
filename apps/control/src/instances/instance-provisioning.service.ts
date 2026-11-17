@@ -2,10 +2,12 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   datePlusDays,
   dateStringFromDate,
+  deletionDay,
   today,
   toDate,
 } from '@saas-instant/shared';
 import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
+import { dayReadable } from '../common/calendar';
 import { CoolifyConfigService, instanceHost } from '../coolify/coolify.config';
 import {
   PROVISIONER,
@@ -342,7 +344,8 @@ export class InstanceProvisioningService {
         [
           `Instanz ${instance.subdomain} archiviert: gestoppt, Status auf ` +
             '„Archiviert" gesetzt. Es wurde nichts gelöscht — die Daten ' +
-            'bleiben erhalten. Wiederherstellung von Hand in Coolify.',
+            `bleiben bis zur automatischen Löschung am ${dayReadable(deletionDay(today()))} ` +
+            'erhalten (Rechnungen auch danach). Wiederherstellung als neue Instanz im Bereich „Sicherungen".',
           hint,
         ]
           .filter((part): part is string => part !== null && part.length > 0)

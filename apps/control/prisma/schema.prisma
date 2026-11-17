@@ -67,14 +67,13 @@ enum EmergencyKind {
   password
 }
 
+/// Anfrage, Testphase (14 Tage), Zahlend, Beitragsbefreit (laeuft ohne
+/// Rechnungs- und Stufenaufgaben), Beendet.
 enum CompanyStatus {
   inquiry
-  demo
-  pilot_approved
-  pilot_running
+  trial
   paying
-  review_pending
-  dormant
+  exempt
   ended
 }
 
@@ -423,6 +422,8 @@ model Company {
 
   status             CompanyStatus @default(inquiry)
   lastStatusChangeAt DateTime?     @db.Date
+  /// Seit wann die Organisation `ended` ist; bei jedem Wechsel weg von `ended` null. Die Löschung wartet 90 Tage darauf.
+  endedAt            DateTime?     @db.Date
 
   priceTier       String?
   customAmount    Decimal?         @db.Decimal(10, 2)
@@ -467,36 +468,24 @@ model Company {
   sepaMandateIp String?
 
   /// QUITTUNG des Aufnahmeformulars: der Tag, an dem die Organisation ihre
-  /// Angaben abgeschickt hat. Vorbild `reviewDoneAt` -- ein
-  /// Vorgang ohne Quittung wird immer wieder faellig.
+  /// Angaben abgeschickt hat.
   intakeCompletedAt DateTime? @db.Date
 
   /// DER RIEGEL FUER DEN EINMALIGEN AUTOMATIKVERSAND. Gesetzt im SELBEN
-  /// bedingten UPDATE wie der Statuswechsel auf `pilot_approved`;
+  /// bedingten UPDATE wie der Statuswechsel auf `trial`;
   /// ausgeloest wird der Versand nur, wenn er vorher leer war.
   ///
   /// WARUM NICHT AM STATUS: Es gibt keine Vorwaerts-Regel. Jeder Status
-  /// laesst sich auf jeden anderen setzen -- `StatuswechselDialog.tsx`
+  /// laesst sich auf jeden anderen setzen -- `StatusChangeDialog.tsx`
   /// begruendet ausdruecklich, warum bewusst keine Zustandsmaschine
   /// erfunden wurde. Ein Hin und Her wuerde die Mail sonst erneut ausloesen.
   intakeLinkSentAt DateTime?
 
+  /// Seit Version 1.2.0 ungenutzt (Pilot-Beschluss und Ueberpruefung entfallen);
+  /// die Spalten bleiben, bis eine spaetere Migration sie entfernt.
   pilotDecisionDate DateTime? @db.Date
   reviewDueDate     DateTime? @db.Date
-  /// QUITTUNG der Ueberpruefung: der Tag, an dem die Betreiberin den Status
-  /// `review_pending` wieder verlassen hat.
-  ///
-  /// Ohne dieses Feld liess sich die Ueberpruefung NIE abschliessen ([K2]):
-  /// Die Faelligkeit haengt an `pilotDecisionDate + 7 Monate`, und dieses
-  /// Datum wandert nie. Wer den Status zurueck auf `paying` setzte, bekam ihn
-  /// in der naechsten Nacht wieder auf `review_pending` — mit zwei
-  /// Systemnotizen und zwei Audit-Zeilen pro Tag und Organisation, dauerhaft.
-  ///
-  /// Der Zeitplan uebergeht eine Organisation, deren Quittung NICHT VOR dem
-  /// faelligen Termin liegt. Verschiebt sich der Termin, weil das
-  /// Beschlussdatum berichtigt wurde, greift die alte Quittung dadurch von
-  /// selbst nicht mehr — verglichen wird zeilenweise, nicht gegen ein
-  /// Stichdatum.
+  /// Frueher die Quittung der Ueberpruefung; seit 1.2.0 ungenutzt.
   reviewDoneAt      DateTime? @db.Date
   instanceStartDate DateTime? @db.Date
 

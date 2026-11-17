@@ -16,12 +16,12 @@ describe('noteText', () => {
         {
           ...basis,
           fromStatus: 'inquiry',
-          afterStatus: 'demo',
+          afterStatus: 'trial',
           introduction: 'Status gewechselt',
         },
         '2026-08-31',
       ),
-    ).toBe('Status gewechselt: Anfrage → Demo, 31.08.2026');
+    ).toBe('Status gewechselt: Anfrage → Testphase, 31.08.2026');
   });
 
   it('hängt den Grund an, wenn der Zeitplan gehandelt hat', () => {
@@ -29,16 +29,16 @@ describe('noteText', () => {
       noteText(
         {
           ...basis,
-          fromStatus: 'pilot_running',
+          fromStatus: 'trial',
           afterStatus: 'paying',
           introduction: 'Status automatisch gewechselt',
-          reason: '90 Tage nach dem Instanzstart',
+          reason: '14 Tage nach dem Instanzstart',
         },
         '2026-08-31',
       ),
     ).toBe(
-      'Status automatisch gewechselt: Pilot läuft → Zahlend, 31.08.2026 ' +
-        '(90 Tage nach dem Instanzstart)',
+      'Status automatisch gewechselt: Testphase → Zahlend, 31.08.2026 ' +
+        '(14 Tage nach dem Instanzstart)',
     );
   });
 });

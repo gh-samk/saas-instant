@@ -71,7 +71,7 @@ const DirectDebit = {
 };
 
 async function withAccess() {
-  const org = await createCompany(Prefix, { status: 'pilot_approved' });
+  const org = await createCompany(Prefix, { status: 'trial' });
   const { token } = await accesses.create(org.id, 'test', null);
   return { org, token };
 }
@@ -246,9 +246,9 @@ describe('Der Nachweis', () => {
       Source,
     );
     const system = (await notesFrom(org.id)).filter((n) => n.bySystem);
-    // Zwei: der Eingang und der Statuswechsel. Beide sind systemerzeugt und
-    // damit unveraenderlich — in KEINER darf ein fremdes Wort stehen ([K1]).
-    expect(system).toHaveLength(2);
+    // Eine: der Eingang. Sie ist systemerzeugt und damit unveraenderlich —
+    // in ihr darf kein fremdes Wort stehen ([K1]).
+    expect(system).toHaveLength(1);
     for (const note of system) {
       expect(note.text).not.toContain('Angreifer');
       expect(note.text).not.toContain('script');
@@ -313,32 +313,24 @@ describe('Die Rechnungsadresse', () => {
   });
 });
 
-describe('Der Statuswechsel nach dem Absenden', () => {
-  it('wechselt von pilot_beschlossen auf pilot_laufend', async () => {
-    const { org, token } = await withAccess();
-    await service.save(token, BankTransfer, Source);
-    expect(await statusFrom(org.id)).toBe('pilot_running');
-  });
+describe('Der Eingang ändert keinen Status mehr', () => {
+  it.each(['trial', 'paying', 'exempt'] as const)(
+    'lässt eine Organisation im Status %s unverändert',
+    async (status) => {
+      const org = await createCompany(Prefix, { status });
+      const { token } = await accesses.create(org.id, 'test', null);
+      await service.save(token, BankTransfer, Source);
+      expect(await statusFrom(org.id)).toBe(status);
+    },
+  );
 
-  /**
-   * Steht die Organisation woanders, hat jemand von Hand eingegriffen — ein
-   * automatischer Wechsel waere eine Entscheidung ueber einen Fall, den das
-   * System nicht kennt. Das bedingte UPDATE trifft dann keine Zeile.
-   */
-  it('greift NICHT ein, wenn die Organisation woanders steht', async () => {
-    const org = await createCompany(Prefix, { status: 'paying' });
-    const { token } = await accesses.create(org.id, 'test', null);
-    await service.save(token, BankTransfer, Source);
-    expect(await statusFrom(org.id)).toBe('paying');
-  });
-
-  it('schreibt genau EINE Systemnotiz zum Wechsel', async () => {
+  it('schreibt keine Systemnotiz zu einem Statuswechsel', async () => {
     const { org, token } = await withAccess();
     await service.save(token, BankTransfer, Source);
     const change = (await notesFrom(org.id)).filter((n) =>
-      n.text.startsWith('Status automatisch gewechselt'),
+      n.text.startsWith('Status'),
     );
-    expect(change).toHaveLength(1);
+    expect(change).toHaveLength(0);
   });
 });
 

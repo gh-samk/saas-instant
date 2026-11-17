@@ -301,6 +301,23 @@ describe('Vorhaltedatei', () => {
     expect(sent).toEqual(['k1', 'k2']);
   });
 
+  it('Fallback auf den gespeicherten Plan: die Loeschliste ist leer', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'bkp-cache-'));
+    const redactor = new Redactor();
+    const log = createLogger(redactor, () => undefined);
+    let down = false;
+    const inner = {
+      getPlan: async () => {
+        if (down) throw new ControlLockedError();
+        return { instances: [], purge: ['kunde1'] };
+      },
+    } as unknown as ControlClient;
+    const c = new ResilientControlClient(inner, new StateStore(dir, STATE_KEY), log, redactor);
+    expect((await c.getPlan()).purge).toEqual(['kunde1']);
+    down = true;
+    expect((await c.getPlan()).purge ?? []).toEqual([]);
+  });
+
   it('Speicherfehler beim Zusammenfuehren der Vorhaltedatei wird als Warnung geloggt', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'bkp-cache-'));
     const redactor = new Redactor();

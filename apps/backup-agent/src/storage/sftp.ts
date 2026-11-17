@@ -10,6 +10,12 @@ export function hostKeyFingerprint(key: Buffer): string {
   return 'SHA256:' + createHash('sha256').update(key).digest('base64').replace(/=+$/, '');
 }
 
+/** Nur ein fehlendes Verzeichnis zählt als leer; SFTP-Status 2 (ssh2) bzw. ENOENT. Jeder andere Fehler muss durchschlagen, sonst meldet die Löschung `purged` für ein nie gelistetes Präfix. */
+export function isMissingDirectory(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  return code === 2 || code === 'ENOENT' || /no such file/i.test(e instanceof Error ? e.message : '');
+}
+
 /** Ohne gepinnten Host-Key wird nicht verbunden (ein Angreifer im Netz koennte sonst Passwort und Sicherungen abgreifen). */
 export class HostKeyNotPinnedError extends Error {
   constructor() {
@@ -133,13 +139,15 @@ export class SftpStorage implements Storage {
         let entries;
         try {
           entries = await c.list(dir);
-        } catch {
-          return;
+        } catch (e) {
+          if (isMissingDirectory(e)) return;
+          throw e;
         }
         for (const e of entries) {
           const full = path.posix.join(dir, e.name);
           if (e.type === 'd') await walk(full);
-          else if (e.type === '-') {
+          // Alles, was kein Verzeichnis ist (auch Symlink), zaehlt als Objekt: sonst wirkte das Praefix faelschlich leer.
+          else {
             const rel = path.posix.relative(rootDir, full);
             if (rel.startsWith(prefix)) out.push({ key: rel, size: e.size, lastModified: new Date(e.modifyTime) });
           }

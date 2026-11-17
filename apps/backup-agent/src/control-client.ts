@@ -1,11 +1,12 @@
 import type { BackupKind, InstanceSpec } from './types.js';
 import { ControlHttpError, ControlLockedError } from './errors.js';
 import type { Logger } from './log.js';
-import { isRecord, parseInstanceSpec } from './validate.js';
+import { isRecord, parseInstanceSpec, parseSubdomain } from './validate.js';
 
 export interface BackupReport {
   subdomain?: string;
-  kind: BackupKind;
+  /** `purged`: `instances/<subdomain>/` im Ziel geloescht (Bestaetigung der Loeschung nach 90 Tagen). */
+  kind: BackupKind | 'purged';
   date: string;
   sizeBytes: number;
   /** Fehlen bei einem Lauf ohne neue Dateien (Rechnungsarchiv unveraendert oder leer). */
@@ -19,6 +20,8 @@ export interface BackupPlan {
   /** Aufbewahrung der Rechnungsarchive in Jahren (Object Lock); fehlt beim alten Array-Format. */
   retentionYears?: number;
   instances: InstanceSpec[];
+  /** Subdomains, deren `instances/<subdomain>/` zu loeschen ist; fehlt bei einer aelteren Verwaltung. */
+  purge?: string[];
 }
 
 export type ArchiveDocKind = 'pdf' | 'xml' | 'xrechnung';
@@ -114,7 +117,24 @@ export class HttpControlClient implements ControlClient {
         });
       }
     });
-    return { ...(retentionYears !== undefined ? { retentionYears } : {}), instances };
+    // Streng validiert: aus diesem Feld entsteht ein Loeschpfad. Ungueltiges wird uebersprungen und gemeldet.
+    const purge: string[] = [];
+    const rawPurge = isRecord(data) ? data['purge'] : undefined;
+    if (Array.isArray(rawPurge)) {
+      for (const item of rawPurge as unknown[]) {
+        try {
+          if (typeof item !== 'string') throw new Error('kein Text');
+          purge.push(parseSubdomain(item));
+        } catch {
+          this.opts.log?.warn('Ungueltiger Eintrag in der Loeschliste des Sicherungsplans uebersprungen');
+        }
+      }
+    }
+    return {
+      ...(retentionYears !== undefined ? { retentionYears } : {}),
+      instances,
+      ...(purge.length > 0 ? { purge } : {}),
+    };
   }
 
   async getInvoiceArchivePage(after?: string): Promise<InvoiceArchivePage> {

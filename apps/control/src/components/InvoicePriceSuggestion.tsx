@@ -35,7 +35,7 @@ export interface AdoptionLines {
  *   Vertrags (monatlich `MON`, halbjährlich `C62`, jährlich `ANN` — Begründung
  *   bei den Knöpfen der Messung weiter unten).
  * - Sonst, wenn die Einrichtung berechenbar ist: nur der Einrichtungsposten.
- *   Das ist der Fall „Pilotphase": das Abo beginnt erst nach 90 Tagen, die
+ *   Das ist der Fall „Pilotphase": das Abo beginnt erst nach 14 Tagen, die
  *   Einrichtung ist sofort berechenbar. Der Knopf bleibt also nutzbar, auch
  *   wenn nur dieser eine Posten fehlt.
  * - Ohne Stufe in der Preisliste: nichts. Ein Preis, den niemand vereinbart

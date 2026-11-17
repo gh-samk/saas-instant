@@ -517,6 +517,37 @@ export class MailService {
   }
 
   /**
+   * Vorwarnung an die Admins: eine archivierte Instanz wird gelöscht.
+   *
+   * Enthält KEINE Kundendaten — nur Subdomain und Datum (`day` ist lesbar
+   * formatiert, `daysLeft` die verbleibenden Tage).
+   */
+  async sendPurgeWarning(
+    email: string,
+    subdomain: string,
+    day: string,
+    daysLeft: number,
+  ): Promise<void> {
+    const text =
+      `Hallo,\n\n` +
+      `die archivierte Instanz „${subdomain}" wird in ${daysLeft} Tagen, am ${day}, ` +
+      `automatisch gelöscht: Anwendung und Daten in Coolify, die Sicherungen im ` +
+      `Sicherungsziel und die Zeilen in der Verwaltung. Rechnungen und das ` +
+      `Rechnungsarchiv bleiben.\n\n` +
+      `Soll etwas übernommen werden, geht das nur noch bis dahin (Wiederherstellung ` +
+      `als neue Instanz im Bereich „Sicherungen" oder Übernahme aus dem Volume).\n`;
+    await this.send(
+      email,
+      `${displayName(mailBrand().name)} – Instanz ${subdomain} wird am ${day} gelöscht`,
+      text,
+      'Löschwarnung',
+    );
+    if (!this.config.get<string>('SMTP_HOST')) {
+      this.logger.log(`[DEV-MAIL] Löschwarnung (${subdomain}) an ${email}`);
+    }
+  }
+
+  /**
    * Warnt die BISHERIGE Zustelladresse, dass jemand die Adresse für
    * Anmeldecodes umstellen will ([W3]).
    *

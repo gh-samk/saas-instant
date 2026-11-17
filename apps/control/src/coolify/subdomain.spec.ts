@@ -51,5 +51,7 @@ describe('subdomainError', () => {
     for (const blocked of BLOCKED_SUBDOMAINS) {
       expect(subdomainError(blocked)).not.toBeNull();
     }
+    // Das Rechnungsarchiv im Sicherungsziel heißt `invoices/`.
+    expect(subdomainError('invoices')).not.toBeNull();
   });
 });

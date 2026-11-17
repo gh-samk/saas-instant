@@ -1,6 +1,6 @@
 {
   "name": "@saas-instant/control",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "build": "nest build && node scripts/copy-fonts.mjs && vite build",

@@ -463,15 +463,12 @@ export function revokeDevice(
 // angefasst.
 // ---------------------------------------------------------------------------
 
-/** Die acht Status einer Organisation, wortgleich mit dem Prisma-Enum. */
+/** Die fünf Status einer Organisation, wortgleich mit dem Prisma-Enum. */
 export type CompanyStatus =
   | 'inquiry'
-  | 'demo'
-  | 'pilot_approved'
-  | 'pilot_running'
+  | 'trial'
   | 'paying'
-  | 'review_pending'
-  | 'dormant'
+  | 'exempt'
   | 'ended';
 
 /** Der Zahlungsrhythmus — die drei, die die Webseite anbietet. */
@@ -510,7 +507,6 @@ export interface CompanyShort {
   city: string | null;
   contactName: string | null;
   contactEmail: string | null;
-  reviewDueDate: string | null;
   lastStatusChangeAt: string | null;
   createdAt: string;
   /** Status der Kundeninstanz — `null`, wenn es keine gibt. */
@@ -582,17 +578,6 @@ export interface Company {
    */
   paymentDetailsStored: boolean;
 
-  pilotDecisionDate: string | null;
-  /** ABGELEITET (Beschlussdatum + 7 Monate). Nur lesen, nie senden. */
-  reviewDueDate: string | null;
-  /**
-   * Quittung der Überprüfung; `null` heißt „steht noch offen".
-   *
-   * Gesetzt wird sie serverseitig, wenn der Status `ueberpruefung_offen`
-   * VERLASSEN wird — das Weiterstellen IST die Erledigung. Einen eigenen Knopf
-   * dafür gibt es bewusst nicht.
-   */
-  reviewDoneAt: string | null;
   instanceStartDate: string | null;
 
   newsletterConsentStatus: ConsentStatus | null;
@@ -618,10 +603,7 @@ export interface CompanyPage {
 }
 
 export interface CompanyFilter {
-  /**
-   * Einer oder mehrere Status. Mehrere, weil die Filterleiste
-   * `pilot_beschlossen` und `pilot_laufend` zu einem Chip „Pilot" bündelt.
-   */
+  /** Einer oder mehrere Status, kommagetrennt an den Server. */
   status?: CompanyStatus[];
   search?: string;
   page?: number;
@@ -670,7 +652,6 @@ export interface CompanyChange {
   electronicAddressScheme?: string | null;
   paymentInterval?: PaymentInterval | null;
   paymentMethod?: PaymentMethod | null;
-  pilotDecisionDate?: string | null;
   instanceStartDate?: string | null;
   source?: Source | null;
   notes?: string | null;
@@ -722,7 +703,7 @@ export interface HistoryEntry {
  */
 export type TaskKind =
   | 'inquiry_unanswered'
-  | 'review_date'
+  | 'instance_still_active'
   | 'status_change_automatic'
   | 'deletion_suggestion'
   | 'price_info_missing'
@@ -747,7 +728,9 @@ export type TaskKind =
   // GoBD: Beleg weicht von seiner Prüfsumme ab / Lücke im Nummernkreis.
   | 'document_tampered'
   // Ziel eingerichtet, aber seit 3 Tagen keine Sicherung der Verwaltung gemeldet.
-  | 'control_backup_missing';
+  | 'control_backup_missing'
+  // Archivierte Instanz über die Löschfrist (90 Tage) hinaus noch da.
+  | 'purge_failed';
 
 export type Urgency = 'high' | 'medium' | 'low';
 
@@ -982,7 +965,7 @@ export interface IntakeLinkSend {
 /**
  * Wechselt den Status.
  *
- * Die Antwort traegt `aufnahmelink` mit: Beim Wechsel auf `pilot_beschlossen`
+ * Die Antwort traegt `aufnahmelink` mit: Beim Wechsel auf `trial`
  * geht der Aufnahmelink automatisch hinaus, und die Oberflaeche sagt danach
  * EINMAL, ob er ankam. `null` heisst: bei diesem Wechsel war nichts zu tun.
  */

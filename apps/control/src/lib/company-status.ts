@@ -1,11 +1,8 @@
 import {
   Archive,
-  CalendarClock,
-  ClipboardCheck,
   CreditCard,
+  Gift,
   Inbox,
-  PauseCircle,
-  PlayCircle,
   Rocket,
   type LucideIcon,
 } from 'lucide-react';
@@ -36,9 +33,9 @@ export interface CompanyStatusStyle {
  *
  * „Einwand" (rot) wird hier von KEINEM Status benutzt. Es bedeutet in der
  * Hauptanwendung „blockiert einen Beschluss, bis er geklärt ist" — dieser
- * Zustand kommt im Lebenszyklus einer Organisation nicht vor. „Ruhend" und
- * „Beendet" tragen deshalb beide die neutrale Graukombination: Weder eine
- * pausierte noch eine regulär beendete Kundenbeziehung ist ein Alarm.
+ * Zustand kommt im Lebenszyklus einer Organisation nicht vor. „Beendet"
+ * trägt deshalb die neutrale Graukombination: Eine regulär beendete
+ * Kundenbeziehung ist kein Alarm.
  *
  * Die Labels sind wortgleich mit `STATUS_BEZEICHNUNG` im Backend
  * (`apps/control/src/organisation/status-bezeichnung.ts`), damit Abzeichen und
@@ -55,56 +52,29 @@ export const COMPANY_STATUS: Record<
     border: 'border-vorschlag-rahmen',
     text: 'text-vorschlag-text',
   },
-  demo: {
+  trial: {
     label: t('common.companyStatus.label2'),
-    Icon: PlayCircle,
-    surface: 'bg-vorschlag-bg',
-    border: 'border-vorschlag-rahmen',
-    text: 'text-vorschlag-text',
-  },
-  pilot_approved: {
-    label: t('common.companyStatus.label3'),
-    Icon: ClipboardCheck,
-    surface: 'bg-beschluss-bg',
-    border: 'border-beschluss-rahmen',
-    text: 'text-beschluss-text',
-  },
-  pilot_running: {
-    label: t('common.companyStatus.label4'),
     Icon: Rocket,
-    surface: 'bg-beschluss-bg',
-    border: 'border-beschluss-rahmen',
-    text: 'text-beschluss-text',
+    surface: 'bg-bedenken-bg',
+    border: 'border-bedenken-rahmen',
+    text: 'text-bedenken-text',
   },
   paying: {
-    label: t('common.companyStatus.label5'),
+    label: t('common.companyStatus.label3'),
     Icon: CreditCard,
     surface: 'bg-beschluss-bg',
     border: 'border-beschluss-rahmen',
     text: 'text-beschluss-text',
   },
-  review_pending: {
-    label: t('common.companyStatus.label6'),
-    Icon: CalendarClock,
-    surface: 'bg-bedenken-bg',
-    border: 'border-bedenken-rahmen',
-    text: 'text-bedenken-text',
-  },
-  // NEUTRAL, nicht rot. „Einwand" heißt in der Hauptanwendung konkret
-  // „blockiert einen Beschluss, bis er geklärt ist". Eine ruhende Organisation
-  // blockiert nichts und wartet auf keine Klärung — Rot behauptete hier eine
-  // Dringlichkeit, die es fachlich nicht gibt, und schwächte über die Zeit die
-  // gelernte Kopplung „Rot = aktiver Einwand". Unterschieden von „Beendet"
-  // wird sie über Icon und Label, nicht über die Farbe.
-  dormant: {
-    label: t('common.companyStatus.label7'),
-    Icon: PauseCircle,
-    surface: 'bg-flaeche-3',
-    border: 'border-rahmen',
-    text: 'text-leise',
+  exempt: {
+    label: t('common.companyStatus.label4'),
+    Icon: Gift,
+    surface: 'bg-beschluss-bg',
+    border: 'border-beschluss-rahmen',
+    text: 'text-beschluss-text',
   },
   ended: {
-    label: t('common.companyStatus.label8'),
+    label: t('common.companyStatus.label5'),
     Icon: Archive,
     surface: 'bg-flaeche-3',
     border: 'border-rahmen',
@@ -115,16 +85,13 @@ export const COMPANY_STATUS: Record<
 /** Reihenfolge für Filter und Statuswechsel — die des Enums im Schema. */
 export const STATUS_ORDER: CompanyStatus[] = [
   'inquiry',
-  'demo',
-  'pilot_approved',
-  'pilot_running',
+  'trial',
   'paying',
-  'review_pending',
-  'dormant',
+  'exempt',
   'ended',
 ];
 
-/** Ist die Zeichenkette einer der acht Status? Für Werte aus der URL. */
+/** Ist die Zeichenkette einer der fünf Status? Für Werte aus der URL. */
 export function isCompanyStatus(
   value: string,
 ): value is CompanyStatus {
@@ -164,19 +131,10 @@ export const PAYMENT_METHOD_LABEL: Record<'direct_debit' | 'bank_transfer', stri
 };
 
 /**
- * Die Filterchips der Organisationsliste — SIEBEN, nicht acht.
+ * Die Filterchips der Organisationsliste: „Alle" und einer je Status.
  *
- * WARUM SIE NICHT EINS ZU EINS DEN STATUS ENTSPRECHEN. Das Enum hat acht
- * Werte, zwei davon beschreiben denselben Lebensabschnitt: `pilot_beschlossen`
- * heisst „entschieden, läuft noch nicht", `pilot_laufend` heisst „läuft".
- * Wer die Liste durchsieht, sucht „die Piloten" — nicht die eine oder die
- * andere Hälfte davon. Beide bekommen deshalb EINEN Chip; die Pille in der
- * Zeile zeigt weiterhin den genauen Wert, damit nichts falsch behauptet wird.
- *
- * `ueberpruefung_offen` hat dagegen einen EIGENEN Chip, obwohl die
- * Organisation weiter zahlt. Der nächtliche Zeitplan setzt diesen Status von
- * selbst, sieben Monate nach dem Pilotbeschluss — eine Filterleiste, die ihn
- * nicht kennt, versteckt genau die Fälle, die das System gerade vorlegt.
+ * Ein alter Link mit `?status=pilot` (oder einem anderen früheren Wert) findet
+ * keinen Chip und fällt in `CompaniesPage` auf „Alle" zurück.
  */
 export interface StatusChip {
   /** Wert für die URL. Leer heisst „alle". */
@@ -187,20 +145,10 @@ export interface StatusChip {
 }
 
 export const STATUS_CHIPS: StatusChip[] = [
-  { value: '', label: t('common.companyStatus.label9'), status: STATUS_ORDER },
-  { value: 'inquiry', label: t('common.companyStatus.label'), status: ['inquiry'] },
-  { value: 'demo', label: t('common.companyStatus.label2'), status: ['demo'] },
-  {
-    value: 'pilot',
-    label: t('common.companyStatus.label10'),
-    status: ['pilot_approved', 'pilot_running'],
-  },
-  { value: 'paying', label: t('common.companyStatus.label5'), status: ['paying'] },
-  {
-    value: 'review_pending',
-    label: t('common.companyStatus.label11'),
-    status: ['review_pending'],
-  },
-  { value: 'dormant', label: t('common.companyStatus.label7'), status: ['dormant'] },
-  { value: 'ended', label: t('common.companyStatus.label8'), status: ['ended'] },
+  { value: '', label: t('common.companyStatus.all'), status: STATUS_ORDER },
+  ...STATUS_ORDER.map((status) => ({
+    value: status,
+    label: COMPANY_STATUS[status].label,
+    status: [status],
+  })),
 ];

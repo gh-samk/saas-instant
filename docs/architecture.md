@@ -64,19 +64,20 @@ Ablauf aus Sicht der Verwaltung (`InstanceService`, `InstanceProvisioningService
 
 Jede neue Instanz bekommt **frische Zufallsgeheimnisse**, nichts wird zwischen Kunden geteilt, dazu die Variablen des [Instanz-Vertrags](instance-contract.md). Fehlen die SMTP-Daten für Instanzen, wird in Coolify gar nichts angelegt.
 
-## Regel R1: nie löschen
+## Regel R1: nie löschen, außer 90 Tage nach der Archivierung
 
-> Die Verwaltung kennt genau eine Datenbank (`control`). Es gibt keine zweite `DATABASE_URL`, keinen SQL-Zugang zu Kundeninstanzen und keinen Codepfad, der ein Deployment oder eine Datenbank löscht.
+> Die Verwaltung kennt genau eine Datenbank (`control`). Es gibt keine zweite `DATABASE_URL`, keinen SQL-Zugang zu Kundeninstanzen und keinen Codepfad, der ein Deployment oder eine Datenbank löscht. **Einzige Ausnahme (seit 1.2.0):** die automatische Löschung einer archivierten Instanz 90 Tage nach der Archivierung (`PurgeService`).
 
 Wie das gesichert ist:
 
-- Die Provisioner-Schnittstelle hat keine Methode zum Löschen oder Zurücksetzen. Was dort nicht steht, lässt sich nirgends aufrufen.
-- `coolify/no-delete-path.spec.ts` prüft über den Quellbaum: abschließende Methodenliste des Clients, kein HTTP-DELETE und kein Löschaufruf in den Dateien, die Coolify ansprechen, kein Löschaufruf gegen die Beweismodelle (Instanz, Kennzahl, Sicherung, Audit-Log).
+- Die Provisioner-Schnittstelle hat außer `create`, `status` und `stop` genau eine Löschmethode, `deleteApplication`, und genau einen Aufrufer: `instances/purge.service.ts`. Was dort nicht steht, lässt sich nirgends aufrufen.
+- `coolify/no-delete-path.spec.ts` prüft über den Quellbaum: abschließende Methodenliste des Clients, genau ein HTTP-DELETE (in `deleteApplication`, gegen `/applications/{uuid}`), Löschaufrufe nur an den benannten Stellen, kein Löschaufruf gegen die Beweismodelle (Instanz, Kennzahl, Sicherung, Audit-Log) außer im `PurgeService`, dessen Reihenfolge und Bedingungen der Test ebenfalls festhält.
+- **Die Löschung** (täglich 03:15, abschaltbar mit `CONTROL_PURGE_ENABLED=nein`, nur bei entsperrtem Tresor), je Instanz, nur wenn die Organisation seit 90 Tagen `ended` ist (`endedAt`, ein Neustart setzt die Frist zurück) UND die Instanz seit 90 Tagen archiviert ist (`archivedAt`); eine nicht beendete Organisation wird nie gelöscht und erscheint als Aufgabe „Löschung fehlgeschlagen“: Warnmail an die Admins 14 und 3 Tage vorher (je Frist einmal, nur Subdomain und Datum) → Coolify-Anwendung samt Volumes löschen (404 = erledigt) → der Backup-Agent löscht `instances/<subdomain>/` im Sicherungsziel (nie `invoices/`) und meldet `purged` → erst dann löscht die Verwaltung die Zeilen `InstanceRestore`, `Backup`, `Metric`, `Instance` → die Organisation: ohne Rechnungen `completeDelete`, mit Rechnungen `contactDataDelete` (die Hülle bleibt für die Rechnungen). Rechnungen, Rechnungsarchiv und Audit-Log bleiben immer. Schlägt ein Schritt fehl, bleibt der Rest stehen, der nächste Lauf macht dort weiter, und nach zwei Tagen über der Frist entsteht die Aufgabe „Löschung fehlgeschlagen“.
 - **Archivieren** stoppt die Anwendung und setzt den Status auf `archived`; das Datenvolumen bleibt. Der Meldetext nennt den Stand der letzten Sicherung, löst aber keine aus. Ein Wiederherstellen einer archivierten oder laufenden Instanz geht nur über eine **neue** Anwendung und die anschließende Übernahme (Abschnitt „Backup-Agent“); die alte wird dabei gestoppt, nie gelöscht.
 - **Erstellung verwerfen** ist nur unter vier Bedingungen möglich: Status `provisioning`; in Coolify existiert nichts (nie angelegt oder dort von Hand entfernt, ein Ausfall zählt nicht als entfernt); keine Kennzahlen; keine Sicherungen. Sie löscht nur die Zeile in der eigenen Datenbank.
-- Das Coolify-Token sollte **kein Löschrecht** haben (siehe [installation.md](installation.md)).
+- Das Coolify-Token **braucht das Löschrecht**, sonst schlägt die automatische Löschung sichtbar fehl (Aufgabe „Löschung fehlgeschlagen“); es geht nichts verloren (siehe [installation.md](installation.md), [operations/coolify-setup.md](operations/coolify-setup.md)).
 
-Weitere Regeln, die im Code genannt und geprüft werden: **R2** der Rechnungsnummernkreis ist lückenlos (Nummer erst beim Festschreiben, in derselben Transaktion, mit Sperre; Format `JJJJ-NNN`); **R4** nichts wird automatisch gelöscht (einzige Ausnahme: unbestätigte Mail-Eintragungen werden nach 72 Stunden entfernt, mit Audit-Eintrag); **R5** alles mit Geldfolge wird vorgeschlagen, nicht vollzogen (der Zeitplan vollzieht nur zwei Statuswechsel ohne Geldfolge); **R3** werbliche Mail geht nur durch ein Tor, das die Einwilligung prüft.
+Weitere Regeln, die im Code genannt und geprüft werden: **R2** der Rechnungsnummernkreis ist lückenlos (Nummer erst beim Festschreiben, in derselben Transaktion, mit Sperre; Format `JJJJ-NNN`); **R4** nichts wird automatisch gelöscht (Ausnahmen: unbestätigte Mail-Eintragungen werden nach 72 Stunden entfernt, mit Audit-Eintrag; archivierte Instanzen werden 90 Tage nach der Archivierung gelöscht, außer Rechnungen); **R5** alles mit Geldfolge wird vorgeschlagen, nicht vollzogen (der Zeitplan vollzieht nur zwei Statuswechsel ohne Geldfolge); **R3** werbliche Mail geht nur durch ein Tor, das die Einwilligung prüft.
 
 ## Backup-Agent
 
@@ -125,6 +126,7 @@ Geheimnisse, die die Verwaltung später braucht (TOTP-Geheimnisse, Setup- und Ke
 | Wann | Was | Abschaltbar mit |
 |---|---|---|
 | täglich 03:00 | Zeitplan: zwei Statuswechsel ohne Geldfolge | `CONTROL_SCHEDULE_ENABLED=nein` |
+| täglich 03:15 | Löschung archivierter Instanzen 90 Tage nach der Archivierung, samt Warnmails (14 und 3 Tage vorher) | `CONTROL_PURGE_ENABLED=nein` |
 | täglich 04:00 | Kennzahlen aller aktiven Instanzen abrufen (nur wenn `metricsPath` deklariert) | `CONTROL_METRICS_FETCH_ENABLED=nein` |
 | täglich 04:30 | Abgleich mit Coolify; Abweichungen erscheinen in der Aufgabenliste | `CONTROL_RECONCILIATION_ENABLED=nein` |
 | minütlich | Versand der Rundmail-Warteschlange | `CONTROL_BROADCAST_ENABLED` |

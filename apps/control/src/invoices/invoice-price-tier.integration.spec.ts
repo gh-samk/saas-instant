@@ -111,6 +111,6 @@ describe('Company.priceTier gegen aktive Stufen', () => {
     expect(result.priceTier).toBe('Standard');
     // Leeren ist immer erlaubt.
     const cleared = await companies.update(company.id, { priceTier: '' }, actor, SOURCE);
-    expect(cleared.priceTier === '' || cleared.priceTier === null).toBe(true);
+    expect(cleared.priceTier).toBeNull();
   });
 });

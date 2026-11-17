@@ -115,7 +115,7 @@ export class CompanyController {
    * Statuswechsel — eigener Endpunkt, weil jeder Wechsel Spuren hinterlässt.
    *
    * DIE ANTWORT TRÄGT DAS VERSANDERGEBNIS mit: Beim Wechsel auf
-   * `pilot_approved` geht der Aufnahmelink automatisch hinaus, und die
+   * `trial` geht der Aufnahmelink automatisch hinaus, und die
    * Oberfläche soll EINMAL sagen können, ob er ankam und an welche Adresse.
    * `null` heisst: Bei diesem Wechsel war nichts zu versenden.
    */

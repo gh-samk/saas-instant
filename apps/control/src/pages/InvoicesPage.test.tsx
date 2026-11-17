@@ -87,7 +87,7 @@ function setFetchReady(invoices: unknown[]) {
     const path = String(input);
     if (/\/api\/companies\/[0-9a-f-]+$/.test(path)) {
       return new Response(
-        JSON.stringify({ ...COMPANIES.companies[1], reviewDueDate: null }),
+        JSON.stringify({ ...COMPANIES.companies[1] }),
         { status: 200 },
       );
     }

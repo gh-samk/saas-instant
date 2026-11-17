@@ -5,7 +5,6 @@ export default {
   truncationHidden: '{more} weitere ausgeblendet',
   truncationLimit: 'Je Art werden höchstens {limit} Aufgaben geladen. Arbeite die angezeigten ab — die übrigen rücken dann nach.',
   groupInquiries: 'Neue Anfragen',
-  groupReview: 'Zu überprüfen',
   groupInvoices: 'Rechnungen',
   groupOther: 'Sonstiges',
   groupInstances: 'Instanzen',

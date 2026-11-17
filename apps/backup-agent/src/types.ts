@@ -1,7 +1,7 @@
 // Gemeinsame Typen des Backup-Agenten. Alles, was hier "Config" heisst und
 // Geheimnisse enthaelt, verlaesst den Agenten nie (siehe target.ts: metadata()).
 
-export type JobKind = 'backup' | 'backup-control' | 'verify' | 'restore';
+export type JobKind = 'backup' | 'backup-control' | 'verify' | 'restore' | 'purge';
 export type BackupKind = 'instance' | 'control' | 'invoices';
 
 export interface InstanceSpec {

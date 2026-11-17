@@ -173,7 +173,16 @@ export class ReconciliationService {
     // prüft eine gewünschte Subdomain unter anderem gegen
     // `<präfix>-<subdomain>` in Coolify — die Subdomains dieser Liste sind
     // damit strukturell vergeben, es kann sie gar keine Kundeninstanz geben.
-    const knownSubdomains = new Set(instances.map((i) => i.subdomain));
+    // Archivierte Instanzen stehen nicht in `instances`, ihre gestoppte
+    // Anwendung existiert in Coolify aber bis zur Löschung (90 Tage) weiter und
+    // ist nicht verwaist. Nach der Löschung gibt es sie nicht mehr.
+    const archived = await this.prisma.instance.findMany({
+      where: { status: 'archived' },
+      select: { subdomain: true },
+    });
+    const knownSubdomains = new Set(
+      [...instances, ...archived].map((i) => i.subdomain),
+    );
     const candidates = applications
       .filter((a) => !assigned.has(a.ref))
       .filter((a) => a.name.startsWith(prefix));

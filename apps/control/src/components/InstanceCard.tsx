@@ -33,6 +33,7 @@ import { ApiError } from '../lib/api-client';
 import { SecondFactorEvidenceDialog } from './SecondFactorEvidenceDialog';
 import { HANGS_FIXED_MINUTES } from '../lib/instance-status';
 import { instanceHost, instanceUrl } from '../lib/instance-address';
+import { deletionDay } from '@saas-instant/shared';
 import { formatDate } from '../utils/date';
 import { formatSize } from '../utils/size';
 import { runtimeInWords, minutesSince, beforeTimespan } from '../utils/timespan';
@@ -1011,6 +1012,13 @@ function Archived({ instance }: { instance: InstanceDetail }) {
           {instance.archivedAt && (
             <span className="ziffern-tabellarisch">
               {formatDate(instance.archivedAt)}
+            </span>
+          )}
+        </Field>
+        <Field label={t('components.instanceCard.deletionDay')}>
+          {instance.archivedAt && (
+            <span className="ziffern-tabellarisch">
+              {formatDate(deletionDay(instance.archivedAt))}
             </span>
           )}
         </Field>

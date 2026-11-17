@@ -258,11 +258,6 @@ function taskGroups(t: TFunction): { value: string; label: string; kinds: TaskKi
       kinds: ['inquiry_unanswered'],
     },
     {
-      value: 'review',
-      label: t('dashboard.groupReview'),
-      kinds: ['review_date'],
-    },
-    {
       value: 'instances',
       label: t('dashboard.groupInstances'),
       kinds: [
@@ -272,6 +267,8 @@ function taskGroups(t: TFunction): { value: string; label: string; kinds: TaskKi
         'reconciliation_deviation',
         'no_entry_for_long',
         'company_name_mismatch',
+        'instance_still_active',
+        'purge_failed',
       ],
     },
     { value: 'other', label: t('dashboard.groupOther'), kinds: [] },

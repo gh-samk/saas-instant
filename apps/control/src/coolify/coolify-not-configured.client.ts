@@ -41,4 +41,7 @@ export class CoolifyNotConfiguredClient implements CoolifyClient {
   stopApplication(): Promise<void> {
     throw new CoolifyNotConfiguredError();
   }
+  deleteApplication(): Promise<void> {
+    throw new CoolifyNotConfiguredError();
+  }
 }

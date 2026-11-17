@@ -19,7 +19,6 @@ import { tableText, tableRow } from '../lib/density';
 import { STATUS_CHIPS } from '../lib/company-status';
 import { INSTANCE_STATUS } from '../lib/instance-status';
 import { formatAmountCent } from '../utils/amount';
-import { formatDate } from '../utils/date';
 import { useT } from '../i18n';
 
 /** Wartezeit, bevor eine Eingabe zu einer Serveranfrage wird. */
@@ -38,7 +37,7 @@ const SEARCH_DELAY_MS = 300;
  * Ort, dazu Seiten zu 25), und eine zweite, clientseitige Filterlogik
  * daneben liefe irgendwann auseinander.
  *
- * KEIN AUTOMATISCHES AUSBLENDEN von „Beendet": Alle acht Status sind
+ * KEIN AUTOMATISCHES AUSBLENDEN von „Beendet": Alle fünf Status sind
  * gleichrangig. Eine Organisation, die unsichtbar ist, obwohl niemand sie
  * gefiltert hat, verwirrt mehr als eine, die sichtbar „Beendet" dasteht.
  */
@@ -49,7 +48,7 @@ export function CompaniesPage() {
   const toast = useToast();
   const wide = useWideList();
 
-  // Der Chipwert steht in der URL („pilot", „anfrage", leer für alle) und
+  // Der Chipwert steht in der URL („trial", „paying", leer für alle) und
   // wird erst hier zu den Status, nach denen der Server filtert. So bleibt
   // ein geteilter Link lesbar und übersteht eine Umbenennung im Enum.
   const chipValue = parameter.get('status') ?? '';
@@ -268,12 +267,12 @@ export function CompaniesPage() {
       ) : (
         <>
           {/* SPALTEN NACH DEM DESIGN: Organisation (Name + Ort), Status,
-              Instanz, Offen, Nächste Frist, Pfeil. „Kontakt" und „Angelegt am"
+              Instanz, Offen, Pfeil. „Kontakt" und „Angelegt am"
               entfallen hier — die Kontaktdaten stehen auf der Detailseite, und
               beim Überfliegen einer Liste ist die offene Forderung die Zahl,
               nach der man sucht.
 
-              `mindestbreite`: Sechs Spalten quetschen sich auf einem schmalen
+              `mindestbreite`: Fünf Spalten quetschen sich auf einem schmalen
               Bildschirm zu Unlesbarkeit. Die Hülle scrollt waagerecht, die
               SEITE nicht. */}
           {wide ? (
@@ -283,22 +282,20 @@ export function CompaniesPage() {
               t('organisationen.status'),
               t('organisationen.instance'),
               t('organisationen.open'),
-              t('organisationen.nextDeadline'),
               // Die Pfeilspalte traegt im Entwurf keine Ueberschrift. Ein
               // LEERER Tabellenkopf ist aber kein Ausweg — vorgelesen hoert
               // man dort nichts. Sie hat deshalb einen Namen, der nur nicht
               // gezeigt wird.
               t('organisationen.openAction'),
             ]}
-            columnsOnlyReadAloud={[false, false, false, false, false, true]}
+            columnsOnlyReadAloud={[false, false, false, false, true]}
             variant="list"
             actionColumn
-            minWidth="min-w-[880px]"
+            minWidth="min-w-[760px]"
             columnsWidths={[
-              'w-4/12',
+              'w-5/12',
               'w-2/12',
               'w-2/12',
-              'w-1/12',
               'w-2/12',
               'w-1/12',
             ]}
@@ -375,14 +372,6 @@ export function CompaniesPage() {
                     : formatAmountCent(o.openAmountCent)}
                 </td>
 
-                <td
-                  className={`${tableRow.compact} whitespace-nowrap ${tableText.compact.data}`}
-                >
-                  {o.reviewDueDate
-                    ? formatDate(o.reviewDueDate)
-                    : '—'}
-                </td>
-
                 <td className={tableRow.compact}>
                   <ChevronRight
                     className="ml-auto h-4 w-4 text-still"
@@ -415,8 +404,7 @@ export function CompaniesPage() {
                       {o.city}
                     </span>
                   )}
-                  {/* Status und offener Betrag in einer Zeile, die Frist nur
-                      wenn es eine gibt: „—" für Leeres sagte der Karte nichts. */}
+                  {/* Status und offener Betrag in einer Zeile. */}
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 ziffern-tabellarisch">
                     <CompanyStatusBadge status={o.status} />
                     {o.openAmountCent !== 0 && (
@@ -429,14 +417,6 @@ export function CompaniesPage() {
                           {t('organisationen.open')}{' '}
                         </span>
                         {formatAmountCent(o.openAmountCent)}
-                      </span>
-                    )}
-                    {o.reviewDueDate && (
-                      <span className="text-sm text-text">
-                        <span className="text-leise">
-                          {t('organisationen.nextDeadline')}{' '}
-                        </span>
-                        {formatDate(o.reviewDueDate)}
                       </span>
                     )}
                   </div>

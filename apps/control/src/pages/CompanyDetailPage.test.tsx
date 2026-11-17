@@ -57,7 +57,7 @@ const COMPANY = {
   deputyEmail: null,
   deputyPhone: null,
   deputyRole: null,
-  status: 'pilot_running',
+  status: 'paying',
   lastStatusChangeAt: '2026-05-01',
   priceTier: 'Standard',
   buyerType: 'business',
@@ -68,9 +68,6 @@ const COMPANY = {
   paymentInterval: 'yearly',
   paymentMethod: 'bank_transfer',
   paymentDetailsStored: true,
-  pilotDecisionDate: '2026-05-01',
-  reviewDueDate: '2026-12-01',
-  reviewDoneAt: null,
   instanceStartDate: null,
   newsletterConsentStatus: null,
   source: 'phone',
@@ -84,7 +81,7 @@ const HISTORY = [
     id: 'n2',
     companyId: IDENTIFIER,
     date: '2026-05-01',
-    text: 'Status gewechselt: Pilot beschlossen → Pilot läuft, 01.05.2026',
+    text: 'Status gewechselt: Testphase → Zahlend, 01.05.2026',
     bySystem: true,
     createdAt: '2026-05-01T10:00:00.000Z',
   },
@@ -286,17 +283,16 @@ afterEach(() => {
 });
 
 describe('Organisations-Detailseite', () => {
-  it('zeigt Stammdaten und den gerechneten Überprüfungstermin', async () => {
+  it('zeigt Stammdaten und den Status', async () => {
     setFetchReady();
     open('contract');
 
     expect(
       await screen.findByRole('heading', { name: 'Solawi Rheintal' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Pilot läuft')).toBeInTheDocument();
-    expect(screen.getByText('01.12.2026')).toBeInTheDocument();
-    // Der Termin ist abgeleitet und deshalb ohne Eingabefeld gekennzeichnet.
-    expect(screen.getByText('(gerechnet, offen)')).toBeInTheDocument();
+    expect(screen.getByText('Zahlend')).toBeInTheDocument();
+    // Pilotbeschluss und Überprüfungstermin gibt es nicht mehr.
+    expect(screen.queryByText('Überprüfungstermin')).toBeNull();
   });
 
   it('rendert eine Website nur bei http(s) als Link (F11)', async () => {
@@ -412,7 +408,7 @@ describe('Organisations-Detailseite', () => {
       'Telefonat: Beschluss ist für Ende April angesetzt.',
     );
     const systemGenerated = screen.getByText(
-      'Status gewechselt: Pilot beschlossen → Pilot läuft, 01.05.2026',
+      'Status gewechselt: Testphase → Zahlend, 01.05.2026',
     );
     // Beide hängen unter derselben <ul> — keine zwei getrennten Listen.
     const list = handwritten.closest('ul');
@@ -429,7 +425,7 @@ describe('Organisations-Detailseite', () => {
     expect(screen.getAllByRole('button', { name: 'Bearbeiten' })).toHaveLength(1);
 
     const systemRow = screen
-      .getByText('Status gewechselt: Pilot beschlossen → Pilot läuft, 01.05.2026')
+      .getByText('Status gewechselt: Testphase → Zahlend, 01.05.2026')
       .closest('li');
     expect(systemRow).not.toBeNull();
     expect(
@@ -707,7 +703,7 @@ describe('Organisations-Detailseite — Kopf und leere Felder', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Status ändern' })).toBeInTheDocument();
   });
 
-  it.each(['inquiry', 'demo'])(
+  it.each(['inquiry'])(
     'zeigt bei Status %s „Status ändern" als Hauptaktion statt „Instanz anlegen"',
     async (status) => {
       setFetchReady({ company: { status } });
@@ -774,8 +770,8 @@ describe('Organisations-Detailseite — Kopf und leere Felder', () => {
     expect(screen.getByText('Rechnungsadresse: wie die Stammdaten.')).toBeInTheDocument();
   });
 
-  it('zeigt das Aufnahmeformular nur bei „Pilot beschlossen" und nach den Stammdaten', async () => {
-    setFetchReady({ company: { status: 'pilot_approved' } });
+  it('zeigt das Aufnahmeformular nur in der Testphase und nach den Stammdaten', async () => {
+    setFetchReady({ company: { status: 'trial' } });
     open('contract');
 
     const intake = await screen.findByRole('heading', { name: 'Aufnahmeformular' });

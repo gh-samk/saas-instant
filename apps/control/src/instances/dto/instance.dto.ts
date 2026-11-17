@@ -44,16 +44,21 @@ export class BackupReportDto {
    * Pflicht für Instanz-Sicherungen (Vorgabe, wenn `kind` fehlt). Bei
    * `control` und `invoices` gibt es keine Instanz.
    */
-  @ValidateIf((o: BackupReportDto) => o.kind === undefined || o.kind === 'instance')
+  @ValidateIf(
+    (o: BackupReportDto) => o.kind === undefined || o.kind === 'instance' || o.kind === 'purged',
+  )
   @IsString()
   @IsNotEmpty({ message: 'Die Subdomain fehlt.' })
   @MaxLength(SUBDOMAIN_MAX)
   subdomain?: string;
 
-  /** Art der Sicherung; fehlt sie, ist es eine Instanz-Sicherung (abwärtskompatibel). */
+  /**
+   * Art der Meldung; fehlt sie, ist es eine Instanz-Sicherung (abwärtskompatibel).
+   * `purged`: der Agent hat `instances/<subdomain>/` im Ziel gelöscht.
+   */
   @IsOptional()
-  @IsIn(['instance', 'control', 'invoices'])
-  kind?: 'instance' | 'control' | 'invoices';
+  @IsIn(['instance', 'control', 'invoices', 'purged'])
+  kind?: 'instance' | 'control' | 'invoices' | 'purged';
 
   /** Schlüssel des Objekts im Sicherungsziel — kein Geheimnis. */
   @IsOptional()

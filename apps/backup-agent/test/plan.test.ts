@@ -18,6 +18,13 @@ describe('Sicherungsplan (control-client)', () => {
     expect(p).toEqual({ instances: [spec] });
     expect((await client({ retentionYears: 1.5, instances: [] }).getPlan()).retentionYears).toBeUndefined();
   });
+  it('liest die Loeschliste und verwirft ungueltige Subdomains (Pfadausbruch)', async () => {
+    const p = await client({ instances: [], purge: ['alt1', '../invoices', 'a/b', 42, 'INVOICES', 'ok-2'] }).getPlan();
+    expect(p.purge).toEqual(['alt1', 'ok-2']);
+  });
+  it('ein Plan ohne Loeschliste (aeltere Verwaltung) bleibt gueltig', async () => {
+    expect((await client({ instances: [spec] }).getPlan()).purge).toBeUndefined();
+  });
   it('lehnt unbekannte Formate und HTTP-Fehler ab', async () => {
     await expect(client({ foo: 1 }).getPlan()).rejects.toThrow(/Format/);
     await expect(client('x').getPlan()).rejects.toThrow(/Format/);

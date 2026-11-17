@@ -34,6 +34,8 @@ export const BLOCKED_SUBDOMAINS = [
   'status',
   'test',
   'staging',
+  // `instances/invoices/` im Sicherungsziel läge sonst neben dem Rechnungsarchiv `invoices/`.
+  'invoices',
 ] as const;
 
 const UMLAUTS: Record<string, string> = {

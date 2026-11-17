@@ -49,6 +49,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
       .filter((x) => /^[A-Za-z0-9_.-]+\*?$/.test(x)),
     jobTimeoutMs: positiveMinutes(env['JOB_TIMEOUT_MINUTES'], 120) * 60_000,
     invoiceRetentionYears: Number(env['INVOICE_RETENTION_YEARS'] ?? 10),
-    version: env['AGENT_VERSION'] ?? '1.1.1',
+    version: env['AGENT_VERSION'] ?? '1.2.0',
   };
 }

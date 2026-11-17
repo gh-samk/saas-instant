@@ -31,29 +31,29 @@ describe('OrganisationAnlegenDto', () => {
     expect(
       check(CompanyCreateDto, {
         name: 'Solawi',
-        pilotDecisionDate: '2026-03-12',
+        instanceStartDate: '2026-03-12',
       }),
     ).toHaveLength(0);
 
     const error = check(CompanyCreateDto, {
       name: 'Solawi',
-      pilotDecisionDate: '2026-03-12T00:00:00.000Z',
+      instanceStartDate: '2026-03-12T00:00:00.000Z',
     });
-    expect(error.map((f) => f.property)).toContain('pilotDecisionDate');
+    expect(error.map((f) => f.property)).toContain('instanceStartDate');
   });
 
   it('weist ein unmögliches Datum ab, statt es später als 500 zu zeigen', () => {
     const error = check(CompanyCreateDto, {
       name: 'Solawi',
-      pilotDecisionDate: '2026-02-30',
+      instanceStartDate: '2026-02-30',
     });
-    expect(error.map((f) => f.property)).toContain('pilotDecisionDate');
+    expect(error.map((f) => f.property)).toContain('instanceStartDate');
   });
 
-  it('nimmt den ÜBERPRÜFUNGSTERMIN nicht entgegen — er wird gerechnet', () => {
+  it('nimmt den früheren PILOTBESCHLUSS nicht mehr entgegen', () => {
     const error = check(CompanyCreateDto, {
       name: 'Solawi',
-      reviewDueDate: '2030-01-01',
+      pilotDecisionDate: '2026-03-12',
     });
     expect(error).not.toHaveLength(0);
   });
@@ -85,9 +85,13 @@ describe('OrganisationBearbeitenDto', () => {
 });
 
 describe('StatusWechselnDto', () => {
-  it('kennt nur die acht Status des Datenmodells', () => {
-    expect(check(StatusChangeDto, { status: 'paying' })).toHaveLength(0);
-    expect(check(StatusChangeDto, { status: 'erfunden' })).not.toHaveLength(0);
+  it('kennt nur die fünf Status des Datenmodells', () => {
+    for (const status of ['inquiry', 'trial', 'paying', 'exempt', 'ended']) {
+      expect(check(StatusChangeDto, { status })).toHaveLength(0);
+    }
+    for (const status of ['demo', 'pilot_approved', 'pilot_running', 'review_pending', 'dormant', 'erfunden']) {
+      expect(check(StatusChangeDto, { status })).not.toHaveLength(0);
+    }
   });
 });
 

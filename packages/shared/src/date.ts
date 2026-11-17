@@ -78,3 +78,11 @@ export function monthFromDate(s: string): string {
   dateFromString(s);
   return s.slice(0, 7);
 }
+
+/** Eine archivierte Instanz wird so viele Tage nach `archivedAt` automatisch gelöscht. */
+export const PURGE_DAYS = 90;
+
+/** Tag der automatischen Löschung (Tagesdatum `YYYY-MM-DD`). */
+export function deletionDay(archivedAt: string): string {
+  return datePlusDays(archivedAt, PURGE_DAYS);
+}

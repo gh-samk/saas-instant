@@ -480,8 +480,11 @@ describe('Instanz-Karte — Halbzustände bleiben sichtbar', () => {
       screen.getByText(/Bitte in Coolify eine Sicherung anstossen/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Die Daten bleiben erhalten/),
+      screen.getByText(/Die Daten bleiben bis zur automatischen Löschung erhalten/),
     ).toBeInTheDocument();
+    // Archiviert am 31.08.2026 + 90 Tage, als Tagesdatum ohne Uhrzeit.
+    expect(screen.getByText('Wird gelöscht am')).toBeInTheDocument();
+    expect(screen.getByText('29.11.2026')).toBeInTheDocument();
   });
 
   it('meldet einen Ladefehler sichtbar, statt eine leere Karte zu zeigen', async () => {
@@ -513,7 +516,11 @@ describe('Instanz-Karte — Archivieren', () => {
     expect(await screen.findByText('Das passiert:')).toBeInTheDocument();
     expect(screen.getByText('Das passiert nicht:')).toBeInTheDocument();
     expect(
-      screen.getByText(/Es wird nichts gelöscht — alle Daten bleiben mindestens 90 Tage/),
+      screen.getByText(/Es wird nichts sofort gelöscht — die Instanz wird gelöscht, wenn die Organisation 90 Tage beendet ist/),
+    ).toBeInTheDocument();
+    // Das Löschdatum steht im Dialog (heute + 90 Tage), samt dem, was bleibt.
+    expect(
+      screen.getByText(/Am \d{2}\.\d{2}\.\d{4} werden die Anwendung in Coolify samt Daten.*Rechnungen bleiben erhalten/),
     ).toBeInTheDocument();
     // Der Dialog verspricht KEINE Sicherung. Das Backend löst keine mehr aus
     // (`loeseSicherungAus` ist entfernt, der Coolify-Endpunkt existiert in

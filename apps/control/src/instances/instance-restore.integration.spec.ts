@@ -21,6 +21,7 @@ import {
   waitUntil,
 } from '../test-support/company-provisioning';
 import { BackupPlanService } from './backup-plan.service';
+import type { PurgeService } from './purge.service';
 import { BackupService } from './backup.service';
 import { InstanceBackupService } from './instance-backup.service';
 import { InstanceProvisioningService } from './instance-provisioning.service';
@@ -35,6 +36,8 @@ import {
 import { SubdomainTakenError } from './instance.errors';
 import { InstanceService } from './instance.service';
 import type { RestoreStartDto } from './dto/instance-backup.dto';
+
+const ACTIVE = { isActive: () => true } as unknown as PurgeService;
 
 /**
  * Sicherung und Wiederherstellung gegen eine ECHTE Datenbank, mit
@@ -254,7 +257,7 @@ describe('Meldeweg und Sicherungsplan', () => {
   it('der Plan nennt aktive Instanzen mit Compose-Projekt und ohne Geheimnisse', async () => {
     const { coolify } = build();
     const { instance, old } = await withInstanceAndBackup(coolify);
-    const plan = await new BackupPlanService(prisma, manifest).plan();
+    const plan = await new BackupPlanService(prisma, manifest, ACTIVE).plan();
     const entry = plan.find((p) => p.subdomain === instance.subdomain);
     expect(entry).toEqual({
       subdomain: instance.subdomain,
@@ -266,7 +269,7 @@ describe('Meldeweg und Sicherungsplan', () => {
       uploadsPath: '/app/uploads',
     });
     expect(JSON.stringify(plan)).not.toMatch(/token|passwor|secret/i);
-    const none = await new BackupPlanService(prisma, { provisioning: { backup: null } } as never).plan();
+    const none = await new BackupPlanService(prisma, { provisioning: { backup: null } } as never, ACTIVE).plan();
     expect(none).toEqual([]);
   });
 
@@ -274,13 +277,13 @@ describe('Meldeweg und Sicherungsplan', () => {
     const { coolify } = build();
     const { instance } = await withInstanceAndBackup(coolify);
     const withYears = { ...manifest, billing: { retentionYears: 10 } } as never;
-    const answer = await new BackupPlanService(prisma, withYears).response();
+    const answer = await new BackupPlanService(prisma, withYears, ACTIVE).response();
     expect(answer.retentionYears).toBe(10);
     expect(Array.isArray(answer.instances)).toBe(true);
     expect(answer.instances.map((p) => p.subdomain)).toContain(instance.subdomain);
 
     const standard = { ...manifest, billing: { retentionYears: null } } as never;
-    expect((await new BackupPlanService(prisma, standard).response()).retentionYears).toBe(8);
+    expect((await new BackupPlanService(prisma, standard, ACTIVE).response()).retentionYears).toBe(8);
   });
 });
 

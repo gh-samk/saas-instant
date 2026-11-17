@@ -19,8 +19,8 @@ import type {
  * ALLE ABLEITUNGEN PASSIEREN HIER, nicht im Browser: `sinceDaysFailed`,
  * `ausgeblieben` und der Vergleichswert „vor drei Wochen" sind
  * Betriebsentscheidungen (`instance.rules.ts`), und die Oberfläche soll sie
- * weder kennen noch nachrechnen — dieselbe Zurückhaltung wie beim
- * Überprüfungstermin in Etappe 2.
+ * weder kennen noch nachrechnen — dieselbe Zurückhaltung wie bei den
+ * Fristen der Organisation.
  */
 export function toInstanceDetail(
   instance: Instance,

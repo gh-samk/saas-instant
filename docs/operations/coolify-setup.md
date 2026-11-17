@@ -7,8 +7,9 @@ sie Coolify bedient, um Kundeninstanzen anzulegen.
 
 Die Anbindung spricht Coolify über die HTTP-API an und kennt nur diese Aufrufe:
 Anwendungen und Version lesen, Anwendung anlegen, Umgebungsvariablen setzen,
-Domäne setzen, ausrollen, Deployment abfragen, Anwendung stoppen. Einen Aufruf
-zum Löschen gibt es nicht (Regel R1, siehe [security-model.md](security-model.md)).
+Domäne setzen, ausrollen, Deployment abfragen, Anwendung stoppen. Genau **ein**
+Aufruf löscht: `DELETE /applications/{uuid}` samt Volumes, 90 Tage nach der
+Archivierung einer Instanz (Regel R1/R4, siehe [security-model.md](security-model.md)).
 Die Pfade stammen aus `reference/provision-tenant.py`, dem Referenzskript für den
 Ablauf. Die automatischen Tests laufen gegen eine Attrappe von Coolify. **Das
 erste echte Anlegen ist deshalb zugleich der Testfall.** Abschnitt 5 beschreibt,
@@ -101,9 +102,16 @@ hat, und ein Widerruf träfe immer beide.
 - **Kein `read:sensitive`.** Dann sieht das Token keine Geheimnisse anderer
   Anwendungen. Die Verwaltung ist darauf eingerichtet (siehe unten, „Das Token
   sieht die Compose-Datei nicht“).
-- Coolify-Tokens unterscheiden Schreiben und Löschen nicht fein. Dass nichts
-  gelöscht wird, garantiert deshalb der Code der Verwaltung und nicht das Token.
-  Das Token trotzdem nur dafür ausgeben, nicht weiter.
+- **Das Token braucht das Löschrecht**, weil die Verwaltung archivierte Instanzen
+  nach 90 Tagen löscht. Fehlt es, schlägt die Löschung mit 403 fehl: Die
+  Instanz bleibt stehen, es entsteht die Aufgabe „Löschung fehlgeschlagen“, und
+  es geht nichts verloren. **Bestandsinstallationen:** das Token in Coolify um
+  das Löschrecht erweitern (oder ein neues ausstellen und `COOLIFY_TOKEN`
+  tauschen). Coolify-Tokens unterscheiden Schreiben und Löschen nicht fein; dass
+  nur archivierte Instanzen nach Ablauf der Frist gelöscht werden, garantiert
+  der Code der Verwaltung (`coolify/no-delete-path.spec.ts`), nicht das Token.
+  Das Token nur dafür ausgeben, nicht weiter. Die Löschung lässt sich mit
+  `CONTROL_PURGE_ENABLED=nein` abschalten.
 - Ablegen im Passwortmanager und als Geheimnis in der Umgebung der Verwaltung,
   nie im Repository.
 
@@ -236,9 +244,9 @@ nicht. Dagegen helfen die Pflicht-Vorschau (zeigt Subdomain, Datenbankname,
 Umgebungsvariablen und Kennzahlen-Token **bevor** etwas passiert und gilt
 15 Minuten) und die sichtbare Fehlerführung. Wer das Risiko klein halten will,
 legt beim ersten Mal bewusst eine Wegwerf-Instanz an und archiviert sie danach.
-Archivieren heißt stoppen und Status setzen, gelöscht wird nichts. Das kostet
-einen belegten Namen im Register und ist der einzige Weg, den ganzen Pfad zu
-sehen, ohne einen echten Kunden zu benutzen.
+Archivieren heißt stoppen und Status setzen; gelöscht wird erst 90 Tage später,
+automatisch. Bis dahin kostet es einen belegten Namen im Register, und es ist der
+einzige Weg, den ganzen Pfad zu sehen, ohne einen echten Kunden zu benutzen.
 
 ## 6. Wenn das Anlegen scheitert
 
@@ -252,8 +260,8 @@ vorliegt:
 | ausgerollt, antwortet noch nicht (meist Zertifikat unterwegs) | „Erneut prüfen“ (reiner Lesezugriff auf die Instanz) |
 | fertig | Status `aktiv`, Einladungslink |
 
-Die Verwaltung löscht in Coolify nie etwas (R1), deshalb ist das Aufräumen
-einer halben Anwendung ein Handgriff in Coolify. „Erstellung verwerfen“ **fragt
+Die Verwaltung löscht in Coolify nur archivierte Instanzen nach Ablauf der Frist
+(R1), deshalb ist das Aufräumen einer halben Anwendung ein Handgriff in Coolify. „Erstellung verwerfen“ **fragt
 Coolify**: Kennt es die Anwendung nicht mehr (404), gilt der Zustand als „nie
 angelegt“. Ein Ausfall von Coolify zählt **nicht** als gelöscht, dann bleibt es
 bei der Ablehnung. Eine laufende Instanz wird archiviert, nicht verworfen.

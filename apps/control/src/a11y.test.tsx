@@ -143,11 +143,10 @@ describe('Etappe 2 — Rahmen, Liste und Detailseite', () => {
   const COMPANY = {
     id: '11111111-1111-4111-8111-111111111111',
     name: 'Solawi Gemeinschaftsgarten Nordost e.V.',
-    status: 'pilot_running',
+    status: 'trial',
     city: 'Berlin',
     contactName: 'Elif Aydin',
     contactEmail: 'elif@example.com',
-    reviewDueDate: '2026-12-01',
     lastStatusChangeAt: null,
     createdAt: '2026-04-02T09:12:00.000Z',
     instanceStatus: 'active',
@@ -181,7 +180,7 @@ describe('Etappe 2 — Rahmen, Liste und Detailseite', () => {
               total: 1,
               page: 1,
               perPage: 25,
-              countPerStatus: { pilot_running: 1 },
+              countPerStatus: { trial: 1 },
             }),
             { status: 200 },
           );

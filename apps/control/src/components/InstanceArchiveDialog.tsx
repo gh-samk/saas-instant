@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { deletionDay, today } from '@saas-instant/shared';
 import { Dialog, Button } from '@saas-instant/ui';
 import { errorText } from '../lib/api-client';
 import { instanceHost } from '../lib/instance-address';
 import { archiveInstance, type InstanceDetail } from '../lib/api';
 import { useT } from '../i18n';
+import { formatDate } from '../utils/date';
 
 /**
  * Archivieren — kein Löschen, und der Dialog sagt genau das.
@@ -100,6 +102,8 @@ export function InstanceArchiveDialog({
             {t('components.instanceArchiveDialog.item4')}</li>
           <li>
             {t('components.instanceArchiveDialog.item5')}</li>
+          <li>
+            {t('components.instanceArchiveDialog.item8', { date: formatDate(deletionDay(today())) })}</li>
         </ul>
       </div>
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   today,
+  deletionDay,
   dateFromString,
   toDate,
   datePlusDays,
@@ -151,5 +152,11 @@ describe('monthFromDate()', () => {
 
   it('wirft bei ungültigem Datum', () => {
     expect(() => monthFromDate('2024-02-31')).toThrow('Ungültiges Datum');
+  });
+});
+
+describe('deletionDay', () => {
+  it('liegt 90 Tage nach der Archivierung', () => {
+    expect(deletionDay('2027-01-01')).toBe('2027-04-01');
   });
 });

@@ -19,17 +19,16 @@ export interface StatusChange {
   action: AuditAction;
   actor: string;
   userId: string | null;
-  /** Optionaler Zusatz für die Notiz, z. B. „90 Tage nach Instanzstart". */
+  /** Optionaler Zusatz für die Notiz, z. B. „14 Tage nach Instanzstart". */
   reason?: string;
   /** Vorsatz der Notiz. Von Hand „Status gewechselt", automatisch anders. */
   introduction: string;
   /**
    * Weitere Felder, die IM SELBEN bedingten Schreibvorgang gesetzt werden.
    *
-   * Gebraucht für die Quittung der Überprüfung ([K2]): Sie darf nicht in einem
-   * zweiten UPDATE landen, sonst gäbe es einen Augenblick, in dem der Status
-   * schon gewechselt und die Quittung noch nicht gesetzt ist — und genau dann
-   * könnte der Zeitplan dazwischenfahren.
+   * Gebraucht für den Riegel des Aufnahmelinks (`intakeLinkSentAt`): Er darf
+   * nicht in einem zweiten UPDATE landen, sonst könnten zwei gleichzeitige
+   * Wechsel zwei Mails auslösen.
    */
   extraData?: Prisma.CompanyUncheckedUpdateInput;
   source?: InquirySource;
@@ -70,6 +69,8 @@ export async function performStatusChange(
       data: {
         status: change.afterStatus,
         lastStatusChangeAt: toDate(day),
+        // Die Löschfrist läuft ab dem Wechsel auf `ended`; jeder Wechsel weg davon setzt sie zurück.
+        endedAt: change.afterStatus === 'ended' ? toDate(day) : null,
         ...(change.extraData ?? {}),
       },
     });
@@ -103,7 +104,7 @@ export async function performStatusChange(
   });
 }
 
-/** „Status gewechselt: Anfrage → Demo, 31.08.2026 (90 Tage nach Instanzstart)" */
+/** „Status gewechselt: Anfrage → Testphase, 31.08.2026 (14 Tage nach Instanzstart)" */
 export function noteText(change: StatusChange, day: string): string {
   const core =
     `${change.introduction}: ${STATUS_LABEL[change.fromStatus]} → ` +

@@ -26,7 +26,7 @@ const logger = new Logger('CoolifyProvisioner');
 /**
  * Der Coolify-Anbieter der Schnittstelle `Provisioner`.
  *
- * Genau drei Methoden: `create`, `status`, `stop`. Hilfsfunktionen stehen
+ * Genau vier Methoden: `create`, `status`, `stop`, `deleteApplication`. Hilfsfunktionen stehen
  * ausserhalb der Klasse, damit die Methodenliste prüfbar abschliessend bleibt
  * (`no-delete-path.spec.ts`). Die Logik ist die bisherige des
  * Instanz-Aufbaus, unverändert übernommen: erst ausrollen (Coolify liest dabei
@@ -88,6 +88,10 @@ export class CoolifyProvisioner implements Provisioner {
 
   async stop(ref: string): Promise<void> {
     await this.client.stopApplication(ref);
+  }
+
+  async deleteApplication(ref: string, deleteVolumes: boolean): Promise<void> {
+    await this.client.deleteApplication(ref, deleteVolumes);
   }
 }
 

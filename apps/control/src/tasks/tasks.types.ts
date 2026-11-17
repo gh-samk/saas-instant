@@ -21,7 +21,7 @@ import type { PriceTable } from '../invoices/pricing.types';
  */
 export const TASKS_KINDS = [
   'inquiry_unanswered',
-  'review_date',
+  'instance_still_active',
   'status_change_automatic',
   'deletion_suggestion',
   'price_info_missing',
@@ -59,6 +59,8 @@ export const TASKS_KINDS = [
   'document_tampered',
   // Ziel eingerichtet, aber keine Meldung der Verwaltungs-/Rechnungsarchiv-Sicherung seit 3 Tagen.
   'control_backup_missing',
+  // Archivierte Instanz über die Löschfrist hinaus noch da (Löschung nach 90 Tagen hängt).
+  'purge_failed',
 ] as const;
 
 export type TasksKind = (typeof TASKS_KINDS)[number];

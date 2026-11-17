@@ -12,8 +12,8 @@ import type { Company } from '.prisma/control-client';
  *
  * Gebraucht wird der Begriff trotzdem an drei Stellen: Das Aufnahmeformular
  * muss wissen, was es verlangen soll; die Karte in der Verwaltung soll sagen,
- * was noch fehlt; und der Statuswechsel nach `pilot_running` soll nur
- * geschehen, wenn wirklich alles da ist.
+ * was noch fehlt; und der Aufnahmeweg soll nur
+ * abschließen, wenn wirklich alles da ist.
  *
  * ES WIRD NICHT GESPEICHERT — dieselbe Entscheidung wie bei „eingeladen" in
  * der Migration `einladungstabelle_entfernt`: Ein Zustand, den niemand
@@ -85,7 +85,7 @@ function missing(value: unknown): boolean {
 }
 
 /**
- * Welche Angaben fehlen, damit die Organisation in den laufenden Pilot gehen
+ * Welche Angaben fehlen, damit die Organisation in die Testphase gehen
  * kann.
  *
  * DIE BANKDATEN ZÄHLEN NUR BEI LASTSCHRIFT. Wer jährlich per Überweisung

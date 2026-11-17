@@ -19,9 +19,8 @@ import type {
  * Anlegen, `deployments[0].deployment_uuid` beim Deploy, `status` beim
  * Verfolgen, `docker_compose_domains` bei der Auflistung.
  *
- * WAS SIE NICHT KANN: löschen. Die Schnittstelle `CoolifyClient` kennt keine
- * solche Methode, also kann auch die Attrappe keine haben — genau das ist der
- * Sinn einer aufgezählten Schnittstelle.
+ * Löschen kann sie nur über `deleteApplication` — die einzige Löschmethode der
+ * aufgezählten Schnittstelle (Löschung 90 Tage nach der Archivierung).
  */
 /** Der Commit, den ein Deployment der Attrappe meldet — sofern nichts anderes gesetzt ist. */
 export const MOCK_COMMIT = '0123456789abcdef0123456789abcdef01234567';
@@ -39,6 +38,8 @@ export class CoolifyMock implements CoolifyClient {
   readonly environment = new Map<string, Record<string, string>>();
   /** Gestoppte Anwendungen. */
   readonly stopped: string[] = [];
+  /** Gelöschte Anwendungen (UUID, mit oder ohne Volumes). */
+  readonly deleted: { uuid: string; deleteVolumes: boolean }[] = [];
 
   /** Wenn gesetzt, wirft der nächste Aufruf dieses Namens. */
   failsAt: string | null = null;
@@ -162,6 +163,12 @@ export class CoolifyMock implements CoolifyClient {
     if (application !== undefined) application.status = 'exited';
   }
 
+  async deleteApplication(uuid: string, deleteVolumes: boolean): Promise<void> {
+    this.book('deleteApplication');
+    // Wie Coolify: eine unbekannte Anwendung (404) ist „schon erledigt".
+    this.removeManually(uuid);
+    this.deleted.push({ uuid, deleteVolumes });
+  }
 
   /**
    * Bildet nach, dass jemand eine Anwendung in der Coolify-Oberflaeche von

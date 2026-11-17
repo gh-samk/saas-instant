@@ -208,3 +208,41 @@ describe('getDeployment liefert den ausgecheckten Commit', () => {
     expect((await client.getDeployment('d1')).commit).toBeNull();
   });
 });
+
+describe('deleteApplication() — die einzige Löschung gegen Coolify', () => {
+  const oldFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = oldFetch;
+  });
+
+  it('schickt DELETE auf /applications/{uuid} und verlangt die Volumes mit', async () => {
+    const client = withResponse(200, { message: 'Application deletion request queued.' });
+    await client.deleteApplication('abc123', true);
+    const [url, init] = (globalThis.fetch as jest.Mock).mock.calls[0] as [string, { method: string }];
+    expect(init.method).toBe('DELETE');
+    expect(url).toMatch(/^https:\/\/coolify\.test\/api\/v1\/applications\/abc123\?/);
+    expect(url).toContain('delete_volumes=true');
+  });
+
+  it('kann die Volumes auch behalten', async () => {
+    const client = withResponse(200, {});
+    await client.deleteApplication('abc123', false);
+    expect(((globalThis.fetch as jest.Mock).mock.calls[0] as [string])[0]).toContain('delete_volumes=false');
+  });
+
+  it('gilt 404 als schon erledigt', async () => {
+    const client = withResponse(404, { message: 'Application not found.' });
+    await expect(client.deleteApplication('weg', true)).resolves.toBeUndefined();
+  });
+
+  it('wirft bei fehlendem Löschrecht des Tokens (403), mit dem Grund', async () => {
+    const client = withResponse(403, { message: 'You are not allowed to perform this action.' });
+    await expect(client.deleteApplication('abc123', true)).rejects.toThrow(/403.*not allowed/);
+  });
+
+  it('maskiert die UUID im Pfad (kein Pfadausbruch)', async () => {
+    const client = withResponse(200, {});
+    await client.deleteApplication('../servers/1', true);
+    expect(((globalThis.fetch as jest.Mock).mock.calls[0] as [string])[0]).toContain('/applications/..%2Fservers%2F1?');
+  });
+});

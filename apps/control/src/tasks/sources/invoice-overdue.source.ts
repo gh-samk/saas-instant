@@ -17,7 +17,7 @@ import type {
  * `ueberfaellig`. Er bleibt ausdrücklich unbenutzt. Ihn zu setzen bräuchte
  * einen nächtlichen Lauf, der Rechnungen anfasst — einen automatischen
  * Schreibvorgang mit Geldfolge, und genau den schließt R5 aus. Dieselbe
- * Begründung, aus der `pilot_running → zahlend` nur deshalb automatisch laufen
+ * Begründung, aus der `trial → zahlend` nur deshalb automatisch laufen
  * darf, WEIL dieser Wechsel keine Geldfolge hat.
  *
  * Abgeleitet kann die Aussage außerdem nicht veralten: Wird eine Zahlung

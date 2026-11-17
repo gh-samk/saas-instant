@@ -216,7 +216,7 @@ Zugangsdaten, wenn Sie beim erneuten Speichern ein Geheimnisfeld nicht neu angeb
 | Bucket | muss existieren |
 | Präfix | optionaler Ordner im Bucket |
 | Path-Style | bei vielen selbst betriebenen S3-Diensten nötig |
-| Zugangsschlüssel und geheimer Schlüssel | nur Rechte für diesen Bucket vergeben: lesen, schreiben, auflisten; das Recht zum Löschen nur, wenn die Aufbewahrung alter Sicherungen aufräumen soll (Abschnitt 5) |
+| Zugangsschlüssel und geheimer Schlüssel | nur Rechte für diesen Bucket vergeben: lesen, schreiben, auflisten; das Recht zum Löschen für die Aufbewahrung alter Sicherungen (Abschnitt 5) und die Löschung archivierter Instanzen nach 90 Tagen (Abschnitt 8) |
 
 **Object Lock am Bucket.** Für das Rechnungsarchiv empfohlen: Legen Sie den Bucket
 **mit aktiviertem Object Lock** (und damit Versionierung) an, und setzen Sie in den
@@ -480,6 +480,22 @@ Verlauf, wie es um die letzte Sicherung steht. Sie zieht dabei keine Sicherung. 
 die letzte zu alt oder fehlt sie, steht dort ein Warnhinweis. Lösen Sie vorher einmal
 „Jetzt sichern“ aus und prüfen Sie, dass im Verlauf „Letzte Sicherung: heute“ steht.
 
+**Löschung nach 90 Tagen.** Bis dahin bleiben Anwendung (gestoppt), Volume und alle
+Sicherungen bestehen; eine Wiederherstellung als neue Instanz ist möglich. Gelöscht wird
+nur, wenn die Organisation seit mindestens 90 Tagen den Status „Beendet“ hat (`endedAt`;
+ein Wechsel weg von „Beendet“ setzt die Frist zurück) **und** die Instanz seit 90 Tagen
+archiviert ist. Eine Instanz einer nicht beendeten Organisation wird nie gelöscht; sie
+erscheint nach der Frist als Aufgabe „Löschung fehlgeschlagen“. Sind beide Fristen um, löscht die Verwaltung die Instanz automatisch (Abschnitt
+„Regel R1“ in [architecture.md](../architecture.md)). Für den Sicherungsweg heißt das:
+Nach der Löschung der Coolify-Anwendung nennt der Sicherungsplan die Subdomain unter
+`purge`; der Agent löscht beim nächsten Lauf (02:30, bei „zweimal täglich“ auch 14:30) **alles** unter
+`instances/<subdomain>/`, auch den neuesten Satz, und meldet `purged`. Erst diese
+Meldung gibt der Verwaltung frei, ihre Zeilen zu löschen. `invoices/` fasst er nie an;
+auch das Rechnungsarchiv der Verwaltung bleibt unverändert. Ein Agent ohne `purge`-
+Unterstützung (älter als 1.2.0) bestätigt nie: Die Löschung hängt dann sichtbar als
+Aufgabe „Löschung fehlgeschlagen“, es geht nichts verloren.
+**Der Zugang zum Sicherungsziel braucht dafür das Recht zum Löschen** (Abschnitt 3).
+
 ## 9. Die Übung, die dieses Dokument nicht ersetzt
 
 **Eine Sicherung, die nie zurückgespielt wurde, ist eine Vermutung.** Die Prüfung in
@@ -538,6 +554,6 @@ hat keinen Docker-Zugriff.
 
 | Wer | darf | darf nicht |
 |---|---|---|
-| Verwaltung | Ziel einstellen (write-only), Aufträge `backup`, `verify`, `restore` auslösen, neue Anwendung anlegen, alte **stoppen**, Meldungen annehmen | Zugangsdaten halten oder zurückgeben, Dump oder Restore selbst ausführen, Docker ansprechen, löschen |
-| Agent | sichern, auflisten, prüfen, in einen **fremden, neuen** Stack zurückspielen, eigene alte Sicherungen nach gelungenem Lauf aufräumen | Instanzen oder Datenbanken löschen, `invoices/` löschen, in den eigenen Stack oder den der Verwaltung zurückspielen, ohne Signatur antworten |
+| Verwaltung | Ziel einstellen (write-only), Aufträge `backup`, `verify`, `restore` auslösen, neue Anwendung anlegen, alte **stoppen**, 90 Tage nach der Archivierung die Coolify-Anwendung löschen, Meldungen annehmen | Zugangsdaten halten oder zurückgeben, Dump oder Restore selbst ausführen, Docker ansprechen, im Sicherungsziel löschen |
+| Agent | sichern, auflisten, prüfen, in einen **fremden, neuen** Stack zurückspielen, eigene alte Sicherungen nach gelungenem Lauf aufräumen, `instances/<subdomain>/` einer archivierten Instanz nach Ablauf der Frist löschen und es melden | Instanzen oder Datenbanken löschen, `invoices/` löschen, in den eigenen Stack oder den der Verwaltung zurückspielen, ohne Signatur antworten |
 | Betreiber | Schlüssel verwalten, Rückspielproben, alte Anwendungen von Hand entfernen | |

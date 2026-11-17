@@ -128,6 +128,7 @@ services:
       CONTROL_INSTANCE_SMTP_FROM:
       CONTROL_METRICS_FETCH_ENABLED:
       CONTROL_RECONCILIATION_ENABLED:
+      CONTROL_PURGE_ENABLED:
       CONTROL_OUTBOX_PROBE_ENABLED:
 
       # Sicherungen: Verwaltung <-> Backup-Agent (nur im Compose-Netz). Die

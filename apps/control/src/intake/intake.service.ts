@@ -4,7 +4,6 @@ import { AUDIT_ACTION, AuditService } from '../audit/audit.service';
 import type { InquirySource } from '../common/inquiry-source';
 import { isHttpUrl } from '../common/http-url';
 import { writeSystemNote } from '../notes/system-note';
-import { performStatusChange } from '../companies/status-change';
 import { PrismaService } from '../prisma/prisma.service';
 import { IssuerConfigService } from '../invoices/document/issuer.config';
 import { assignNextMandateReference } from '../companies/mandate-number-sequence';
@@ -193,30 +192,12 @@ export class IntakeService {
 
     if (result === 'already_there') return { kind: 'already_there' };
 
-    // NACH der Transaktion: Der Statuswechsel ist ein eigener Vorgang mit
-    // eigener Systemnotiz und eigenem Audit-Eintrag, und er hat seine eigene
-    // Bedingung (`fromStatus`). Ihn in dieselbe Transaktion zu ziehen hiesse,
-    // zwei bedingte UPDATE ineinanderzuschachteln, deren Bedingungen
-    // unabhaengig scheitern koennen.
+    // Der Eingang aendert keinen Status: die Testphase beginnt mit dem
+    // Wechsel von Hand, der Aufnahmelink geht erst dabei hinaus.
     //
-    // NUR AUS `pilot_approved`: Steht die Organisation woanders, hat
-    // jemand von Hand eingegriffen, und ein automatischer Wechsel waere eine
-    // Entscheidung ueber einen Fall, den das System nicht kennt.
-    await performStatusChange(this.prisma, this.audit, {
-      companyId: checked.companyId,
-      fromStatus: 'pilot_approved',
-      afterStatus: 'pilot_running',
-      action: AUDIT_ACTION.companyStatusChanged,
-      actor: 'aufnahmeformular',
-      userId: null,
-      introduction: 'Status automatisch gewechselt',
-      reason: 'Aufnahmeangaben vollständig eingegangen',
-      source,
-    });
-
-    // ZULETZT und ausserhalb jeder Transaktion: Die Meldung ist der dritte
-    // Weg, auf dem die Betreiberin vom Eingang erfährt — nach Systemnotiz und
-    // Statuswechsel. Sie scheitert leise; die Angaben stehen bereits.
+    // ZULETZT und ausserhalb jeder Transaktion: Die Meldung ist der zweite
+    // Weg, auf dem die Betreiberin vom Eingang erfährt — nach der
+    // Systemnotiz. Sie scheitert leise; die Angaben stehen bereits.
     await this.send.reportReceipt(
       checked.companyId,
       draft.name,

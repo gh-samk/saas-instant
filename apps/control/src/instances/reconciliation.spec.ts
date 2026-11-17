@@ -18,7 +18,16 @@ function build(
 ) {
   const stored: Record<string, unknown>[] = [];
   const prisma = {
-    instance: { findMany: jest.fn().mockResolvedValue(instances) },
+    instance: {
+      // Wie die Datenbank: je nach Statusfilter nur die passenden Zeilen.
+      findMany: jest.fn().mockImplementation(({ where }: { where: { status: string | { in: string[] } } }) =>
+        Promise.resolve(
+          instances.filter((i) =>
+            typeof where.status === 'string' ? i.status === where.status : where.status.in.includes(i.status),
+          ),
+        ),
+      ),
+    },
     reconciliationRun: {
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((arg: { data: Record<string, unknown> }) => {
@@ -46,6 +55,30 @@ function build(
 const TRIGGER = { actor: 'test', userId: null };
 
 describe('Abgleich — er meldet, er korrigiert nicht (E3-16)', () => {
+  it('meldet die gestoppte Anwendung einer archivierten Instanz nicht als verwaist', async () => {
+    const coolify = new CoolifyMock();
+    coolify.setUp('instance-altverein', 'altverein.example.com', 'exited');
+    const { service } = build(
+      [{ id: 'i1', companyId: 'o1', subdomain: 'altverein', status: 'archived', coolifyApplicationId: null }],
+      coolify,
+    );
+
+    const result = await service.executeFrom(TRIGGER);
+
+    expect(result.orphanedApplications).toEqual([]);
+    expect(result.deviations).toEqual([]);
+  });
+
+  it('meldet nach der Löschung nichts: weder Anwendung noch Abweichung', async () => {
+    const { service } = build([
+      { id: 'i1', companyId: 'o1', subdomain: 'geloescht', status: 'archived', coolifyApplicationId: null },
+    ]);
+
+    const result = await service.executeFrom(TRIGGER);
+
+    expect(result).toMatchObject({ successful: true, orphanedApplications: [], deviations: [] });
+  });
+
   it('meldet eine CRM-Instanz ohne Coolify-Anwendung', async () => {
     const { service } = build([
       {

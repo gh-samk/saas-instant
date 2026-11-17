@@ -41,7 +41,7 @@ function company(fields: {
   }[];
 }) {
   const start = new Date(`${fields.aboFrom}T00:00:00.000Z`);
-  start.setUTCDate(start.getUTCDate() - 90);
+  start.setUTCDate(start.getUTCDate() - 14);
   return {
     id: 'o1',
     name: 'Kollektiv Grünspecht e. V.',

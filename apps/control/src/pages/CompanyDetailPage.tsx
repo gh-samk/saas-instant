@@ -95,7 +95,6 @@ interface Draft {
   electronicAddressScheme: string;
   paymentInterval: string;
   paymentMethod: string;
-  pilotDecisionDate: string;
   instanceStartDate: string;
 }
 
@@ -130,7 +129,6 @@ function draftFrom(o: Company): Draft {
     electronicAddressScheme: o.electronicAddressScheme ?? 'EM',
     paymentInterval: o.paymentInterval ?? '',
     paymentMethod: o.paymentMethod ?? '',
-    pilotDecisionDate: o.pilotDecisionDate ?? '',
     instanceStartDate: o.instanceStartDate ?? '',
   };
 }
@@ -168,12 +166,10 @@ function noBillingAddress(o: Company): boolean {
  * Blöcke, die einzeln gespeichert werden, sind es nicht. Wer nur die
  * Telefonnummer der Stellvertretung nachträgt, öffnet eine Karte.
  *
- * DREI ÄNDERUNGEN LAUFEN NICHT ÜBER DIESE FORMULARE, weil der Server sie in
+ * ZWEI ÄNDERUNGEN LAUFEN NICHT ÜBER DIESE FORMULARE, weil der Server sie in
  * PATCH ausdrücklich zurückweist:
  * - der Status (eigener Dialog, eigener Endpunkt, erzeugt eine Systemnotiz),
  * - die Hauptansprechpartnerin (dito, der Datensatz wird ersetzt),
- * - der Überprüfungstermin (abgeleitet aus dem Beschlussdatum, wird gerechnet
- *   und nie entgegengenommen — er steht hier deshalb nur zum Lesen).
  */
 /**
  * Die sechs Reiter der Detailseite.
@@ -438,16 +434,16 @@ export function CompanyDetailPage() {
     setInstanceCreateRequested(true);
     setTab('instance');
   };
-  // Die Hauptaktion folgt dem Status: Solange nur angefragt oder vorgeführt
-  // wurde, gibt es nichts anzulegen (die Instanz kommt erst mit dem Beschluss
-  // zum Piloten) — der nächste Schritt ist der Statuswechsel. Danach gilt:
+  // Die Hauptaktion folgt dem Status: Solange nur angefragt wurde, gibt es
+  // nichts anzulegen (die Instanz kommt erst mit der Testphase) — der nächste
+  // Schritt ist der Statuswechsel. Danach gilt:
   // ohne Instanz „Instanz anlegen", sonst „Rechnung anlegen".
-  const statusPrimary = o.status === 'inquiry' || o.status === 'demo';
+  const statusPrimary = o.status === 'inquiry';
   const primaryAction = statusPrimary
     ? { label: t('organisationen.changeStatus'), run: () => setStatusOpen(true) }
     : instanceState === 'loading'
       ? null
-      : instanceState === 'no' && o.status !== 'ended' && o.status !== 'dormant'
+      : instanceState === 'no' && o.status !== 'ended'
         ? { label: t('organisationen.createInstance'), run: createInstance }
         : { label: t('organisationen.createInvoice'), run: createInvoice };
   // Was nicht Hauptaktion ist, steht im Menü: E-Mail nur, wenn es eine
@@ -802,16 +798,16 @@ export function CompanyDetailPage() {
         {/* -------------------------------------------------- Aufnahmeformular */}
         {/* NUR IN DER AUFNAHMEPHASE UND NACH DEN STAMMDATEN. Das Formular
             sammelt Anschrift, Ansprechperson, Zahlung und Mandat und wird
-            genau einmal gebraucht: Der Link geht beim Wechsel auf „Pilot
-            beschlossen" hinaus. Davor gibt es keinen Anlass, danach steht die
+            genau einmal gebraucht: Der Link geht beim Wechsel auf „Testphase"
+            hinaus. Davor gibt es keinen Anlass, danach steht die
             Karte nicht mehr im Weg — wer ihren Nachweis oder den Link später
             braucht, holt sie über den dezenten Link darunter zurück (ein
             Wegblenden ohne Rückweg wäre ein verlorener Nachweis des Versands). */}
-        {o.status === 'pilot_approved' || intakeShown ? (
+        {o.status === 'trial' || intakeShown ? (
           <ErrorBoundary area={t('organisationen.sectionIntakeForm')}>
             <IntakeCard companyId={o.id} totpPossible={totpPossible} />
           </ErrorBoundary>
-        ) : o.status !== 'inquiry' && o.status !== 'demo' ? (
+        ) : o.status !== 'inquiry' ? (
           <p className="mt-4">
             <button
               type="button"
@@ -1303,7 +1299,6 @@ export function CompanyDetailPage() {
                 e.paymentInterval === '' ? null : (e.paymentInterval as PaymentInterval),
               paymentMethod:
                 e.paymentMethod === '' ? null : (e.paymentMethod as PaymentMethod),
-              pilotDecisionDate: text(e.pilotDecisionDate),
               instanceStartDate: text(e.instanceStartDate),
             });
           }}
@@ -1373,13 +1368,6 @@ export function CompanyDetailPage() {
                 </h3>
                 <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
                   <DateField
-                    label={t('organisationen.pilotDecisionDate')}
-                    name="pilotDecisionDate"
-                    value={e.pilotDecisionDate}
-                    onChange={setField('pilotDecisionDate')}
-                    helperText={t('organisationen.reviewDueDerived')}
-                  />
-                  <DateField
                     label={t('organisationen.instanceStart')}
                     name="instanceStartDate"
                     value={e.instanceStartDate}
@@ -1406,48 +1394,6 @@ export function CompanyDetailPage() {
             {t('organisationen.dates')}
           </h3>
           <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Field label={t('organisationen.pilotDecisionDate')} onAdd={add('contract')}>
-              {o.pilotDecisionDate && (
-                <span className="ziffern-tabellarisch">
-                  {formatDate(o.pilotDecisionDate)}
-                </span>
-              )}
-            </Field>
-            {/* NUR LESBAR, kein `DatumFeld`. Der Termin ist abgeleitet
-                (Beschlussdatum plus sieben Monate) und wird vom Server
-                gerechnet, nie entgegengenommen — `OrganisationBearbeitenDto`
-                führt ihn gar nicht. Ein Eingabefeld daneben verspräche eine
-                Änderbarkeit, die es nicht gibt, und ließe Termin und
-                Beschlussdatum irgendwann auseinanderlaufen, ohne dass jemand
-                wüsste, welcher von beiden gilt. Der Zusatz „(gerechnet)" sagt
-                das an Ort und Stelle. */}
-            <Field label={t('organisationen.reviewDate')}>
-              {o.reviewDueDate ? (
-                <>
-                  <span className="ziffern-tabellarisch">
-                    {formatDate(o.reviewDueDate)}
-                  </span>
-                  {/* Die Quittung entsteht serverseitig, wenn der Status
-                      `ueberpruefung_offen` VERLASSEN wird — das Weiterstellen
-                      IST die Erledigung. Einen eigenen Knopf „Überprüfung
-                      erledigt" gibt es bewusst nicht: Er wäre ein zweiter Weg,
-                      denselben Sachverhalt zu behaupten, und einer davon bliebe
-                      liegen. */}
-                  {o.reviewDoneAt ? (
-                    <span className="ml-2 text-sm text-leise">
-                      {t('organisationen.doneOn')}{' '}
-                      <span className="ziffern-tabellarisch">
-                        {formatDate(o.reviewDoneAt)}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="ml-2 text-sm text-leise">
-                      {t('organisationen.computedOpen')}
-                    </span>
-                  )}
-                </>
-              ) : null}
-            </Field>
             <Field label={t('organisationen.instanceStart')} onAdd={add('contract')}>
               {o.instanceStartDate && (
                 <span className="ziffern-tabellarisch">

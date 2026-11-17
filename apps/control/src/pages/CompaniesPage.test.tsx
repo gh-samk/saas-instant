@@ -28,11 +28,10 @@ const STATE = {
 const ONE = {
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Solawi Rheintal',
-  status: 'pilot_running',
+  status: 'trial',
   city: 'Freiburg',
   contactName: 'Lena Brandt',
   contactEmail: 'contact@example.com',
-  reviewDueDate: '2026-12-01',
   lastStatusChangeAt: '2026-05-01',
   createdAt: '2026-04-02T09:12:00.000Z',
   instanceStatus: 'active',
@@ -66,7 +65,7 @@ function list(companies: unknown[], total = companies.length) {
       perPage: 25,
       // Die Zahlen der Filterchips. Sie kommen vom Server und beachten die
       // Suche, aber nicht den Statusfilter.
-      countPerStatus: { pilot_running: total },
+      countPerStatus: { trial: total },
     }),
     { status: 200 },
   );
@@ -78,7 +77,7 @@ afterEach(() => {
 });
 
 describe('Organisationsliste', () => {
-  it('zeigt Name, Ort, Status, Ansprechpartnerin und Datum in deutscher Form', async () => {
+  it('zeigt Name, Ort, Status, Instanz und offenen Betrag in deutscher Form', async () => {
     setFetchReady((path) =>
       path.includes('/api/companies')
         ? list([ONE])
@@ -88,19 +87,16 @@ describe('Organisationsliste', () => {
     renderWithI18n(<App />);
 
     await screen.findByText('Solawi Rheintal');
-    // Innerhalb der Tabelle prüfen: „Pilot läuft" steht zusätzlich als Option
+    // Innerhalb der Tabelle prüfen: „Testphase" steht zusätzlich als Option
     // im Statusfilter, und der ist hier nicht gemeint.
     const rows = within(screen.getByRole('table'));
     expect(rows.getByText('Solawi Rheintal')).toBeInTheDocument();
     expect(rows.getByText('Freiburg')).toBeInTheDocument();
-    expect(rows.getByText('Pilot läuft')).toBeInTheDocument();
+    expect(rows.getByText('Testphase')).toBeInTheDocument();
     // Instanz und offener Betrag stehen seit dem Redesign in der Liste:
     // beim Überfliegen sind das die zwei Fragen, die man wirklich hat.
     expect(rows.getByText('Aktiv')).toBeInTheDocument();
     expect(rows.getByText('1.240,00 €')).toBeInTheDocument();
-    // dd.mm.yyyy, niemals ISO — auch aus einem technischen Zeitstempel.
-    expect(rows.getByText('01.12.2026')).toBeInTheDocument();
-    expect(screen.queryByText(/2026-12-01/)).not.toBeInTheDocument();
     // Die Ansprechpartnerin hat keine eigene Spalte mehr — sie steht auf der
     // Detailseite. Eine Liste, die alles zeigt, zeigt nichts.
     expect(rows.queryByText('Lena Brandt')).not.toBeInTheDocument();
@@ -143,45 +139,38 @@ describe('Organisationsliste', () => {
     const bar = within(
       screen.getByRole('group', { name: 'Nach Status filtern' }),
     );
-    fireEvent.click(bar.getByRole('button', { name: /Ruhend/ }));
+    fireEvent.click(bar.getByRole('button', { name: /Beendet/ }));
 
     await waitFor(() =>
       expect(
         called.mock.calls.some((call) =>
-          String(call[0]).includes('status=dormant'),
+          String(call[0]).includes('status=ended'),
         ),
       ).toBe(true),
     );
-    expect(window.location.search).toContain('status=dormant');
+    expect(window.location.search).toContain('status=ended');
   });
 
-  it('DER CHIP „PILOT" SCHICKT BEIDE PILOTSTUFEN — nicht nur eine', async () => {
-    // `pilot_beschlossen` und `pilot_laufend` sind derselbe Lebensabschnitt.
-    // Schickte der Chip nur einen davon, versteckte er die halbe Gruppe.
+  it('ein alter Link mit ?status=pilot fällt auf „Alle" zurück', async () => {
     const called = setFetchReady((path) =>
       path.includes('/api/companies')
         ? list([ONE])
         : new Response('{}', { status: 200 }),
     );
-    window.history.pushState({}, '', '/companies');
+    window.history.pushState({}, '', '/companies?status=pilot');
     renderWithI18n(<App />);
 
     await screen.findByText('Solawi Rheintal');
-    fireEvent.click(
-      within(
-        screen.getByRole('group', { name: 'Nach Status filtern' }),
-      ).getByRole('button', { name: /Pilot/ }),
+    const bar = within(
+      screen.getByRole('group', { name: 'Nach Status filtern' }),
     );
-
-    await waitFor(() =>
-      expect(
-        called.mock.calls.some((call) =>
-          String(call[0]).includes(
-            `status=${encodeURIComponent('pilot_approved,pilot_running')}`,
-          ),
-        ),
-      ).toBe(true),
+    expect(bar.getByRole('button', { name: /Alle/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
     );
+    expect(
+      called.mock.calls.some((call) => String(call[0]).includes('status=')),
+    ).toBe(false);
   });
 
   it('unterscheidet „noch gar nichts da" von „nichts gefunden"', async () => {
@@ -280,7 +269,7 @@ describe('Organisationsliste', () => {
         ? list([ONE])
         : new Response('{}', { status: 200 }),
     );
-    window.history.pushState({}, '', '/companies?status=demo&search=Rhein');
+    window.history.pushState({}, '', '/companies?status=trial&search=Rhein');
     renderWithI18n(<App />);
 
     await screen.findByText('Solawi Rheintal');
@@ -288,7 +277,7 @@ describe('Organisationsliste', () => {
       .getByRole('link')
       .getAttribute('href');
     expect(target).toContain(`/companies/${ONE.id}`);
-    expect(target).toContain('status=demo');
+    expect(target).toContain('status=trial');
     expect(target).toContain('search=Rhein');
   });
 
@@ -305,7 +294,7 @@ describe('Organisationsliste', () => {
 
     const table = await screen.findByRole('table');
     expect(table.className).toContain('sm:table-fixed');
-    expect(table.querySelectorAll('colgroup col')).toHaveLength(6);
+    expect(table.querySelectorAll('colgroup col')).toHaveLength(5);
   });
 });
 
@@ -325,7 +314,7 @@ function stubNarrow() {
 describe('Organisationsliste — Karten unter 1280 px', () => {
   it('zeigt statt der Tabelle Karten mit Status und offenem Betrag, ohne Platzhalter', async () => {
     stubNarrow();
-    const empty = { ...ONE, id: '22222222-2222-4222-8222-222222222222', name: 'Leere Gruppe', city: null, reviewDueDate: null, openAmountCent: 0 };
+    const empty = { ...ONE, id: '22222222-2222-4222-8222-222222222222', name: 'Leere Gruppe', city: null, openAmountCent: 0 };
     setFetchReady(() => list([ONE, empty]));
     window.history.pushState({}, '', '/companies');
     renderWithI18n(<App />);
@@ -338,10 +327,8 @@ describe('Organisationsliste — Karten unter 1280 px', () => {
       '/companies/11111111-1111-4111-8111-111111111111',
     );
     expect(first).toHaveTextContent('1.240,00');
-    expect(first).toHaveTextContent('01.12.2026');
-    // Nichts Offenes, keine Frist: weder Betrag noch Frist noch „—".
+    // Nichts Offenes: weder Betrag noch „—".
     expect(second).not.toHaveTextContent('—');
-    expect(second).not.toHaveTextContent('Frist');
     expect(second).not.toHaveTextContent('Offen');
   });
 

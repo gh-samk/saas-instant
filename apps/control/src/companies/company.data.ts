@@ -1,10 +1,9 @@
 import type { Prisma } from '.prisma/control-client';
-import { toDate } from '@saas-instant/shared';
+import { today, toDate } from '@saas-instant/shared';
 import type {
   CompanyCreateDto,
   CompanyUpdateDto,
 } from './dto/company.dto';
-import { reviewDateFrom } from './deadlines';
 
 /**
  * Textfelder, die eins zu eins übernommen werden und leer sein dürfen.
@@ -39,7 +38,7 @@ const TextFields = [
 ] as const;
 
 /** Tagesdaten `YYYY-MM-DD`, die als `@db.Date` gespeichert werden. */
-const DateFields = ['pilotDecisionDate', 'instanceStartDate'] as const;
+const DateFields = ['instanceStartDate'] as const;
 
 type TextField = (typeof TextFields)[number];
 type DateField = (typeof DateFields)[number];
@@ -51,10 +50,6 @@ type DateField = (typeof DateFields)[number];
  * `undefined` = Feld war nicht dabei, bleibt unangetastet.
  * `null`      = Feld soll geleert werden.
  * Wert        = Feld wird gesetzt.
- *
- * `reviewDueDate` steht nirgends im DTO — er wird hier aus
- * `pilotDecisionDate` GERECHNET, und zwar auch dann, wenn das Beschlussdatum
- * geleert wird (dann fällt der Termin mit weg).
  */
 export function masterDataAfterPrisma(
   dto: CompanyUpdateDto,
@@ -66,7 +61,10 @@ export function masterDataAfterPrisma(
   const raw = dto as Record<string, unknown>;
   for (const field of TextFields) {
     const value = raw[field] as string | null | undefined;
-    if (value !== undefined) data[field as TextField] = value;
+    if (value === undefined) continue;
+    // Eine leere Preisstufe ist keine Preisstufe: sonst gilt sie als vereinbarter Preis.
+    data[field as TextField] =
+      field === 'priceTier' && value !== null && value.trim() === '' ? null : value;
   }
   for (const field of DateFields) {
     const value = raw[field] as string | null | undefined;
@@ -84,12 +82,6 @@ export function masterDataAfterPrisma(
   if (dto.source !== undefined) data.source = dto.source;
   if (dto.newsletterConsentStatus !== undefined) {
     data.newsletterConsentStatus = dto.newsletterConsentStatus;
-  }
-
-  // Abgeleitet, niemals entgegengenommen.
-  if (dto.pilotDecisionDate !== undefined) {
-    const date = reviewDateFrom(dto.pilotDecisionDate ?? null);
-    data.reviewDueDate = date === null ? null : toDate(date);
   }
 
   return data;
@@ -111,6 +103,7 @@ export function createAfterPrisma(
     ...masterData,
     name: dto.name,
     ...(dto.status !== undefined ? { status: dto.status } : {}),
+    ...(dto.status === 'ended' ? { endedAt: toDate(today()) } : {}),
     contactName: dto.contactName ?? null,
     contactEmail: dto.contactEmail ?? null,
     contactPhone: dto.contactPhone ?? null,

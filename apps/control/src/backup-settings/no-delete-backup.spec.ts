@@ -63,6 +63,16 @@ describe('R1/R4 — kein Löschpfad in der Sicherungs-Anbindung', () => {
     }
   });
 
+  it('der Plan nennt Löschkandidaten nur über expiredArchiveCoolifyGone (archiviert, Frist um, Coolify schon gelöscht)', () => {
+    expect(code('instances/backup-plan.service.ts')).toContain('where: expiredArchiveCoolifyGone()');
+    expect(code('instances/backup.service.ts')).toContain('...expiredArchiveCoolifyGone()');
+    const due = code('instances/expired-archive.ts');
+    expect(due).toContain("status: 'archived'");
+    expect(due).toContain('coolifyApplicationId: null');
+    // Im Plan steht nur der Name; weder Rechnungen noch ein Pfad.
+    expect(code('instances/backup-plan.service.ts')).not.toMatch(/invoices?\//);
+  });
+
   it('der Agent-Client kennt nur GET, PUT und POST', () => {
     const text = code('backup-settings/backup-agent.client.ts');
     expect(text).toContain("type AgentMethod = 'GET' | 'PUT' | 'POST'");
